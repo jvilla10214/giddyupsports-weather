@@ -1,0 +1,189 @@
+/**
+ * GiddyUpSports Weather Command Center — Cloudflare Worker
+ *
+ * Deploy with Wrangler (`npx wrangler deploy` — see wrangler.toml), which bundles this file plus
+ * its imports into one script server-side. Unlike the racing repo's manually-pasted single-file
+ * Worker, this one is split into modules for testability (`node --test` against rules-engine.js
+ * and stadiums.js directly) while still deploying as a single bundled Worker. Bindings needed
+ * (declared in wrangler.toml):
+ *   - KV namespace bound as `WEATHER_KV`
+ *   - Workers AI bound as `AI` (no API key needed — it's a native Cloudflare binding)
+ *
+ * Routes (all GET, all CORS-open for the GitHub Pages frontend):
+ *   /api/schedule?sport=mlb                      -> today's MLB games
+ *   /api/schedule?sport=nfl                       -> current week's NFL games
+ *   /api/game?sport=mlb&gameId=...&venueKey=...   -> weather + rules-engine score + AI insight
+ *   /api/game?sport=nfl&gameId=...&venueKey=...   -> same, NFL
+ *
+ * Every external call is cached in KV so a burst of page loads doesn't hammer free/unofficial
+ * upstream APIs (MLB Stats API, ESPN's undocumented scoreboard, Open-Meteo, Workers AI's free tier).
+ */
+
+import { MLB_STADIUMS, NFL_STADIUMS, MLB_TEAM_ID_TO_KEY } from "../data/stadiums.js";
+import { scoreMlbGame, scoreNflGame } from "./rules-engine.js";
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+  });
+}
+
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function cached(env, key, ttlSeconds, fetcher) {
+  const hit = await env.WEATHER_KV.get(key, "json");
+  if (hit) return hit;
+  const fresh = await fetcher();
+  await env.WEATHER_KV.put(key, JSON.stringify(fresh), { expirationTtl: ttlSeconds });
+  return fresh;
+}
+
+// ---- Schedules ----
+
+async function fetchMlbSchedule(env) {
+  const date = todayIso();
+  return cached(env, `schedule:mlb:${date}`, 15 * 60, async () => {
+    const url = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&startDate=${date}&endDate=${date}&hydrate=venue`;
+    const res = await fetch(url, { headers: { "User-Agent": "GiddyUpSports-Weather/1.0" } });
+    if (!res.ok) throw new Error(`MLB Stats API ${res.status}`);
+    const data = await res.json();
+    const games = [];
+    for (const d of data.dates || []) {
+      for (const g of d.games || []) {
+        const venueKey = MLB_TEAM_ID_TO_KEY[g.teams?.home?.team?.id] || null;
+        games.push({
+          gameId: String(g.gamePk),
+          startTimeUtc: g.gameDate,
+          away: g.teams?.away?.team?.name,
+          home: g.teams?.home?.team?.name,
+          venue: g.venue?.name,
+          venueKey,
+          status: g.status?.detailedState,
+        });
+      }
+    }
+    return { sport: "mlb", date, games };
+  });
+}
+
+async function fetchNflSchedule(env) {
+  const date = todayIso();
+  return cached(env, `schedule:nfl:${date}`, 30 * 60, async () => {
+    const url = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard";
+    const res = await fetch(url, { headers: { "User-Agent": "GiddyUpSports-Weather/1.0" } });
+    if (!res.ok) throw new Error(`ESPN scoreboard API ${res.status}`);
+    const data = await res.json();
+    const games = (data.events || []).map((ev) => {
+      const comp = ev.competitions?.[0];
+      const home = comp?.competitors?.find((c) => c.homeAway === "home");
+      const away = comp?.competitors?.find((c) => c.homeAway === "away");
+      const abbr = home?.team?.abbreviation;
+      return {
+        gameId: ev.id,
+        startTimeUtc: ev.date,
+        away: away?.team?.displayName,
+        home: home?.team?.displayName,
+        venue: comp?.venue?.fullName,
+        venueKey: NFL_STADIUMS[abbr] ? abbr : null,
+        status: ev.status?.type?.description,
+      };
+    });
+    return { sport: "nfl", date, games };
+  });
+}
+
+// ---- Weather ----
+
+async function fetchWeather(env, lat, lon) {
+  const hourKey = new Date().toISOString().slice(0, 13);
+  return cached(env, `weather:${lat},${lon}:${hourKey}`, 30 * 60, async () => {
+    const url =
+      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+      `&current=temperature_2m,relative_humidity_2m,precipitation_probability,wind_speed_10m,wind_direction_10m` +
+      `&temperature_unit=fahrenheit&wind_speed_unit=mph`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Open-Meteo ${res.status}`);
+    const data = await res.json();
+    const c = data.current || {};
+    return {
+      tempF: c.temperature_2m,
+      humidityPct: c.relative_humidity_2m,
+      precipProbPct: c.precipitation_probability,
+      windSpeedMph: c.wind_speed_10m,
+      windFromDeg: c.wind_direction_10m,
+      observedAt: c.time,
+    };
+  });
+}
+
+// ---- AI narration ----
+
+async function narrate(env, sport, score, weather, venueLabel) {
+  const cacheKey = `insight:${sport}:${venueLabel}:${todayIso()}:${Math.round(weather.windSpeedMph)}:${Math.round(weather.tempF)}`;
+  return cached(env, cacheKey, 6 * 60 * 60, async () => {
+    if (!env.AI) return { text: "AI narration unavailable (no AI binding configured).", cached: false };
+    const prompt =
+      sport === "mlb"
+        ? `You are a concise baseball weather analyst. Venue: ${venueLabel}. Conditions: ${weather.tempF}F, ${weather.humidityPct}% humidity, wind ${weather.windSpeedMph}mph ${score.windCompass}. Rules-engine read: estimated carry ${score.carryFt}ft vs. a neutral day, wind is ${score.windZone}, overall lean: ${score.scoringLean}. In 2-3 sentences, explain what this means for hitters and scoring today. Be specific about field direction. No disclaimers, no hedging filler.`
+        : `You are a concise NFL weather analyst. Venue: ${venueLabel}. Conditions: ${weather.tempF}F, wind ${weather.windSpeedMph}mph ${score.windCompass || ""}, precip chance ${weather.precipProbPct}%. Rules-engine read: wind tier ${score.windTier}, passing impact "${score.passingImpact}", field-goal range impact "${score.fgRangeImpact}". In 2-3 sentences, explain what this means for the passing game and kicking today. No disclaimers, no hedging filler.`;
+    try {
+      const result = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 200,
+      });
+      return { text: result.response?.trim() || "No insight generated.", cached: false };
+    } catch (err) {
+      return { text: `AI narration failed: ${err.message}`, cached: false };
+    }
+  });
+}
+
+// ---- Router ----
+
+async function handleGame(env, sport, params) {
+  const venueKey = params.get("venueKey");
+  const stadiums = sport === "mlb" ? MLB_STADIUMS : NFL_STADIUMS;
+  const venue = stadiums[venueKey];
+  if (!venue) return json({ error: `Unknown venueKey "${venueKey}" for sport ${sport}` }, 400);
+
+  const weather = await fetchWeather(env, venue.lat, venue.lon);
+  const score = sport === "mlb" ? scoreMlbGame(weather, venue) : scoreNflGame(weather, venue);
+  const insight = await narrate(env, sport, score, weather, venue.venue);
+
+  return json({ sport, venue, weather, score, insight: insight.text });
+}
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (request.method === "OPTIONS") return new Response(null, { headers: CORS_HEADERS });
+
+    try {
+      if (url.pathname === "/api/schedule") {
+        const sport = url.searchParams.get("sport");
+        if (sport === "mlb") return json(await fetchMlbSchedule(env));
+        if (sport === "nfl") return json(await fetchNflSchedule(env));
+        return json({ error: "sport must be mlb or nfl" }, 400);
+      }
+
+      if (url.pathname === "/api/game") {
+        const sport = url.searchParams.get("sport");
+        if (sport !== "mlb" && sport !== "nfl") return json({ error: "sport must be mlb or nfl" }, 400);
+        return await handleGame(env, sport, url.searchParams);
+      }
+
+      return json({ error: "Not found. Try /api/schedule?sport=mlb or /api/game?sport=mlb&venueKey=COL" }, 404);
+    } catch (err) {
+      return json({ error: err.message }, 500);
+    }
+  },
+};
