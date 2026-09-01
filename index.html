@@ -660,7 +660,8 @@
           } else {
             cls = data.score.windTier === "light" || data.score.windTier === "none (closed roof)" ? "good" : data.score.windTier === "moderate" ? "warn" : "bad";
           }
-          el.innerHTML = `<span class="gc-dot ${cls}"></span>${Math.round(data.weather.tempF)}°F · ${Math.round(data.weather.windSpeedMph)}mph ${data.score.windCompass || ""}`;
+          const windPart = data.score.roofClosed ? "indoors" : `${Math.round(data.weather.windSpeedMph)}mph ${data.score.windCompass || ""}`;
+          el.innerHTML = `<span class="gc-dot ${cls}"></span>${Math.round(data.weather.tempF)}°F · ${windPart}`;
         } catch {
           // leave the placeholder — a single game's preview failing shouldn't disrupt the grid
         }
@@ -731,10 +732,16 @@
   }
 
   function renderDataStrip(sport, weather, venue, score) {
+    // score.roofClosed means wind can't reach the field (fixed dome, or a retractable roof
+    // assumed closed) -- showing the raw outdoor wind reading here would be actively misleading,
+    // since it plays no part in the carry/passing numbers right next to it.
+    const windChip = score.roofClosed
+      ? chip("wind", "Wind", "Indoors", "no effect")
+      : chip("wind", "Wind", weather.windSpeedMph.toFixed(1), `mph ${score.windCompass || ""}`);
     const chips = [
       chip("temp", "Temp", Math.round(weather.tempF), "°F"),
       chip("humidity", "Humidity", Math.round(weather.humidityPct), "%"),
-      chip("wind", "Wind", weather.windSpeedMph.toFixed(1), `mph ${score.windCompass || ""}`),
+      windChip,
     ];
     if (sport === "mlb") {
       chips.push(chip("altitude", "Altitude", (venue.altitudeFt / 1000).toFixed(1), "k ft"));
@@ -779,7 +786,10 @@
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       ensureMap(data.venue.lat, data.venue.lon);
-      const suffix = sport === "mlb" ? `${data.venue.altitudeFt} ft elevation` : `${data.venue.roofType} roof`;
+      const suffix =
+        sport === "mlb"
+          ? `${data.venue.altitudeFt} ft elevation${data.venue.roofType !== "open" ? ` · ${data.venue.roofType} roof` : ""}`
+          : `${data.venue.roofType} roof`;
       venueTag.textContent = data.venue.venue;
       venueMeta.textContent = `${game.away} @ ${game.home} · ${suffix}`;
       renderDataStrip(sport, data.weather, data.venue, data.score);
