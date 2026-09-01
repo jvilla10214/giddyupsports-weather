@@ -6,6 +6,30 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## Historical almanac: schedule-first search, not weather-first
+**Date:** 2026-09-02
+**Decision:** `/api/almanac` finds the closest-matching historical weather day at a venue by
+first pulling each of the last 15 years' home-game schedule in a +/-5 day window around today's
+month/day (via MLB Stats API, `hydrate=linescore`), and only comparing weather among those
+confirmed game dates — not by finding the single closest weather day in history and hoping a game
+happened to be played then.
+**Why:** The point of this feature is "here's what happened last time it felt like this," which
+requires an actual game to report on. Weather-first search would frequently land on a date with no
+game (off day, road trip) and produce a dead end after users already read a date. Schedule-first
+guarantees every match has a final score and HR count to show, at the cost of a slightly less
+perfect weather match (constrained to ~11 candidate days/year instead of all 365).
+**Known limitation:** team IDs are stable across relocations, but venues aren't — for the
+Athletics (moved from Oakland Coliseum to Sutter Health Park in 2025), a match can return a
+historical game played at their *old* venue while comparing against the *new* venue's weather.
+Confirmed live: querying for Sutter Health Park returned a 2014 game at Oakland Coliseum. Affects
+one team; not worth the complexity of tracking historical venue-per-game before more of the
+schedule accumulates at the new park.
+**Alternatives considered:** NFL support (rejected — no free historical box-score API exists for
+NFL, confirmed when scoping this feature; MLB Stats API's boxscore endpoint has no equivalent);
+searching all 365 days of history instead of a +/-5 day window (rejected — a "closest match" from
+January weather when today is September isn't a meaningful comparison regardless of how close the
+numbers happen to land).
+
 ## NFL schedule: fetched client-side, not through the Worker
 **Date:** 2026-09-01
 **Decision:** `index.html` calls ESPN's scoreboard API (`site.api.espn.com`) directly from the

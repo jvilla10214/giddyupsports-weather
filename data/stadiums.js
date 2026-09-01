@@ -53,6 +53,12 @@ export const MLB_TEAM_ID_TO_KEY = {
   143: "PHI", 144: "ATL", 145: "CWS", 146: "MIA", 147: "NYY", 158: "MIL",
 };
 
+// Reverse of the above, for looking up a team's MLB Stats API ID from our venue key (used by the
+// historical-almanac feature to query that team's past home schedule).
+export const MLB_KEY_TO_TEAM_ID = Object.fromEntries(
+  Object.entries(MLB_TEAM_ID_TO_KEY).map(([id, key]) => [key, Number(id)])
+);
+
 // NFL: roofType drives whether wind/precip effects apply at all (a closed dome/retractable roof
 // zeroes them out). lat/lon center the aerial map. No CF-bearing equivalent needed for football.
 export const NFL_STADIUMS = {

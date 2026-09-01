@@ -455,6 +455,25 @@
   .chip .value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 1.4rem; font-weight: 600; color: var(--text); line-height: 1; }
   .chip .value small { font-size: 0.8rem; color: var(--text-muted); font-weight: 500; margin-left: 2px; }
 
+  /* ---------- Historical almanac (MLB only) ---------- */
+  .almanac-card {
+    background: var(--bg-elevated);
+    border: var(--card-border-width) solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 16px 20px;
+    box-shadow: var(--shadow-soft);
+  }
+  .almanac-label {
+    font-family: var(--font-mono); font-size: 0.62rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-faint);
+    margin-bottom: 10px;
+  }
+  .almanac-body { font-size: 0.9rem; color: var(--text-muted); }
+  .almanac-date { font-family: var(--font-display); font-weight: 700; font-size: 1.15rem; color: var(--text); margin-bottom: 2px; }
+  .almanac-weather { font-family: var(--font-mono); font-size: 0.82rem; color: var(--text-muted); margin-bottom: 8px; }
+  .almanac-game { font-size: 0.92rem; color: var(--text); }
+  .almanac-game b { color: var(--accent-live); }
+
   footer {
     display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
     padding-top: 8px;
@@ -527,6 +546,11 @@
     </div>
 
     <div class="stats" id="dataStrip"></div>
+
+    <div class="almanac-card" id="almanacCard" style="display:none;">
+      <div class="almanac-label">Closest Historical Match — Last 15 Years</div>
+      <div class="almanac-body" id="almanacBody">Searching…</div>
+    </div>
   </div>
 
   <footer>
@@ -556,6 +580,8 @@
   const insightTop = document.getElementById("insightTop");
   const fieldCarryEl = document.getElementById("fieldCarry");
   const handedNoteEl = document.getElementById("handedNote");
+  const almanacCard = document.getElementById("almanacCard");
+  const almanacBody = document.getElementById("almanacBody");
   const venueMeta = document.getElementById("venueMeta");
 
   let map, marker;
@@ -914,6 +940,35 @@
     }
   }
 
+  // Historical weather-match: loaded independently of the main game fetch, since a cache-miss
+  // search across 15 years can take a few seconds -- no reason to hold up the primary view for it.
+  async function loadAlmanac(sport, game) {
+    if (sport !== "mlb") {
+      almanacCard.style.display = "none";
+      return;
+    }
+    almanacCard.style.display = "block";
+    almanacBody.innerHTML = "Searching 15 years of history…";
+    try {
+      const res = await fetch(`${WORKER_BASE}/api/almanac?sport=mlb&venueKey=${game.venueKey}`);
+      const data = await res.json();
+      if (data.error || !data.match) {
+        almanacBody.textContent = "No comparable historical home game found.";
+        return;
+      }
+      const m = data.match;
+      const dateStr = new Date(`${m.date}T00:00:00`).toLocaleDateString([], { year: "numeric", month: "long", day: "numeric" });
+      const totalHr = m.game.awayHomeRuns != null && m.game.homeHomeRuns != null ? m.game.awayHomeRuns + m.game.homeHomeRuns : null;
+      almanacBody.innerHTML = `
+        <div class="almanac-date">${dateStr}</div>
+        <div class="almanac-weather">${m.weather.tempF}°F · ${m.weather.windSpeedMph}mph ${m.weather.windCompass}</div>
+        <div class="almanac-game">${m.game.away} <b>${m.game.awayScore}</b> @ ${m.game.home} <b>${m.game.homeScore}</b>${totalHr !== null ? ` · ${totalHr} total HR` : ""}</div>
+      `;
+    } catch (err) {
+      almanacBody.textContent = `Couldn't load historical match: ${err.message}`;
+    }
+  }
+
   async function showDetail(sport, game) {
     emptyState.style.display = "none";
     gamesGrid.style.display = "none";
@@ -924,8 +979,10 @@
     insightTop.innerHTML = "";
     fieldCarryEl.style.display = "none";
     handedNoteEl.style.display = "none";
+    almanacCard.style.display = "none";
     dataStrip.innerHTML = "";
     setStatus("Fetching conditions…");
+    loadAlmanac(sport, game); // fire-and-forget, doesn't block the main view
     try {
       const res = await fetch(`${WORKER_BASE}/api/game?sport=${sport}&venueKey=${game.venueKey}`);
       const data = await res.json();
