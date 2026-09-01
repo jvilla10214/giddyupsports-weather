@@ -42,4 +42,15 @@ const openWindy = scoreNflGame(
 console.log("Soldier Field, 25mph wind:", openWindy);
 assert(openWindy.windTier === "severe", "25mph wind at an open venue should be classified severe");
 
+// Per-field carry breakdown: wind blowing toward right field (45deg off Yankee Stadium's CF
+// bearing of 0) should carry right field the most, left field the least.
+const rfWind = scoreMlbGame(
+  { tempF: 75, humidityPct: 50, windSpeedMph: 15, windFromDeg: 225, precipProbPct: 0 },
+  MLB_STADIUMS.NYY
+);
+console.log("Yankee Stadium, wind blowing toward RF:", rfWind.fieldCarry);
+assert(rfWind.fieldCarry.right > rfWind.fieldCarry.center, "Wind toward RF should carry right field more than center");
+assert(rfWind.fieldCarry.center > rfWind.fieldCarry.left, "Wind toward RF should carry center more than left field (pure crosswind there)");
+assert(rfWind.carryFt === rfWind.fieldCarry.center, "The headline carryFt should equal the center-field figure");
+
 console.log("\nAll rules-engine sanity checks passed.");

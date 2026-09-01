@@ -405,6 +405,21 @@
   .pill-lean.info { color: var(--accent-atmo); background: var(--accent-atmo-dim); }
   .pill-lean.warn { color: var(--accent-ai); background: var(--accent-ai-dim); }
   .pill-lean.bad { color: var(--accent-warn); background: var(--accent-warn-dim); }
+
+  /* ---------- HR-by-field breakdown (MLB only) ---------- */
+  .field-carry { display: flex; gap: 8px; margin-bottom: 14px; }
+  .fc-btn {
+    flex: 1; text-align: center; padding: 8px 6px;
+    background: var(--bg-elevated-2);
+    border: var(--card-border-width) solid var(--line);
+    border-radius: var(--radius-md);
+  }
+  .fc-btn .fc-label { font-family: var(--font-mono); font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); }
+  .fc-btn .fc-value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 1.05rem; font-weight: 700; color: var(--text); margin-top: 2px; }
+  .fc-btn.good { border-color: var(--accent-live); }
+  .fc-btn.good .fc-value { color: var(--accent-live); }
+  .fc-btn.bad { border-color: var(--accent-warn); }
+  .fc-btn.bad .fc-value { color: var(--accent-warn); }
   .pill-lean.neutral { color: var(--text-muted); background: var(--bg-elevated-2); }
   .insight-zone { font-size: 0.78rem; color: var(--text-muted); }
   .insight-text { font-size: 0.94rem; line-height: 1.55; color: var(--text); max-width: 64ch; }
@@ -499,6 +514,7 @@
 
     <div class="insight-panel">
       <div class="insight-top" id="insightTop"></div>
+      <div class="field-carry" id="fieldCarry" style="display:none;"></div>
       <div class="insight-text" id="insightText">Loading AI read…</div>
     </div>
 
@@ -530,6 +546,7 @@
   const dataStrip = document.getElementById("dataStrip");
   const insightText = document.getElementById("insightText");
   const insightTop = document.getElementById("insightTop");
+  const fieldCarryEl = document.getElementById("fieldCarry");
   const venueMeta = document.getElementById("venueMeta");
 
   let map, marker;
@@ -841,6 +858,27 @@
       `<span class="insight-zone">${zone}</span>`;
   }
 
+  // HR-by-field breakdown -- MLB only, since "which field" isn't a football concept.
+  function renderFieldCarry(sport, score) {
+    if (sport !== "mlb" || !score.fieldCarry) {
+      fieldCarryEl.style.display = "none";
+      return;
+    }
+    const fields = [
+      ["LF", score.fieldCarry.left],
+      ["CF", score.fieldCarry.center],
+      ["RF", score.fieldCarry.right],
+    ];
+    fieldCarryEl.innerHTML = fields
+      .map(([label, ft]) => {
+        const cls = ft > 12 ? "good" : ft < -12 ? "bad" : "";
+        const sign = ft > 0 ? "+" : "";
+        return `<div class="fc-btn ${cls}"><div class="fc-label">${label}</div><div class="fc-value">${sign}${ft}ft</div></div>`;
+      })
+      .join("");
+    fieldCarryEl.style.display = "flex";
+  }
+
   async function showDetail(sport, game) {
     emptyState.style.display = "none";
     gamesGrid.style.display = "none";
@@ -849,6 +887,7 @@
     venueMeta.textContent = `${game.away} @ ${game.home}`;
     insightText.textContent = "Loading AI read…";
     insightTop.innerHTML = "";
+    fieldCarryEl.style.display = "none";
     dataStrip.innerHTML = "";
     setStatus("Fetching conditions…");
     try {
@@ -864,6 +903,7 @@
       venueMeta.textContent = `${game.away} @ ${game.home} · ${suffix}`;
       renderDataStrip(sport, data.weather, data.venue, data.score);
       renderLeanTop(sport, data.score);
+      renderFieldCarry(sport, data.score);
       insightText.textContent = data.insight || "No insight generated.";
       if (window.setWindFlow) window.setWindFlow(data.weather.windFromDeg || 0, data.weather.windSpeedMph || 0);
       setStatus(`Updated ${new Date().toLocaleTimeString()}`);

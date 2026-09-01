@@ -32,28 +32,48 @@ function scoreMlbGame(weather, venue) {
   const roofClosed = venue.roofType !== "open"; // retractable/dome: assume closed unless told otherwise
   const notes = [];
 
-  // Air density / carry index, in estimated feet of extra fly-ball distance vs. a 70F/50%RH/sea-level baseline.
-  let carryFt = 0;
+  // Air density / carry index, in estimated feet of extra fly-ball distance vs. a 70F/50%RH/sea-level
+  // baseline. This part is direction-independent -- it applies the same to a ball hit anywhere in the park.
+  let baseCarryFt = 0;
   const tempDelta = weather.tempF - 75;
-  if (tempDelta > 0) carryFt += (tempDelta / 10) * 3;
-  else carryFt += (tempDelta / 10) * 3; // colder air also costs distance symmetrically
-  carryFt += (weather.humidityPct - 50) / 50 * 2; // small humidity nudge, +2ft at 100% RH vs 50%
+  baseCarryFt += (tempDelta / 10) * 3; // colder air costs distance symmetrically to how hot air adds it
+  baseCarryFt += (weather.humidityPct - 50) / 50 * 2; // small humidity nudge, +2ft at 100% RH vs 50%
   const altitudeBonusFt = (venue.altitudeFt / 5280) * 40; // ~40ft (~10% of a 400ft flyball) at Coors-level altitude
-  carryFt += altitudeBonusFt;
+  baseCarryFt += altitudeBonusFt;
   if (altitudeBonusFt > 15) notes.push(`Elevation (${venue.altitudeFt}ft) adds an estimated +${altitudeBonusFt.toFixed(0)}ft of carry.`);
 
-  // Wind component relative to park orientation. windFromDeg is where wind comes FROM; the vector
-  // it blows TOWARD is windFromDeg + 180. Compare that to the park's home-plate->CF bearing.
+  // Wind component, evaluated separately at three bearings approximating the pull direction to each
+  // field -- foul lines run roughly +/-45deg off the park's home-plate->CF bearing, so that's used as
+  // a stand-in for "toward left field" / "toward right field". windFromDeg is where wind comes FROM;
+  // the vector it blows TOWARD is windFromDeg + 180.
+  function windCarryAt(targetBearingDeg) {
+    if (roofClosed || weather.windSpeedMph < 3) return 0;
+    const blowsToward = (weather.windFromDeg + 180) % 360;
+    const diff = angleDiff(blowsToward, targetBearingDeg); // 0 = blowing straight out toward that bearing
+    return Math.cos((diff * Math.PI) / 180) * weather.windSpeedMph * 3.5;
+  }
+
+  // Facing center field from home plate, right field is to the right (+45deg), left field to the left.
+  const rfBearing = (venue.cfBearingDeg + 45) % 360;
+  const lfBearing = (venue.cfBearingDeg - 45 + 360) % 360;
+  const cfWindCarryFt = windCarryAt(venue.cfBearingDeg);
+  const rfWindCarryFt = windCarryAt(rfBearing);
+  const lfWindCarryFt = windCarryAt(lfBearing);
+
+  const fieldCarry = {
+    left: Math.round((baseCarryFt + lfWindCarryFt) * 10) / 10,
+    center: Math.round((baseCarryFt + cfWindCarryFt) * 10) / 10,
+    right: Math.round((baseCarryFt + rfWindCarryFt) * 10) / 10,
+  };
+  const carryFt = fieldCarry.center; // kept as the headline number, same value as before this split
+
   let windZone = "calm";
-  let windCarryFt = 0;
   if (!roofClosed && weather.windSpeedMph >= 3) {
     const blowsToward = (weather.windFromDeg + 180) % 360;
-    const diff = angleDiff(blowsToward, venue.cfBearingDeg); // 0 = straight out to CF
-    windCarryFt = Math.cos((diff * Math.PI) / 180) * weather.windSpeedMph * 3.5;
-    carryFt += windCarryFt;
-    if (Math.abs(diff) <= 30) windZone = windCarryFt > 0 ? "blowing out to center" : "blowing in from center";
-    else if (diff > 30 && diff <= 100) windZone = windCarryFt > 0 ? "blowing out toward right field" : "blowing in from right field";
-    else if (diff < -30 && diff >= -100) windZone = windCarryFt > 0 ? "blowing out toward left field" : "blowing in from left field";
+    const diff = angleDiff(blowsToward, venue.cfBearingDeg);
+    if (Math.abs(diff) <= 30) windZone = cfWindCarryFt > 0 ? "blowing out to center" : "blowing in from center";
+    else if (diff > 30 && diff <= 100) windZone = cfWindCarryFt > 0 ? "blowing out toward right field" : "blowing in from right field";
+    else if (diff < -30 && diff >= -100) windZone = cfWindCarryFt > 0 ? "blowing out toward left field" : "blowing in from left field";
     else windZone = "mostly crosswind";
   } else if (venue.roofType === "dome") {
     notes.push(`${venue.venue} is a fixed dome — always closed, so wind has no effect here.`);
@@ -67,8 +87,9 @@ function scoreMlbGame(weather, venue) {
     sport: "MLB",
     roofClosed,
     carryFt: Math.round(carryFt * 10) / 10,
+    fieldCarry,
     windZone,
-    windCarryFt: Math.round(windCarryFt * 10) / 10,
+    windCarryFt: Math.round(cfWindCarryFt * 10) / 10,
     windCompass: degToCompass16(weather.windFromDeg),
     scoringLean,
     notes,
