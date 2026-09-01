@@ -84,7 +84,7 @@
     width: 100%; height: 100%;
     pointer-events: none;
     z-index: 0;
-    opacity: 0.6;
+    opacity: 1;
   }
 
   .page {
@@ -410,7 +410,7 @@
     const canvas = document.getElementById("windFlowCanvas");
     const ctx = canvas.getContext("2d");
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const PARTICLE_COUNT = 110;
+    const PARTICLE_COUNT = 220;
     let particles = [];
     let flowAngleDeg = 200; // gentle ambient default until real wind data loads
     let flowSpeedMph = 6;
@@ -465,7 +465,7 @@
         p.y += dy * speedPx * p.variance;
         p.age++;
         p.trail.push({ x: p.x, y: p.y });
-        if (p.trail.length > 14) p.trail.shift();
+        if (p.trail.length > 22) p.trail.shift();
         if (p.age > p.maxAge || p.x < -40 || p.x > window.innerWidth + 40 || p.y < -40 || p.y > window.innerHeight + 40) {
           respawn(p);
           continue;
@@ -473,13 +473,27 @@
         for (let i = 1; i < p.trail.length; i++) {
           const a = p.trail[i - 1];
           const b = p.trail[i];
-          const alpha = (i / p.trail.length) * 0.4;
+          const alpha = (i / p.trail.length) * 0.9;
           ctx.strokeStyle = `rgba(${strokeRgb},${alpha})`;
-          ctx.lineWidth = 1.2;
+          ctx.lineWidth = 2.2;
+          ctx.lineCap = "round";
           ctx.beginPath();
           ctx.moveTo(a.x, a.y);
           ctx.lineTo(b.x, b.y);
           ctx.stroke();
+        }
+        // Arrowhead at the leading edge of each trail, angled with the flow direction.
+        if (p.trail.length >= 2) {
+          const head = p.trail[p.trail.length - 1];
+          const rad = Math.atan2(dy, dx);
+          const size = 5;
+          ctx.fillStyle = `rgba(${strokeRgb},0.95)`;
+          ctx.beginPath();
+          ctx.moveTo(head.x + Math.cos(rad) * size, head.y + Math.sin(rad) * size);
+          ctx.lineTo(head.x + Math.cos(rad + 2.5) * size, head.y + Math.sin(rad + 2.5) * size);
+          ctx.lineTo(head.x + Math.cos(rad - 2.5) * size, head.y + Math.sin(rad - 2.5) * size);
+          ctx.closePath();
+          ctx.fill();
         }
       }
     }

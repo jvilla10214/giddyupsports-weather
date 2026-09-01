@@ -55,8 +55,10 @@ function scoreMlbGame(weather, venue) {
     else if (diff > 30 && diff <= 100) windZone = windCarryFt > 0 ? "blowing out toward right field" : "blowing in from right field";
     else if (diff < -30 && diff >= -100) windZone = windCarryFt > 0 ? "blowing out toward left field" : "blowing in from left field";
     else windZone = "mostly crosswind";
+  } else if (venue.roofType === "dome") {
+    notes.push(`${venue.venue} is a fixed dome — always closed, so wind has no effect here.`);
   } else if (roofClosed) {
-    notes.push(`${venue.venue} roof status is not known in advance for free — if closed, wind has no effect. Verify before relying on this.`);
+    notes.push(`${venue.venue}'s retractable roof status isn't known in advance for free — if closed, wind has no effect. Verify before relying on this.`);
   }
 
   const scoringLean = carryFt > 12 ? "hitter-friendly" : carryFt < -12 ? "pitcher-friendly" : "neutral";
