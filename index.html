@@ -4,210 +4,366 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>GiddyUpSports Weather Command Center</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
+  /* ---------- Design tokens: dark ("stadium at night") is the default identity ---------- */
   :root {
-    --sky: #0b2545;
-    --sky-2: #13315c;
-    --turf: #1b7a4d;
-    --turf-2: #144f34;
-    --amber: #f2a83b;
-    --amber-2: #d98a1f;
-    --ink: #0d1b2a;
-    --paper: #f5f7fa;
-    --card: #ffffff;
-    --line: #d9dfe6;
-    --text: #16222f;
-    --muted: #5a6b7b;
-    --danger: #c94b3f;
-    --radius: 10px;
-    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    --bg: #0a1420;
+    --bg-elevated: #101d2e;
+    --bg-elevated-2: #16273c;
+    --bg-glass: rgba(16, 29, 46, 0.78);
+    --text: #eef3f8;
+    --text-muted: #93a5b8;
+    --text-faint: #5f7086;
+    --line: rgba(255, 255, 255, 0.09);
+    --line-strong: rgba(255, 255, 255, 0.18);
+
+    --accent-atmo: #6fd7ff;      /* wind / weather data */
+    --accent-atmo-dim: #16384a;
+    --accent-live: #3ecf82;      /* favorable / live status */
+    --accent-live-dim: #143c29;
+    --accent-ai: #ffb648;        /* AI-generated content marker only */
+    --accent-ai-dim: #4a3418;
+    --accent-warn: #ff6b5b;      /* unfavorable / severe */
+    --accent-warn-dim: #4a2119;
+
+    --shadow: 0 20px 60px -22px rgba(0, 0, 0, 0.65);
+    --shadow-soft: 0 12px 32px -18px rgba(0, 0, 0, 0.55);
+
+    --font-display: "Big Shoulders Display", system-ui, sans-serif;
+    --font-body: "Manrope", system-ui, -apple-system, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
   }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f2f5f8;
+      --bg-elevated: #ffffff;
+      --bg-elevated-2: #e9eef3;
+      --bg-glass: rgba(255, 255, 255, 0.82);
+      --text: #0f1e2e;
+      --text-muted: #52667a;
+      --text-faint: #8497aa;
+      --line: rgba(15, 30, 46, 0.1);
+      --line-strong: rgba(15, 30, 46, 0.18);
+
+      --accent-atmo: #0e8aa3;
+      --accent-atmo-dim: #d7eef3;
+      --accent-live: #1f8a52;
+      --accent-live-dim: #dcf1e5;
+      --accent-ai: #b96d0e;
+      --accent-ai-dim: #fbe8cf;
+      --accent-warn: #c8392b;
+      --accent-warn-dim: #fbe0dd;
+
+      --shadow: 0 20px 50px -26px rgba(15, 30, 46, 0.22);
+      --shadow-soft: 0 10px 26px -18px rgba(15, 30, 46, 0.16);
+    }
+  }
+
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--paper); color: var(--text); }
-
-  header {
-    background: linear-gradient(135deg, var(--sky), var(--sky-2));
-    color: #fff;
-    padding: 18px 24px;
-    display: flex;
-    align-items: baseline;
-    gap: 14px;
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
   }
-  header h1 { margin: 0; font-size: 1.35rem; letter-spacing: 0.3px; }
-  header .tag {
-    background: var(--amber);
-    color: var(--ink);
-    font-weight: 700;
-    font-size: 0.7rem;
-    padding: 2px 8px;
-    border-radius: 100px;
+  a { color: inherit; }
+  button, select { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent-atmo); outline-offset: 2px; }
+
+  .page {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: clamp(16px, 4vw, 40px);
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  /* ---------- Masthead ---------- */
+  .masthead { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+  .brand { display: flex; align-items: baseline; gap: 10px; }
+  .brand .mark {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: 1.65rem;
+    letter-spacing: 0.01em;
     text-transform: uppercase;
+    white-space: nowrap;
   }
-  header .sub { margin-left: auto; font-size: 0.8rem; opacity: 0.75; }
+  .brand .mark span { color: var(--accent-ai); }
+  .brand .kicker {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    white-space: nowrap;
+  }
 
-  .controls {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    padding: 16px 24px;
-    background: var(--card);
-    border-bottom: 1px solid var(--line);
+  .sport-toggle {
+    display: inline-flex;
+    background: var(--bg-elevated);
+    border: 1px solid var(--line);
+    border-radius: 100px;
+    padding: 4px;
+    gap: 2px;
+    margin-left: auto;
     flex-wrap: wrap;
   }
-  .controls label { font-size: 0.75rem; text-transform: uppercase; color: var(--muted); font-weight: 700; margin-right: 6px; }
-  select {
-    padding: 8px 12px;
-    border-radius: var(--radius);
-    border: 1px solid var(--line);
-    background: #fff;
-    font-size: 0.95rem;
-    min-width: 220px;
-  }
-  select:disabled { color: #aab3bc; background: #f0f2f4; }
-  .status { font-size: 0.8rem; color: var(--muted); margin-left: auto; }
-
-  main { padding: 24px; max-width: 1200px; margin: 0 auto; }
-  .grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 20px; }
-  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
-
-  .card {
-    background: var(--card);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    overflow: hidden;
-  }
-  .card h2 {
-    margin: 0;
-    padding: 12px 16px;
-    font-size: 0.85rem;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--muted);
-    border-bottom: 1px solid var(--line);
-    background: #fafbfc;
-  }
-  .card .body { padding: 16px; }
-
-  #map { height: 380px; width: 100%; }
-  .wind-overlay {
-    position: absolute;
-    top: 12px;
-    right: 12px;
-    background: rgba(13, 27, 42, 0.85);
-    color: #fff;
+  .sport-toggle button {
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 0.8rem;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    padding: 8px 16px;
     border-radius: 100px;
-    width: 64px;
-    height: 64px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .sport-toggle button[aria-pressed="true"] { background: var(--accent-live-dim); color: var(--accent-live); }
+  .sport-toggle button:disabled { color: var(--text-faint); cursor: default; opacity: 0.5; }
+  .sport-toggle button:not(:disabled):not([aria-pressed="true"]):hover { color: var(--text); }
+
+  .game-picker {
     display: flex;
     align-items: center;
-    justify-content: center;
-    z-index: 500;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    gap: 10px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--line);
+    padding: 6px 8px 6px 16px;
+    border-radius: 100px;
   }
-  .wind-overlay svg { width: 34px; height: 34px; transition: transform 0.4s ease; }
-  .map-wrap { position: relative; }
+  .game-picker svg.gp-icon { flex: none; stroke: var(--text-faint); }
+  .game-picker select {
+    appearance: none;
+    -webkit-appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    flex: 1;
+    padding: 8px 4px;
+    cursor: pointer;
+  }
+  .game-picker select:disabled { color: var(--text-faint); cursor: default; }
+  .game-picker select option { background: var(--bg-elevated); color: var(--text); }
+  .game-picker svg.gp-chev { flex: none; stroke: var(--text-faint); margin-right: 6px; }
 
-  .data-strip { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-  .stat { background: #f7f9fb; border-radius: var(--radius); padding: 10px 12px; }
-  .stat .label { font-size: 0.7rem; text-transform: uppercase; color: var(--muted); font-weight: 700; }
-  .stat .value { font-size: 1.3rem; font-weight: 700; color: var(--ink); }
+  /* ---------- Empty state ---------- */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    padding: 90px 20px;
+    color: var(--text-muted);
+    text-align: center;
+  }
+  .empty-state .icon-ring {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    background: var(--bg-elevated);
+    border: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .empty-state .icon-ring svg { stroke: var(--accent-atmo); }
+  .empty-state p { margin: 0; font-size: 0.95rem; }
 
-  .insight {
-    background: linear-gradient(135deg, #fff7ea, #fff);
-    border-left: 4px solid var(--amber);
+  /* ---------- Hero ---------- */
+  .hero {
+    position: relative;
+    border-radius: 22px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow);
+    height: clamp(340px, 42vw, 540px);
+    background: var(--bg-elevated);
+  }
+  #map { position: absolute; inset: 0; }
+  .hero-scrim {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(10,20,32,0.02) 0%, rgba(10,20,32,0.1) 55%, rgba(10,20,32,0.6) 100%);
+    pointer-events: none;
+    z-index: 450;
+  }
+
+  .venue-tag {
+    position: absolute;
+    top: 20px; left: 20px;
+    z-index: 460;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+    color: var(--text);
+    background: var(--bg-glass);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--line-strong);
+    padding: 7px 14px;
+    border-radius: 100px;
+    text-transform: uppercase;
+  }
+
+  .compass {
+    position: absolute;
+    top: 20px; right: 20px;
+    z-index: 460;
+    width: 96px; height: 96px;
+    border-radius: 50%;
+    background: var(--bg-glass);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--line-strong);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    box-shadow: var(--shadow-soft);
+  }
+  .compass .needle { transition: transform 0.6s ease; }
+  .compass .reading {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .compass .reading b { color: var(--accent-atmo); font-weight: 600; }
+
+  .insight-card {
+    position: absolute;
+    left: 20px; right: 20px; bottom: 20px;
+    z-index: 460;
+    background: var(--bg-glass);
+    backdrop-filter: blur(16px);
+    border: 1px solid var(--line-strong);
+    border-radius: 16px;
+    padding: 16px 20px;
+    box-shadow: var(--shadow-soft);
+    max-width: 620px;
+  }
+  .insight-top { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; min-height: 22px; }
+  .pill-ai {
+    font-family: var(--font-mono);
+    font-size: 0.6rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--accent-ai); background: var(--accent-ai-dim);
+    border-radius: 100px; padding: 4px 10px;
+  }
+  .pill-lean {
+    font-family: var(--font-body); font-size: 0.78rem; font-weight: 700;
+    border-radius: 100px; padding: 4px 12px;
+  }
+  .pill-lean.good { color: var(--accent-live); background: var(--accent-live-dim); }
+  .pill-lean.info { color: var(--accent-atmo); background: var(--accent-atmo-dim); }
+  .pill-lean.warn { color: var(--accent-ai); background: var(--accent-ai-dim); }
+  .pill-lean.bad { color: var(--accent-warn); background: var(--accent-warn-dim); }
+  .pill-lean.neutral { color: var(--text-muted); background: var(--bg-elevated-2); }
+  .insight-zone { font-size: 0.78rem; color: var(--text-muted); }
+  .insight-text { font-size: 0.94rem; line-height: 1.55; color: var(--text); max-width: 64ch; }
+
+  /* ---------- Stat chips ---------- */
+  .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; min-height: 8px; }
+  @media (max-width: 760px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+
+  .chip {
+    background: var(--bg-elevated);
+    border: 1px solid var(--line);
+    border-radius: 16px;
     padding: 14px 16px;
-    border-radius: 8px;
-    line-height: 1.5;
-    font-size: 0.95rem;
+    display: flex; flex-direction: column; gap: 8px;
+    box-shadow: var(--shadow-soft);
   }
-  .insight .ai-tag { display: inline-block; background: var(--amber); color: var(--ink); font-size: 0.65rem; font-weight: 800; padding: 2px 7px; border-radius: 100px; margin-bottom: 8px; text-transform: uppercase; }
+  .chip .icon-wrap {
+    width: 30px; height: 30px; border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--accent-atmo-dim);
+  }
+  .chip .icon-wrap svg { stroke: var(--accent-atmo); }
+  .chip.live .icon-wrap { background: var(--accent-live-dim); }
+  .chip.live .icon-wrap svg { stroke: var(--accent-live); }
+  .chip .label { font-family: var(--font-mono); font-size: 0.64rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); }
+  .chip .value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 1.4rem; font-weight: 600; color: var(--text); line-height: 1; }
+  .chip .value small { font-size: 0.8rem; color: var(--text-muted); font-weight: 500; margin-left: 2px; }
 
-  .lean-badge { display: inline-block; padding: 4px 10px; border-radius: 100px; font-weight: 700; font-size: 0.8rem; }
-  .lean-hitter { background: #fde3d0; color: #a1481a; }
-  .lean-pitcher { background: #d7e8ff; color: #1a4a91; }
-  .lean-neutral { background: #e6e9ec; color: #4a5661; }
+  footer {
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding-top: 8px;
+    font-size: 0.76rem;
+    color: var(--text-faint);
+    border-top: 1px solid var(--line);
+    margin-top: 8px;
+  }
+  footer .status { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
 
-  .empty-state { padding: 60px 20px; text-align: center; color: var(--muted); }
-  .roadmap { display: flex; gap: 8px; padding: 10px 24px 0; flex-wrap: wrap; }
-  .roadmap span { font-size: 0.7rem; color: var(--muted); background: #eef1f4; padding: 3px 10px; border-radius: 100px; }
-  .roadmap span.live { background: var(--turf); color: #fff; }
-
-  footer { text-align: center; padding: 24px; color: var(--muted); font-size: 0.75rem; }
+  @media (prefers-reduced-motion: reduce) {
+    .compass .needle { transition: none; }
+  }
 </style>
 </head>
 <body>
 
-<header>
-  <h1>GiddyUpSports</h1>
-  <span class="tag">Weather Command Center</span>
-  <span class="sub">Wind, humidity &amp; air-density read on today's slate</span>
-</header>
+<div class="page">
 
-<div class="roadmap">
-  <span class="live">MLB</span>
-  <span class="live">NFL</span>
-  <span>D1 College Football — coming soon</span>
-  <span>Tennis — coming soon</span>
-  <span>Golf — coming soon</span>
-</div>
-
-<div class="controls">
-  <div>
-    <label for="sportSelect">Sport</label>
-    <select id="sportSelect">
-      <option value="mlb">MLB</option>
-      <option value="nfl">NFL</option>
-      <option value="ncaaf" disabled>D1 College Football (coming soon)</option>
-      <option value="tennis" disabled>Tennis (coming soon)</option>
-      <option value="golf" disabled>Golf (coming soon)</option>
-    </select>
+  <div class="masthead">
+    <div class="brand">
+      <span class="mark">GiddyUp<span>Sports</span></span>
+      <span class="kicker">Weather Intelligence</span>
+    </div>
+    <div class="sport-toggle" id="sportToggle" role="group" aria-label="Sport">
+      <button data-sport="mlb" aria-pressed="true">MLB</button>
+      <button data-sport="nfl" aria-pressed="false">NFL</button>
+      <button disabled title="Coming soon">NCAAF</button>
+      <button disabled title="Coming soon">Tennis</button>
+      <button disabled title="Coming soon">Golf</button>
+    </div>
   </div>
-  <div>
-    <label for="gameSelect">Game</label>
+
+  <div class="game-picker">
+    <svg class="gp-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
     <select id="gameSelect" disabled>
       <option value="">Loading schedule…</option>
     </select>
+    <svg class="gp-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
   </div>
-  <div class="status" id="statusLine"></div>
+
+  <div id="emptyState" class="empty-state">
+    <div class="icon-ring">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+    </div>
+    <p>Pick a game above to see conditions and the AI read.</p>
+  </div>
+
+  <div id="gameView" style="display:none; flex-direction: column; gap: 20px;">
+    <div class="hero" id="heroCard">
+      <div id="map"></div>
+      <div class="hero-scrim"></div>
+      <div class="venue-tag" id="venueTag">Loading venue…</div>
+      <div class="compass" id="windOverlay" title="Wind direction">
+        <svg id="windArrow" class="needle" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--accent-atmo)" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="20" x2="12" y2="4"></line>
+          <polyline points="6 10 12 4 18 10"></polyline>
+        </svg>
+        <div class="reading" id="windReading">—</div>
+      </div>
+      <div class="insight-card">
+        <div class="insight-top" id="insightTop"></div>
+        <div class="insight-text" id="insightText">Loading AI read…</div>
+      </div>
+    </div>
+
+    <div class="stats" id="dataStrip"></div>
+  </div>
+
+  <footer>
+    <span>Data from MLB Stats API, ESPN, and Open-Meteo. Insights are AI-narrated readings of a deterministic physics model, not betting advice.</span>
+    <span class="status" id="statusLine"></span>
+  </footer>
+
 </div>
-
-<main>
-  <div id="emptyState" class="empty-state">Pick a game above to see conditions and the AI read.</div>
-
-  <div id="gameView" class="grid" style="display:none;">
-    <div class="card">
-      <h2 id="venueTitle">Venue</h2>
-      <div class="map-wrap">
-        <div id="map"></div>
-        <div class="wind-overlay" id="windOverlay" title="Wind direction">
-          <svg id="windArrow" viewBox="0 0 24 24" fill="none" stroke="#f2a83b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="12" y1="20" x2="12" y2="4"></line>
-            <polyline points="6 10 12 4 18 10"></polyline>
-          </svg>
-        </div>
-      </div>
-      <div class="body">
-        <div class="data-strip" id="dataStrip"></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>AI Read</h2>
-      <div class="body">
-        <div id="leanBadgeWrap" style="margin-bottom:12px;"></div>
-        <div class="insight">
-          <span class="ai-tag">AI Insight</span>
-          <div id="insightText">—</div>
-        </div>
-      </div>
-    </div>
-  </div>
-</main>
-
-<footer>
-  GiddyUpSports Weather Command Center — data from MLB Stats API, ESPN, and Open-Meteo. Insights are AI-narrated readings of a deterministic physics model, not betting advice.
-</footer>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
@@ -216,21 +372,41 @@
     ? "http://localhost:8787"
     : "https://giddyupsports-weather.giddyupsports.workers.dev";
 
-  const sportSelect = document.getElementById("sportSelect");
+  const sportToggle = document.getElementById("sportToggle");
   const gameSelect = document.getElementById("gameSelect");
   const statusLine = document.getElementById("statusLine");
   const emptyState = document.getElementById("emptyState");
   const gameView = document.getElementById("gameView");
-  const venueTitle = document.getElementById("venueTitle");
+  const venueTag = document.getElementById("venueTag");
   const dataStrip = document.getElementById("dataStrip");
   const insightText = document.getElementById("insightText");
-  const leanBadgeWrap = document.getElementById("leanBadgeWrap");
+  const insightTop = document.getElementById("insightTop");
   const windArrow = document.getElementById("windArrow");
+  const windReading = document.getElementById("windReading");
 
-  let map, marker, tileLayer;
+  let map, marker;
   let currentGames = [];
+  let currentSport = "mlb";
 
   function setStatus(msg) { statusLine.textContent = msg || ""; }
+
+  const ICONS = {
+    temp: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0Z"/></svg>',
+    humidity: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M12 2.7s6 7.2 6 11.3a6 6 0 0 1-12 0c0-4.1 6-11.3 6-11.3Z"/></svg>',
+    wind: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M3 8h11a3 3 0 1 0-3-3M3 16h15a3 3 0 1 1-3 3M3 12h9"/></svg>',
+    altitude: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="m8 21 4-13 4 13M3 21h18M9 8l3-5 3 5"/></svg>',
+    carry: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M3 17l6-6 4 4 8-8M21 7v6h-6"/></svg>',
+    roof: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M3 11 12 4l9 7M5 10v10h14V10"/></svg>',
+    gauge: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M12 12 16 8M4 12a8 8 0 1 1 16 0"/></svg>',
+  };
+
+  function chip(icon, label, value, unit, live) {
+    return `<div class="chip${live ? " live" : ""}">
+      <div class="icon-wrap">${ICONS[icon]}</div>
+      <div class="label">${label}</div>
+      <div class="value">${value}${unit ? `<small>${unit}</small>` : ""}</div>
+    </div>`;
+  }
 
   // ESPN's scoreboard API allows browser CORS requests (Access-Control-Allow-Origin: *) but
   // blocks Cloudflare Worker IPs outright — confirmed by testing identical requests. So NFL
@@ -257,6 +433,7 @@
   }
 
   async function loadSchedule(sport) {
+    currentSport = sport;
     gameSelect.disabled = true;
     gameSelect.innerHTML = '<option value="">Loading schedule…</option>';
     setStatus(`Fetching ${sport.toUpperCase()} schedule…`);
@@ -294,7 +471,7 @@
   function ensureMap(lat, lon) {
     if (!map) {
       map = L.map("map", { zoomControl: false, attributionControl: false }).setView([lat, lon], 17);
-      tileLayer = L.tileLayer(
+      L.tileLayer(
         "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         { maxZoom: 19 }
       ).addTo(map);
@@ -307,50 +484,60 @@
   }
 
   function renderDataStrip(sport, weather, venue, score) {
-    const stats = [
-      { label: "Temp", value: `${Math.round(weather.tempF)}°F` },
-      { label: "Humidity", value: `${Math.round(weather.humidityPct)}%` },
-      { label: "Wind", value: `${Math.round(weather.windSpeedMph)} mph ${score.windCompass || ""}` },
-      { label: "Precip Chance", value: `${Math.round(weather.precipProbPct ?? 0)}%` },
+    const chips = [
+      chip("temp", "Temp", Math.round(weather.tempF), "°F"),
+      chip("humidity", "Humidity", Math.round(weather.humidityPct), "%"),
+      chip("wind", "Wind", weather.windSpeedMph.toFixed(1), `mph ${score.windCompass || ""}`),
     ];
     if (sport === "mlb") {
-      stats.push({ label: "Altitude", value: `${venue.altitudeFt} ft` });
-      stats.push({ label: "Est. Carry vs. Neutral", value: `${score.carryFt > 0 ? "+" : ""}${score.carryFt} ft` });
+      chips.push(chip("altitude", "Altitude", (venue.altitudeFt / 1000).toFixed(1), "k ft"));
+      chips.push(chip("carry", "Est. Carry", `${score.carryFt > 0 ? "+" : ""}${score.carryFt}`, "ft", true));
     } else {
-      stats.push({ label: "Roof", value: venue.roofType });
-      stats.push({ label: "Wind Tier", value: score.windTier || "—" });
+      chips.push(chip("roof", "Roof", venue.roofType));
+      chips.push(chip("gauge", "Wind Tier", score.windTier || "—", null, true));
     }
-    dataStrip.innerHTML = stats
-      .map((s) => `<div class="stat"><div class="label">${s.label}</div><div class="value">${s.value}</div></div>`)
-      .join("");
+    dataStrip.innerHTML = chips.join("");
   }
 
-  function renderLeanBadge(sport, score) {
+  function renderLeanTop(sport, score) {
+    let cls, label, zone;
     if (sport === "mlb") {
-      const cls = score.scoringLean === "hitter-friendly" ? "lean-hitter" : score.scoringLean === "pitcher-friendly" ? "lean-pitcher" : "lean-neutral";
-      leanBadgeWrap.innerHTML = `<span class="lean-badge ${cls}">${score.scoringLean.toUpperCase()}</span> <span style="color:var(--muted);font-size:0.85rem;margin-left:8px;">${score.windZone}</span>`;
+      cls = score.scoringLean === "hitter-friendly" ? "good" : score.scoringLean === "pitcher-friendly" ? "info" : "neutral";
+      label = score.scoringLean.replace(/-/g, " ");
+      zone = `wind ${score.windZone}`;
     } else {
-      leanBadgeWrap.innerHTML = `<span class="lean-badge lean-neutral">${(score.windTier || "").toUpperCase()} WIND</span> <span style="color:var(--muted);font-size:0.85rem;margin-left:8px;">${score.passingImpact || ""}</span>`;
+      const tier = score.windTier || "";
+      cls = tier === "light" ? "good" : tier === "moderate" ? "warn" : tier === "none (closed roof)" ? "neutral" : "bad";
+      label = tier === "none (closed roof)" ? "roof closed" : `${tier} wind`;
+      zone = score.passingImpact || "";
     }
+    insightTop.innerHTML =
+      `<span class="pill-ai">AI Insight</span>` +
+      `<span class="pill-lean ${cls}">${label.replace(/\b\w/g, (c) => c.toUpperCase())}</span>` +
+      `<span class="insight-zone">${zone}</span>`;
   }
 
   async function loadGame(sport, game) {
     emptyState.style.display = "none";
-    gameView.style.display = "grid";
-    venueTitle.textContent = `${game.venue || "Venue"} — ${game.away} @ ${game.home}`;
+    gameView.style.display = "flex";
+    venueTag.textContent = `${game.venue || "Venue"}…`;
     insightText.textContent = "Loading AI read…";
+    insightTop.innerHTML = "";
+    windReading.innerHTML = "—";
     dataStrip.innerHTML = "";
-    leanBadgeWrap.innerHTML = "";
     setStatus("Fetching conditions…");
     try {
       const res = await fetch(`${WORKER_BASE}/api/game?sport=${sport}&venueKey=${game.venueKey}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       ensureMap(data.venue.lat, data.venue.lon);
+      const suffix = sport === "mlb" ? `${data.venue.altitudeFt} FT` : data.venue.roofType.toUpperCase();
+      venueTag.textContent = `${data.venue.venue} · ${suffix}`;
       renderDataStrip(sport, data.weather, data.venue, data.score);
-      renderLeanBadge(sport, data.score);
+      renderLeanTop(sport, data.score);
       insightText.textContent = data.insight || "No insight generated.";
       windArrow.style.transform = `rotate(${(data.weather.windFromDeg || 0) + 180}deg)`;
+      windReading.innerHTML = `from <b>${data.score.windCompass || "—"}</b> · ${data.weather.windSpeedMph.toFixed(1)} mph`;
       setStatus(`Updated ${new Date().toLocaleTimeString()}`);
     } catch (err) {
       insightText.textContent = `Could not load conditions: ${err.message}`;
@@ -358,13 +545,19 @@
     }
   }
 
-  sportSelect.addEventListener("change", () => loadSchedule(sportSelect.value));
-  gameSelect.addEventListener("change", () => {
-    const g = currentGames[Number(gameSelect.value)];
-    if (g) loadGame(sportSelect.value, g);
+  sportToggle.addEventListener("click", (e) => {
+    const btn = e.target.closest("button");
+    if (!btn || btn.disabled || btn.getAttribute("aria-pressed") === "true") return;
+    sportToggle.querySelectorAll("button[data-sport]").forEach((b) => b.setAttribute("aria-pressed", String(b === btn)));
+    loadSchedule(btn.dataset.sport);
   });
 
-  loadSchedule(sportSelect.value);
+  gameSelect.addEventListener("change", () => {
+    const g = currentGames[Number(gameSelect.value)];
+    if (g) loadGame(currentSport, g);
+  });
+
+  loadSchedule(currentSport);
 </script>
 </body>
 </html>
