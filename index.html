@@ -572,20 +572,17 @@
     const hero = document.getElementById("heroCard");
     const ctx = canvas.getContext("2d");
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const PARTICLE_COUNT = 90;
+    const PARTICLE_COUNT = 150;
     let particles = [];
     let w = 0, h = 0;
     let flowAngleDeg = 200; // gentle ambient default until real wind data loads
     let flowSpeedMph = 6;
-    let strokeRgb = "111,215,255";
-
-    function hexToRgb(hex) {
-      const m = hex.trim().match(/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i);
-      return m ? `${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)}` : "111,215,255";
-    }
-    function refreshColor() {
-      strokeRgb = hexToRgb(getComputedStyle(document.documentElement).getPropertyValue("--accent-atmo"));
-    }
+    // Fixed bright color rather than a theme token: this draws over a live satellite photo whose
+    // brightness varies constantly (roads, roofs, grass, water), not over a themed card
+    // background, so it needs to read clearly regardless of what's underneath or which sport's
+    // theme is active. A dark outline stroke drawn under each segment (see step()) does the rest,
+    // same contrast trick the racing command center's track-wind visual uses.
+    const strokeRgb = "255,204,51";
 
     function resize() {
       w = hero.clientWidth;
@@ -624,7 +621,8 @@
     function step() {
       if (!w || !h) return;
       const { dx, dy } = flowVector(flowAngleDeg);
-      const speedPx = 0.35 + Math.min(flowSpeedMph, 30) * 0.055;
+      // Wide range so a calm day and a windy one are visibly, not just numerically, different.
+      const speedPx = 0.25 + Math.min(flowSpeedMph, 35) * 0.11;
       ctx.clearRect(0, 0, w, h);
       for (const p of particles) {
         p.x += dx * speedPx * p.variance;
@@ -639,10 +637,18 @@
         for (let i = 1; i < p.trail.length; i++) {
           const a = p.trail[i - 1];
           const b = p.trail[i];
-          const alpha = (i / p.trail.length) * 0.85;
-          ctx.strokeStyle = `rgba(${strokeRgb},${alpha})`;
-          ctx.lineWidth = 2;
+          const alpha = (i / p.trail.length) * 0.9;
+          // Dark outline pass first so the arrow stays legible over bright patches of the photo
+          // (roads, rooftops), then the bright color on top -- same trick as the racing app's.
+          ctx.strokeStyle = `rgba(10,10,10,${alpha * 0.55})`;
+          ctx.lineWidth = 3.4;
           ctx.lineCap = "round";
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+          ctx.strokeStyle = `rgba(${strokeRgb},${alpha})`;
+          ctx.lineWidth = 2.2;
           ctx.beginPath();
           ctx.moveTo(a.x, a.y);
           ctx.lineTo(b.x, b.y);
@@ -652,12 +658,22 @@
         if (p.trail.length >= 2) {
           const head = p.trail[p.trail.length - 1];
           const rad = Math.atan2(dy, dx);
-          const size = 4.5;
-          ctx.fillStyle = `rgba(${strokeRgb},0.95)`;
+          const size = 5.5;
+          const tip = { x: head.x + Math.cos(rad) * size, y: head.y + Math.sin(rad) * size };
+          const l = { x: head.x + Math.cos(rad + 2.5) * size, y: head.y + Math.sin(rad + 2.5) * size };
+          const r = { x: head.x + Math.cos(rad - 2.5) * size, y: head.y + Math.sin(rad - 2.5) * size };
+          ctx.fillStyle = "rgba(10,10,10,0.5)";
           ctx.beginPath();
-          ctx.moveTo(head.x + Math.cos(rad) * size, head.y + Math.sin(rad) * size);
-          ctx.lineTo(head.x + Math.cos(rad + 2.5) * size, head.y + Math.sin(rad + 2.5) * size);
-          ctx.lineTo(head.x + Math.cos(rad - 2.5) * size, head.y + Math.sin(rad - 2.5) * size);
+          ctx.moveTo(tip.x + 0.6, tip.y + 0.6);
+          ctx.lineTo(l.x + 0.6, l.y + 0.6);
+          ctx.lineTo(r.x + 0.6, r.y + 0.6);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = `rgba(${strokeRgb},1)`;
+          ctx.beginPath();
+          ctx.moveTo(tip.x, tip.y);
+          ctx.lineTo(l.x, l.y);
+          ctx.lineTo(r.x, r.y);
           ctx.closePath();
           ctx.fill();
         }
@@ -674,11 +690,9 @@
       flowSpeedMph = speedMph;
     };
 
-    refreshColor();
     resize();
     seed();
     new ResizeObserver(resize).observe(hero);
-    matchMedia("(prefers-color-scheme: light)").addEventListener("change", refreshColor);
 
     if (reduceMotion) {
       for (let i = 0; i < 6; i++) step();
@@ -801,6 +815,10 @@
   }
 
   function ensureMap(lat, lon) {
+    // Zoomed in enough that the stadium is the clear subject of the picture, not the surrounding
+    // city -- tuned against Great American Ball Park; a handful of larger/smaller venues may want
+    // their own adjustment later, but there's no per-venue footprint data to fit bounds exactly.
+    const STADIUM_ZOOM = 17.4;
     if (!map) {
       // Fully static picture: every interaction handler off, so the stadium view can't be
       // panned or zoomed — it just shows the venue, centered, and nothing else.
@@ -814,14 +832,14 @@
         keyboard: false,
         touchZoom: false,
         tap: false,
-      }).setView([lat, lon], 17);
+      }).setView([lat, lon], STADIUM_ZOOM);
       L.tileLayer(
         "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         { maxZoom: 19 }
       ).addTo(map);
       marker = L.marker([lat, lon], { interactive: false }).addTo(map);
     } else {
-      map.setView([lat, lon], 17);
+      map.setView([lat, lon], STADIUM_ZOOM);
       marker.setLatLng([lat, lon]);
     }
     setTimeout(() => map.invalidateSize(), 150);
