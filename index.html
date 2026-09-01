@@ -217,20 +217,22 @@
     position: absolute;
     top: 20px; right: 20px;
     z-index: 460;
-    width: 96px; height: 96px;
+    width: 118px; height: 118px;
     border-radius: 50%;
     background: var(--bg-glass);
     backdrop-filter: blur(12px);
     border: 1px solid var(--line-strong);
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
     box-shadow: var(--shadow-soft);
   }
   .compass .needle { transition: transform 0.6s ease; }
   .compass .reading {
     font-family: var(--font-mono);
-    font-size: 0.62rem;
+    font-size: 0.6rem;
     color: var(--text-muted);
     white-space: nowrap;
+    max-width: 84px;
+    text-align: center;
   }
   .compass .reading b { color: var(--accent-atmo); font-weight: 600; }
 
@@ -537,7 +539,7 @@
       renderLeanTop(sport, data.score);
       insightText.textContent = data.insight || "No insight generated.";
       windArrow.style.transform = `rotate(${(data.weather.windFromDeg || 0) + 180}deg)`;
-      windReading.innerHTML = `from <b>${data.score.windCompass || "—"}</b> · ${data.weather.windSpeedMph.toFixed(1)} mph`;
+      windReading.innerHTML = `<b>${data.score.windCompass || "—"}</b> ${data.weather.windSpeedMph.toFixed(1)}mph`;
       setStatus(`Updated ${new Date().toLocaleTimeString()}`);
     } catch (err) {
       insightText.textContent = `Could not load conditions: ${err.message}`;
