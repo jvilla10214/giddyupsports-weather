@@ -6,10 +6,15 @@
 <title>GiddyUpSports Weather Command Center</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Bebas+Neue&family=Roboto+Slab:wght@400;500;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Bebas+Neue&family=Roboto+Slab:wght@400;500;700&family=Anton&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
-  /* ---------- Design tokens: dark ("stadium at night") is the default identity ---------- */
+  /* ---------- Base tokens ("Floodlight") — inert fallback, always overridden below ----------
+     Both sports now have their own dedicated identity (Vintage Diamond for MLB, Gridiron for
+     NFL), set via html[data-sport]. data-sport is always present (static in the HTML, kept in
+     sync by the sport toggle), so this block never actually renders — it's just a safe default
+     if that ever isn't true. Left in place rather than deleted so removing a sport's block
+     doesn't leave undefined custom properties. */
   :root {
     --bg: #0a1420;
     --bg-elevated: #101d2e;
@@ -126,6 +131,69 @@
       --accent-ai-dim: #3a1f18;
       --accent-warn: #e08871;
       --accent-warn-dim: #3a1f18;
+    }
+  }
+
+  /* ---------- NFL theme: "Gridiron" — cold turf under Friday-night lights ----------
+     Deliberately a sibling to Vintage Diamond, not a twin: dark-first (turf night) instead of
+     cream/parchment, Anton + Barlow instead of the condensed-serif pairing, gold (first-down
+     marker) as the favorable accent instead of forest green. Dark is the natural identity here,
+     so — unlike MLB — the unconditional block below IS the dark version, with a light override. */
+  html[data-sport="nfl"] {
+    --bg: #0d1f14;
+    --bg-elevated: #142b1c;
+    --bg-elevated-2: #1a3423;
+    --bg-glass: rgba(20, 43, 28, 0.85);
+    --text: #f5f7ee;
+    --text-muted: #9db3a0;
+    --text-faint: #6b8073;
+    --line: rgba(245, 247, 238, 0.14);
+    --line-strong: rgba(245, 247, 238, 0.28);
+
+    --accent-atmo: #7fb8d4;
+    --accent-atmo-dim: #1c3440;
+    --accent-live: #f2c14e;
+    --accent-live-dim: #3a3416;
+    --accent-ai: #c67a45;
+    --accent-ai-dim: #3a2716;
+    --accent-warn: #d64545;
+    --accent-warn-dim: #3a1c1c;
+
+    --shadow: 0 20px 60px -22px rgba(0, 0, 0, 0.6);
+    --shadow-soft: 0 12px 32px -18px rgba(0, 0, 0, 0.5);
+
+    --font-display: "Anton", sans-serif;
+    --font-body: "Barlow", sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+
+    --card-border-width: 2px;
+    --radius-lg: 12px;
+    --radius-md: 8px;
+    --insight-border-color: var(--accent-live);
+  }
+  @media (prefers-color-scheme: light) {
+    html[data-sport="nfl"] {
+      --bg: #eef2ec;
+      --bg-elevated: #ffffff;
+      --bg-elevated-2: #e4ebe1;
+      --bg-glass: rgba(255, 255, 255, 0.85);
+      --text: #10241a;
+      --text-muted: #4d6156;
+      --text-faint: #7c8f83;
+      --line: rgba(16, 36, 26, 0.14);
+      --line-strong: rgba(16, 36, 26, 0.28);
+
+      --accent-atmo: #2f6b85;
+      --accent-atmo-dim: #dcebf0;
+      --accent-live: #a8710f;
+      --accent-live-dim: #f7ecd2;
+      --accent-ai: #96501f;
+      --accent-ai-dim: #f2e2d2;
+      --accent-warn: #b6342f;
+      --accent-warn-dim: #f7dfdd;
+
+      --shadow: 0 20px 50px -26px rgba(16, 36, 26, 0.22);
+      --shadow-soft: 0 10px 26px -18px rgba(16, 36, 26, 0.16);
     }
   }
 
