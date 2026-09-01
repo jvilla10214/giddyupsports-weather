@@ -67,6 +67,19 @@ function scoreMlbGame(weather, venue) {
   };
   const carryFt = fieldCarry.center; // kept as the headline number, same value as before this split
 
+  // Pull hitters skew the platoon advantage: right-handed batters predominantly pull fly balls
+  // toward left field, left-handed batters toward right field. So extra carry toward LF favors
+  // RHB power, extra carry toward RF favors LHB power. Small deltas aren't meaningful -- require
+  // a real gap (8ft, roughly the same order as the wind-out-to-CF carry threshold below) before
+  // calling it either way.
+  const handedDeltaFt = Math.round((fieldCarry.right - fieldCarry.left) * 10) / 10;
+  const handedness =
+    roofClosed || Math.abs(handedDeltaFt) < 8
+      ? { favors: "neutral", deltaFt: handedDeltaFt }
+      : handedDeltaFt > 0
+        ? { favors: "left", deltaFt: handedDeltaFt } // RF carries more -> favors left-handed pull power
+        : { favors: "right", deltaFt: handedDeltaFt }; // LF carries more -> favors right-handed pull power
+
   let windZone = "calm";
   if (!roofClosed && weather.windSpeedMph >= 3) {
     const blowsToward = (weather.windFromDeg + 180) % 360;
@@ -88,6 +101,7 @@ function scoreMlbGame(weather, venue) {
     roofClosed,
     carryFt: Math.round(carryFt * 10) / 10,
     fieldCarry,
+    handedness,
     windZone,
     windCarryFt: Math.round(cfWindCarryFt * 10) / 10,
     windCompass: degToCompass16(weather.windFromDeg),

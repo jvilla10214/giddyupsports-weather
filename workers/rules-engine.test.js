@@ -52,5 +52,9 @@ console.log("Yankee Stadium, wind blowing toward RF:", rfWind.fieldCarry);
 assert(rfWind.fieldCarry.right > rfWind.fieldCarry.center, "Wind toward RF should carry right field more than center");
 assert(rfWind.fieldCarry.center > rfWind.fieldCarry.left, "Wind toward RF should carry center more than left field (pure crosswind there)");
 assert(rfWind.carryFt === rfWind.fieldCarry.center, "The headline carryFt should equal the center-field figure");
+assert(rfWind.handedness.favors === "left", "Wind carrying RF more than LF should favor left-handed pull hitters");
+
+// Symmetric case (wind straight out to CF, Coors Field) -> no handedness edge either way.
+assert(coors.handedness.favors === "neutral", "Wind blowing straight out to center should not favor either handedness");
 
 console.log("\nAll rules-engine sanity checks passed.");

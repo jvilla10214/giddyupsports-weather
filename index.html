@@ -420,6 +420,13 @@
   .fc-btn.good .fc-value { color: var(--accent-live); }
   .fc-btn.bad { border-color: var(--accent-warn); }
   .fc-btn.bad .fc-value { color: var(--accent-warn); }
+
+  .handed-note {
+    display: flex; align-items: center; gap: 6px;
+    font-family: var(--font-mono); font-size: 0.76rem; color: var(--text-muted);
+    margin-bottom: 14px;
+  }
+  .handed-note .hn-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-atmo); flex: none; }
   .pill-lean.neutral { color: var(--text-muted); background: var(--bg-elevated-2); }
   .insight-zone { font-size: 0.78rem; color: var(--text-muted); }
   .insight-text { font-size: 0.94rem; line-height: 1.55; color: var(--text); max-width: 64ch; }
@@ -515,6 +522,7 @@
     <div class="insight-panel">
       <div class="insight-top" id="insightTop"></div>
       <div class="field-carry" id="fieldCarry" style="display:none;"></div>
+      <div class="handed-note" id="handedNote" style="display:none;"></div>
       <div class="insight-text" id="insightText">Loading AI read…</div>
     </div>
 
@@ -547,6 +555,7 @@
   const insightText = document.getElementById("insightText");
   const insightTop = document.getElementById("insightTop");
   const fieldCarryEl = document.getElementById("fieldCarry");
+  const handedNoteEl = document.getElementById("handedNote");
   const venueMeta = document.getElementById("venueMeta");
 
   let map, marker;
@@ -877,6 +886,14 @@
       })
       .join("");
     fieldCarryEl.style.display = "flex";
+
+    if (score.handedness && score.handedness.favors !== "neutral") {
+      const who = score.handedness.favors === "left" ? "Left-handed" : "Right-handed";
+      handedNoteEl.innerHTML = `<span class="hn-dot"></span>${who} hitters may have an edge tonight — ${Math.abs(score.handedness.deltaFt)}ft more carry to their pull side.`;
+      handedNoteEl.style.display = "flex";
+    } else {
+      handedNoteEl.style.display = "none";
+    }
   }
 
   async function showDetail(sport, game) {
@@ -888,6 +905,7 @@
     insightText.textContent = "Loading AI read…";
     insightTop.innerHTML = "";
     fieldCarryEl.style.display = "none";
+    handedNoteEl.style.display = "none";
     dataStrip.innerHTML = "";
     setStatus("Fetching conditions…");
     try {
