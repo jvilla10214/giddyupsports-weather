@@ -339,6 +339,8 @@
     gameView.style.display = "grid";
     venueTitle.textContent = `${game.venue || "Venue"} — ${game.away} @ ${game.home}`;
     insightText.textContent = "Loading AI read…";
+    dataStrip.innerHTML = "";
+    leanBadgeWrap.innerHTML = "";
     setStatus("Fetching conditions…");
     try {
       const res = await fetch(`${WORKER_BASE}/api/game?sport=${sport}&venueKey=${game.venueKey}`);
