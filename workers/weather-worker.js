@@ -11,12 +11,14 @@
  *
  * Routes (all GET, all CORS-open for the GitHub Pages frontend):
  *   /api/schedule?sport=mlb                      -> today's MLB games
- *   /api/schedule?sport=nfl                       -> current week's NFL games
  *   /api/game?sport=mlb&gameId=...&venueKey=...   -> weather + rules-engine score + AI insight
  *   /api/game?sport=nfl&gameId=...&venueKey=...   -> same, NFL
  *
+ * NFL schedule is NOT fetched here — ESPN's scoreboard API blocks Cloudflare Worker IPs but
+ * allows browser CORS requests, so the frontend fetches it client-side instead. See DECISIONS.md.
+ *
  * Every external call is cached in KV so a burst of page loads doesn't hammer free/unofficial
- * upstream APIs (MLB Stats API, ESPN's undocumented scoreboard, Open-Meteo, Workers AI's free tier).
+ * upstream APIs (MLB Stats API, Open-Meteo, Workers AI's free tier).
  */
 
 import { MLB_STADIUMS, NFL_STADIUMS, MLB_TEAM_ID_TO_KEY } from "../data/stadiums.js";
@@ -75,31 +77,13 @@ async function fetchMlbSchedule(env) {
   });
 }
 
-async function fetchNflSchedule(env) {
-  const date = todayIso();
-  return cached(env, `schedule:nfl:${date}`, 30 * 60, async () => {
-    const url = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard";
-    const res = await fetch(url, { headers: { "User-Agent": "GiddyUpSports-Weather/1.0" } });
-    if (!res.ok) throw new Error(`ESPN scoreboard API ${res.status}`);
-    const data = await res.json();
-    const games = (data.events || []).map((ev) => {
-      const comp = ev.competitions?.[0];
-      const home = comp?.competitors?.find((c) => c.homeAway === "home");
-      const away = comp?.competitors?.find((c) => c.homeAway === "away");
-      const abbr = home?.team?.abbreviation;
-      return {
-        gameId: ev.id,
-        startTimeUtc: ev.date,
-        away: away?.team?.displayName,
-        home: home?.team?.displayName,
-        venue: comp?.venue?.fullName,
-        venueKey: NFL_STADIUMS[abbr] ? abbr : null,
-        status: ev.status?.type?.description,
-      };
-    });
-    return { sport: "nfl", date, games };
-  });
-}
+// NFL schedule is intentionally NOT fetched here. ESPN's scoreboard API (site.api.espn.com) sends
+// Access-Control-Allow-Origin: * (it's fine with real browsers) but returns 403 to every request
+// from a Cloudflare Worker regardless of headers — confirmed by testing identical requests with
+// matching browser User-Agent/Referer/Origin headers from a Worker (blocked) vs. a plain machine
+// (200 OK). This is ESPN's edge blocking Cloudflare's IP ranges, not a headers problem, so no
+// header tweak fixes it from here. The frontend (index.html) fetches ESPN directly from the
+// user's own browser instead, which ESPN's CORS policy explicitly allows. See DECISIONS.md.
 
 // ---- Weather ----
 
@@ -136,7 +120,7 @@ async function narrate(env, sport, score, weather, venueLabel) {
         ? `You are a concise baseball weather analyst. Venue: ${venueLabel}. Conditions: ${weather.tempF}F, ${weather.humidityPct}% humidity, wind ${weather.windSpeedMph}mph ${score.windCompass}. Rules-engine read: estimated carry ${score.carryFt}ft vs. a neutral day, wind is ${score.windZone}, overall lean: ${score.scoringLean}. In 2-3 sentences, explain what this means for hitters and scoring today. Be specific about field direction. No disclaimers, no hedging filler.`
         : `You are a concise NFL weather analyst. Venue: ${venueLabel}. Conditions: ${weather.tempF}F, wind ${weather.windSpeedMph}mph ${score.windCompass || ""}, precip chance ${weather.precipProbPct}%. Rules-engine read: wind tier ${score.windTier}, passing impact "${score.passingImpact}", field-goal range impact "${score.fgRangeImpact}". In 2-3 sentences, explain what this means for the passing game and kicking today. No disclaimers, no hedging filler.`;
     try {
-      const result = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+      const result = await env.AI.run("@cf/meta/llama-3.2-3b-instruct", {
         messages: [{ role: "user", content: prompt }],
         max_tokens: 200,
       });
@@ -171,7 +155,9 @@ export default {
       if (url.pathname === "/api/schedule") {
         const sport = url.searchParams.get("sport");
         if (sport === "mlb") return json(await fetchMlbSchedule(env));
-        if (sport === "nfl") return json(await fetchNflSchedule(env));
+        if (sport === "nfl") {
+          return json({ error: "NFL schedule is fetched client-side (ESPN blocks Worker IPs) — see index.html and DECISIONS.md" }, 400);
+        }
         return json({ error: "sport must be mlb or nfl" }, 400);
       }
 

@@ -214,7 +214,7 @@
   // Point this at your deployed Worker. Falls back to localhost for `wrangler dev` testing.
   const WORKER_BASE = (location.hostname === "localhost" || location.hostname === "127.0.0.1")
     ? "http://localhost:8787"
-    : "https://giddyupsports-weather.YOUR_SUBDOMAIN.workers.dev"; // TODO: replace after first deploy
+    : "https://giddyupsports-weather.giddyupsports.workers.dev";
 
   const sportSelect = document.getElementById("sportSelect");
   const gameSelect = document.getElementById("gameSelect");
@@ -232,15 +232,45 @@
 
   function setStatus(msg) { statusLine.textContent = msg || ""; }
 
+  // ESPN's scoreboard API allows browser CORS requests (Access-Control-Allow-Origin: *) but
+  // blocks Cloudflare Worker IPs outright — confirmed by testing identical requests. So NFL
+  // schedule is fetched straight from the browser instead of proxied through the Worker; MLB
+  // still goes through the Worker since the official MLB Stats API has no such restriction.
+  async function fetchNflScheduleClientSide() {
+    const res = await fetch("https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard");
+    if (!res.ok) throw new Error(`ESPN scoreboard API ${res.status}`);
+    const data = await res.json();
+    return (data.events || []).map((ev) => {
+      const comp = ev.competitions?.[0];
+      const home = comp?.competitors?.find((c) => c.homeAway === "home");
+      const away = comp?.competitors?.find((c) => c.homeAway === "away");
+      return {
+        gameId: ev.id,
+        startTimeUtc: ev.date,
+        away: away?.team?.displayName,
+        home: home?.team?.displayName,
+        venue: comp?.venue?.fullName,
+        venueKey: home?.team?.abbreviation || null,
+        status: ev.status?.type?.description,
+      };
+    });
+  }
+
   async function loadSchedule(sport) {
     gameSelect.disabled = true;
     gameSelect.innerHTML = '<option value="">Loading schedule…</option>';
     setStatus(`Fetching ${sport.toUpperCase()} schedule…`);
     try {
-      const res = await fetch(`${WORKER_BASE}/api/schedule?sport=${sport}`);
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      currentGames = (data.games || []).filter((g) => g.venueKey);
+      let games;
+      if (sport === "nfl") {
+        games = await fetchNflScheduleClientSide();
+      } else {
+        const res = await fetch(`${WORKER_BASE}/api/schedule?sport=${sport}`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        games = data.games || [];
+      }
+      currentGames = games.filter((g) => g.venueKey);
       if (!currentGames.length) {
         gameSelect.innerHTML = '<option value="">No games found for today</option>';
         setStatus("No games on the slate right now.");

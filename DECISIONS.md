@@ -6,6 +6,42 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## NFL schedule: fetched client-side, not through the Worker
+**Date:** 2026-09-01
+**Decision:** `index.html` calls ESPN's scoreboard API (`site.api.espn.com`) directly from the
+browser for NFL schedule data. The Worker no longer attempts this — `/api/schedule?sport=nfl`
+returns a 400 pointing here instead.
+**Why:** Verified live, not theoretical: identical requests (same URL, same browser User-Agent,
+Referer, Origin headers) return 200 from a plain machine and 403 from the deployed Worker, every
+time, regardless of header tweaking. ESPN's edge is blocking Cloudflare Workers' IP ranges
+specifically, not detecting a missing header. Checking ESPN's own response headers confirmed
+`Access-Control-Allow-Origin: *` — they explicitly permit any browser to call this cross-origin —
+so the fix is to stop pretending to be a server and just be the browser the API already welcomes.
+MLB's official Stats API has no such block and stays server-side through the Worker as originally
+designed.
+**Alternatives considered:** A CORS/IP proxy in front of the Worker's request (rejected — adds a
+third-party dependency and another point of failure for no real benefit over just calling from the
+browser, which already works); TheSportsDB as a schedule source (rejected — checked live, its free
+tier's `search_all_leagues` doesn't include the NFL at all, only smaller leagues like the CFL and
+European American-football leagues).
+
+## AI narration model: llama-3.2-3b-instruct via env.AI, called through the REST endpoint contract
+**Date:** 2026-09-01
+**Decision:** Settled on `@cf/meta/llama-3.2-3b-instruct` after the originally planned
+`@cf/meta/llama-3.1-8b-instruct` turned out to be deprecated (May 2026). Also upgraded the project's
+Wrangler dependency from 4.86.0 to the current 4.128.0 (which needed a Node 22 runtime bump too) —
+the old Wrangler version's `env.AI` binding was resolving valid, non-deprecated model IDs through a
+stale internal route and failing with a deprecation error for a model we never requested, while the
+exact same model+request called via Cloudflare's plain REST API (same account) worked immediately.
+Upgrading Wrangler fixed the binding without changing anything else.
+**Why:** This was diagnosed live, not guessed — direct REST calls to `/ai/run/@cf/meta/llama-3.2-3b-instruct`
+succeeded consistently before the Wrangler upgrade, proving the model and account were fine and the
+bug was specifically in the old binding's local routing table.
+**Known rough edge:** the free small model's phrasing is occasionally awkward (e.g. describing
+"negligible passing impact" in a way that reads ambiguous rather than clearly reassuring). Not
+worth fighting further given the free-tier model size — a tighter prompt or a slightly larger model
+is the fix if this becomes noticeable in real use.
+
 ## Wrangler + ES modules for the Worker, instead of manual dashboard paste-editing
 **Date:** 2026-08-31
 **Decision:** Unlike the racing repo's `stable-tour-feed.js` (a single monolithic file pasted
