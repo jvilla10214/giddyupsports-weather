@@ -38,7 +38,7 @@ export const MLB_STADIUMS = {
   SF: { team: "Giants", venue: "Oracle Park", city: "San Francisco, CA", lat: 37.7786, lon: -122.3893, roofType: "open", altitudeFt: 10, cfBearingDeg: 337.5 },
   SEA: { team: "Mariners", venue: "T-Mobile Park", city: "Seattle, WA", lat: 47.5914, lon: -122.3325, roofType: "retractable", altitudeFt: 15, cfBearingDeg: 22.5 },
   STL: { team: "Cardinals", venue: "Busch Stadium", city: "St. Louis, MO", lat: 38.6226, lon: -90.1928, roofType: "open", altitudeFt: 465, cfBearingDeg: 45 },
-  TB: { team: "Rays", venue: "George M. Steinbrenner Field", city: "Tampa, FL", lat: 27.9803, lon: -82.5322, roofType: "open", altitudeFt: 15, cfBearingDeg: 45 },
+  TB: { team: "Rays", venue: "Tropicana Field", city: "St. Petersburg, FL", lat: 27.7683, lon: -82.6534, roofType: "dome", altitudeFt: 10, cfBearingDeg: 45 },
   TEX: { team: "Rangers", venue: "Globe Life Field", city: "Arlington, TX", lat: 32.7473, lon: -97.0817, roofType: "retractable", altitudeFt: 550, cfBearingDeg: 45 },
   TOR: { team: "Blue Jays", venue: "Rogers Centre", city: "Toronto, ON", lat: 43.6414, lon: -79.3894, roofType: "retractable", altitudeFt: 300, cfBearingDeg: 67.5 },
   WSH: { team: "Nationals", venue: "Nationals Park", city: "Washington, DC", lat: 38.873, lon: -77.0074, roofType: "open", altitudeFt: 20, cfBearingDeg: 45 },

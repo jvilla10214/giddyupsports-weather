@@ -76,7 +76,20 @@
   button, select { font: inherit; color: inherit; }
   :focus-visible { outline: 2px solid var(--accent-atmo); outline-offset: 2px; }
 
+  /* Ambient wind-flow layer: sits behind everything, drifting arrows across the whole page —
+     never over the stadium picture, which stays clean per the design brief. */
+  .wind-flow-canvas {
+    position: fixed;
+    inset: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.6;
+  }
+
   .page {
+    position: relative;
+    z-index: 1;
     max-width: 1120px;
     margin: 0 auto;
     padding: clamp(16px, 4vw, 40px);
@@ -87,16 +100,42 @@
 
   /* ---------- Masthead ---------- */
   .masthead { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
-  .brand { display: flex; align-items: baseline; gap: 10px; }
-  .brand .mark {
+  .brand { display: flex; align-items: center; gap: 12px; }
+
+  /* Logo mark: a ruler/tape-measure pill frame around a wordmark, recolored via currentColor
+     so it automatically matches the active theme (dark: near-white, light: near-black). */
+  .brand-logo {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    color: var(--text);
+    border: 2px solid currentColor;
+    border-radius: 100px;
+    padding: 9px 22px;
+  }
+  .brand-logo::before,
+  .brand-logo::after {
+    content: "";
+    position: absolute;
+    left: 16px; right: 16px;
+    height: 5px;
+    background-image: repeating-linear-gradient(90deg, currentColor 0 1.5px, transparent 1.5px 9px);
+    opacity: 0.5;
+  }
+  .brand-logo::before { top: 3px; }
+  .brand-logo::after { bottom: 3px; }
+  .brand-logo .wordmark {
     font-family: var(--font-display);
     font-weight: 800;
-    font-size: 1.65rem;
+    font-size: 1.3rem;
     letter-spacing: 0.01em;
     text-transform: uppercase;
     white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.05em;
   }
-  .brand .mark span { color: var(--accent-ai); }
+  .brand-logo .ball { flex: none; transform: translateY(-0.02em); }
   .brand .kicker {
     font-family: var(--font-mono);
     font-size: 0.65rem;
@@ -178,7 +217,23 @@
   .empty-state .icon-ring svg { stroke: var(--accent-atmo); }
   .empty-state p { margin: 0; font-size: 0.95rem; }
 
-  /* ---------- Hero ---------- */
+  /* ---------- Venue heading ---------- */
+  .venue-heading { display: flex; flex-direction: column; gap: 2px; }
+  .venue-heading .name {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(1.4rem, 2.6vw, 2rem);
+    text-transform: uppercase;
+    letter-spacing: 0.01em;
+    text-wrap: balance;
+  }
+  .venue-heading .meta {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--text-muted);
+  }
+
+  /* ---------- Hero: a static, centered, non-interactive picture — nothing overlays it ---------- */
   .hero {
     position: relative;
     border-radius: 22px;
@@ -188,65 +243,17 @@
     height: clamp(340px, 42vw, 540px);
     background: var(--bg-elevated);
   }
-  #map { position: absolute; inset: 0; }
-  .hero-scrim {
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(180deg, rgba(10,20,32,0.02) 0%, rgba(10,20,32,0.1) 55%, rgba(10,20,32,0.6) 100%);
-    pointer-events: none;
-    z-index: 450;
-  }
+  #map { position: absolute; inset: 0; cursor: default !important; }
+  #map .leaflet-marker-icon,
+  #map .leaflet-marker-shadow { cursor: default !important; }
 
-  .venue-tag {
-    position: absolute;
-    top: 20px; left: 20px;
-    z-index: 460;
-    font-family: var(--font-mono);
-    font-size: 0.7rem;
-    letter-spacing: 0.05em;
-    color: var(--text);
-    background: var(--bg-glass);
-    backdrop-filter: blur(10px);
-    border: 1px solid var(--line-strong);
-    padding: 7px 14px;
-    border-radius: 100px;
-    text-transform: uppercase;
-  }
-
-  .compass {
-    position: absolute;
-    top: 20px; right: 20px;
-    z-index: 460;
-    width: 118px; height: 118px;
-    border-radius: 50%;
-    background: var(--bg-glass);
-    backdrop-filter: blur(12px);
-    border: 1px solid var(--line-strong);
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
-    box-shadow: var(--shadow-soft);
-  }
-  .compass .needle { transition: transform 0.6s ease; }
-  .compass .reading {
-    font-family: var(--font-mono);
-    font-size: 0.6rem;
-    color: var(--text-muted);
-    white-space: nowrap;
-    max-width: 84px;
-    text-align: center;
-  }
-  .compass .reading b { color: var(--accent-atmo); font-weight: 600; }
-
-  .insight-card {
-    position: absolute;
-    left: 20px; right: 20px; bottom: 20px;
-    z-index: 460;
-    background: var(--bg-glass);
-    backdrop-filter: blur(16px);
-    border: 1px solid var(--line-strong);
+  /* ---------- Insight panel: a plain card below the picture, not an overlay on it ---------- */
+  .insight-panel {
+    background: var(--bg-elevated);
+    border: 1px solid var(--line);
     border-radius: 16px;
-    padding: 16px 20px;
+    padding: 18px 20px;
     box-shadow: var(--shadow-soft);
-    max-width: 620px;
   }
   .insight-top { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; min-height: 22px; }
   .pill-ai {
@@ -300,19 +307,27 @@
     margin-top: 8px;
   }
   footer .status { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
-
-  @media (prefers-reduced-motion: reduce) {
-    .compass .needle { transition: none; }
-  }
 </style>
 </head>
 <body>
+
+<canvas id="windFlowCanvas" class="wind-flow-canvas"></canvas>
 
 <div class="page">
 
   <div class="masthead">
     <div class="brand">
-      <span class="mark">GiddyUp<span>Sports</span></span>
+      <div class="brand-logo">
+        <span class="wordmark">
+          GiddyUpSp
+          <svg class="ball" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <circle cx="12" cy="12" r="9.5" />
+            <path d="M6.2 4.2c2.4 4 2.4 11.6 0 15.6" stroke-linecap="round" />
+            <path d="M17.8 4.2c-2.4 4-2.4 11.6 0 15.6" stroke-linecap="round" />
+          </svg>
+          rts
+        </span>
+      </div>
       <span class="kicker">Weather Intelligence</span>
     </div>
     <div class="sport-toggle" id="sportToggle" role="group" aria-label="Sport">
@@ -339,22 +354,19 @@
     <p>Pick a game above to see conditions and the AI read.</p>
   </div>
 
-  <div id="gameView" style="display:none; flex-direction: column; gap: 20px;">
+  <div id="gameView" style="display:none; flex-direction: column; gap: 16px;">
+    <div class="venue-heading">
+      <div class="name" id="venueTag">Loading venue…</div>
+      <div class="meta" id="venueMeta"></div>
+    </div>
+
     <div class="hero" id="heroCard">
       <div id="map"></div>
-      <div class="hero-scrim"></div>
-      <div class="venue-tag" id="venueTag">Loading venue…</div>
-      <div class="compass" id="windOverlay" title="Wind direction">
-        <svg id="windArrow" class="needle" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--accent-atmo)" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="12" y1="20" x2="12" y2="4"></line>
-          <polyline points="6 10 12 4 18 10"></polyline>
-        </svg>
-        <div class="reading" id="windReading">—</div>
-      </div>
-      <div class="insight-card">
-        <div class="insight-top" id="insightTop"></div>
-        <div class="insight-text" id="insightText">Loading AI read…</div>
-      </div>
+    </div>
+
+    <div class="insight-panel">
+      <div class="insight-top" id="insightTop"></div>
+      <div class="insight-text" id="insightText">Loading AI read…</div>
     </div>
 
     <div class="stats" id="dataStrip"></div>
@@ -383,14 +395,117 @@
   const dataStrip = document.getElementById("dataStrip");
   const insightText = document.getElementById("insightText");
   const insightTop = document.getElementById("insightTop");
-  const windArrow = document.getElementById("windArrow");
-  const windReading = document.getElementById("windReading");
+  const venueMeta = document.getElementById("venueMeta");
 
   let map, marker;
   let currentGames = [];
   let currentSport = "mlb";
 
   function setStatus(msg) { statusLine.textContent = msg || ""; }
+
+  // ---- Ambient wind-flow: arrows drifting across the whole page, same technique as the
+  // racing command center's track-wind visual (canvas particle streamlines), but here it runs
+  // behind the page content rather than over a photo, so nothing ever covers the stadium picture.
+  (function initWindFlow() {
+    const canvas = document.getElementById("windFlowCanvas");
+    const ctx = canvas.getContext("2d");
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const PARTICLE_COUNT = 110;
+    let particles = [];
+    let flowAngleDeg = 200; // gentle ambient default until real wind data loads
+    let flowSpeedMph = 6;
+    let strokeRgb = "111,215,255";
+
+    function hexToRgb(hex) {
+      const m = hex.trim().match(/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i);
+      return m ? `${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)}` : "111,215,255";
+    }
+    function refreshColor() {
+      strokeRgb = hexToRgb(getComputedStyle(document.documentElement).getPropertyValue("--accent-atmo"));
+    }
+
+    function resize() {
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = window.innerWidth * dpr;
+      canvas.height = window.innerHeight * dpr;
+      canvas.style.width = window.innerWidth + "px";
+      canvas.style.height = window.innerHeight + "px";
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    function flowVector(deg) {
+      const rad = (deg * Math.PI) / 180;
+      return { dx: Math.sin(rad), dy: -Math.cos(rad) };
+    }
+
+    function respawn(p) {
+      p.x = Math.random() * window.innerWidth;
+      p.y = Math.random() * window.innerHeight;
+      p.trail = [];
+      p.age = 0;
+      p.maxAge = 140 + Math.random() * 160;
+      p.variance = 0.75 + Math.random() * 0.5;
+    }
+
+    function seed() {
+      particles = Array.from({ length: PARTICLE_COUNT }, () => {
+        const p = {};
+        respawn(p);
+        p.age = Math.random() * p.maxAge; // stagger so they don't all respawn in sync
+        return p;
+      });
+    }
+
+    function step() {
+      const { dx, dy } = flowVector(flowAngleDeg);
+      const speedPx = 0.35 + Math.min(flowSpeedMph, 30) * 0.055;
+      ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+      for (const p of particles) {
+        p.x += dx * speedPx * p.variance;
+        p.y += dy * speedPx * p.variance;
+        p.age++;
+        p.trail.push({ x: p.x, y: p.y });
+        if (p.trail.length > 14) p.trail.shift();
+        if (p.age > p.maxAge || p.x < -40 || p.x > window.innerWidth + 40 || p.y < -40 || p.y > window.innerHeight + 40) {
+          respawn(p);
+          continue;
+        }
+        for (let i = 1; i < p.trail.length; i++) {
+          const a = p.trail[i - 1];
+          const b = p.trail[i];
+          const alpha = (i / p.trail.length) * 0.4;
+          ctx.strokeStyle = `rgba(${strokeRgb},${alpha})`;
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+        }
+      }
+    }
+
+    function loop() {
+      step();
+      requestAnimationFrame(loop);
+    }
+
+    window.setWindFlow = function (dirFromDeg, speedMph) {
+      flowAngleDeg = (dirFromDeg + 180) % 360; // flow shows where wind blows TOWARD
+      flowSpeedMph = speedMph;
+    };
+
+    refreshColor();
+    resize();
+    seed();
+    window.addEventListener("resize", resize);
+    matchMedia("(prefers-color-scheme: light)").addEventListener("change", refreshColor);
+
+    if (reduceMotion) {
+      for (let i = 0; i < 6; i++) step();
+    } else {
+      loop();
+    }
+  })();
 
   const ICONS = {
     temp: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0Z"/></svg>',
@@ -472,12 +587,24 @@
 
   function ensureMap(lat, lon) {
     if (!map) {
-      map = L.map("map", { zoomControl: false, attributionControl: false }).setView([lat, lon], 17);
+      // Fully static picture: every interaction handler off, so the stadium view can't be
+      // panned or zoomed — it just shows the venue, centered, and nothing else.
+      map = L.map("map", {
+        zoomControl: false,
+        attributionControl: false,
+        dragging: false,
+        scrollWheelZoom: false,
+        doubleClickZoom: false,
+        boxZoom: false,
+        keyboard: false,
+        touchZoom: false,
+        tap: false,
+      }).setView([lat, lon], 17);
       L.tileLayer(
         "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         { maxZoom: 19 }
       ).addTo(map);
-      marker = L.marker([lat, lon]).addTo(map);
+      marker = L.marker([lat, lon], { interactive: false }).addTo(map);
     } else {
       map.setView([lat, lon], 17);
       marker.setLatLng([lat, lon]);
@@ -523,9 +650,9 @@
     emptyState.style.display = "none";
     gameView.style.display = "flex";
     venueTag.textContent = `${game.venue || "Venue"}…`;
+    venueMeta.textContent = `${game.away} @ ${game.home}`;
     insightText.textContent = "Loading AI read…";
     insightTop.innerHTML = "";
-    windReading.innerHTML = "—";
     dataStrip.innerHTML = "";
     setStatus("Fetching conditions…");
     try {
@@ -533,13 +660,13 @@
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       ensureMap(data.venue.lat, data.venue.lon);
-      const suffix = sport === "mlb" ? `${data.venue.altitudeFt} FT` : data.venue.roofType.toUpperCase();
-      venueTag.textContent = `${data.venue.venue} · ${suffix}`;
+      const suffix = sport === "mlb" ? `${data.venue.altitudeFt} ft elevation` : `${data.venue.roofType} roof`;
+      venueTag.textContent = data.venue.venue;
+      venueMeta.textContent = `${game.away} @ ${game.home} · ${suffix}`;
       renderDataStrip(sport, data.weather, data.venue, data.score);
       renderLeanTop(sport, data.score);
       insightText.textContent = data.insight || "No insight generated.";
-      windArrow.style.transform = `rotate(${(data.weather.windFromDeg || 0) + 180}deg)`;
-      windReading.innerHTML = `<b>${data.score.windCompass || "—"}</b> ${data.weather.windSpeedMph.toFixed(1)}mph`;
+      if (window.setWindFlow) window.setWindFlow(data.weather.windFromDeg || 0, data.weather.windSpeedMph || 0);
       setStatus(`Updated ${new Date().toLocaleTimeString()}`);
     } catch (err) {
       insightText.textContent = `Could not load conditions: ${err.message}`;
