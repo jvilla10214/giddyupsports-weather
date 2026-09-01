@@ -120,29 +120,28 @@ async function fetchWeather(env, lat, lon) {
 
 async function narrate(env, sport, score, weather, venue) {
   const venueLabel = venue.venue;
+
+  // Indoor games (fixed dome, or a retractable roof assumed closed) always land on the same
+  // conclusion -- climate-controlled, wind/precip irrelevant to play -- so there's nothing for
+  // an AI call to add. Most are air-conditioned too, which is exactly why even the temperature
+  // reading isn't meaningful once you're indoors. Skip the model entirely and say so directly;
+  // this also means no more "gentle breeze inside a fixed dome" hallucinations (confirmed live
+  // on Tropicana Field before this fix), since there's no generation step left to hallucinate in.
+  if (score.roofClosed) {
+    const certainty = venue.roofType === "dome" ? "a fixed dome" : "a retractable roof (assumed closed today)";
+    return {
+      text: `${venueLabel} is played under ${certainty}. Conditions are climate-controlled, so wind, temperature, and precipitation have no bearing on today's game.`,
+      cached: false,
+    };
+  }
+
   const cacheKey = `insight:${sport}:${venueLabel}:${todayIso()}:${Math.round(weather.windSpeedMph)}:${Math.round(weather.tempF)}`;
   return cached(env, cacheKey, 6 * 60 * 60, async () => {
     if (!env.AI) return { text: "AI narration unavailable (no AI binding configured).", cached: false };
-
-    // score.roofClosed already zeroes wind out of the carry/passing math (see rules-engine.js),
-    // but the model still needs to be TOLD that explicitly — otherwise it happily invents a
-    // "gentle breeze" for a fixed dome using the raw (irrelevant) weather.windSpeedMph value.
-    // Confirmed live: Tropicana Field's insight fabricated wind effects before this fix.
-    const roofNote =
-      venue.roofType === "dome"
-        ? `${venueLabel} has a FIXED DOME roof that is always closed. Wind has zero effect on play here — do not mention wind, breeze, or gusts at all.`
-        : venue.roofType === "retractable"
-          ? `${venueLabel} has a retractable roof, assumed closed for today (its live status isn't available for free) — treat wind as having no effect on play, and don't describe a breeze or gusts as if they're reaching the field.`
-          : null;
-
     const prompt =
       sport === "mlb"
-        ? roofNote
-          ? `You are a concise baseball weather analyst. Venue: ${venueLabel}. ${roofNote} Conditions: ${weather.tempF}F, ${weather.humidityPct}% humidity. Rules-engine read: estimated carry ${score.carryFt}ft vs. a neutral day (temperature/humidity only, no wind), overall lean: ${score.scoringLean}. In 2-3 sentences, explain what this means for hitters and scoring today, focused on temperature/humidity, not wind. No disclaimers, no hedging filler.`
-          : `You are a concise baseball weather analyst. Venue: ${venueLabel}. Conditions: ${weather.tempF}F, ${weather.humidityPct}% humidity, wind ${weather.windSpeedMph}mph ${score.windCompass}. Rules-engine read: estimated carry ${score.carryFt}ft vs. a neutral day, wind is ${score.windZone}, overall lean: ${score.scoringLean}. In 2-3 sentences, explain what this means for hitters and scoring today. Be specific about field direction. No disclaimers, no hedging filler.`
-        : roofNote
-          ? `You are a concise NFL weather analyst. Venue: ${venueLabel}. ${roofNote} Conditions: ${weather.tempF}F, precip chance ${weather.precipProbPct}%. In 2-3 sentences, explain that passing and kicking are unaffected by weather today since play is indoors, and briefly note temperature/precip are irrelevant to the game itself. No disclaimers, no hedging filler.`
-          : `You are a concise NFL weather analyst. Venue: ${venueLabel}. Conditions: ${weather.tempF}F, wind ${weather.windSpeedMph}mph ${score.windCompass || ""}, precip chance ${weather.precipProbPct}%. Rules-engine read: wind tier ${score.windTier}, passing impact "${score.passingImpact}", field-goal range impact "${score.fgRangeImpact}". In 2-3 sentences, explain what this means for the passing game and kicking today. No disclaimers, no hedging filler.`;
+        ? `You are a concise baseball weather analyst. Venue: ${venueLabel}. Conditions: ${weather.tempF}F, ${weather.humidityPct}% humidity, wind ${weather.windSpeedMph}mph ${score.windCompass}. Rules-engine read: estimated carry ${score.carryFt}ft vs. a neutral day, wind is ${score.windZone}, overall lean: ${score.scoringLean}. In 2-3 sentences, explain what this means for hitters and scoring today. Be specific about field direction. No disclaimers, no hedging filler.`
+        : `You are a concise NFL weather analyst. Venue: ${venueLabel}. Conditions: ${weather.tempF}F, wind ${weather.windSpeedMph}mph ${score.windCompass || ""}, precip chance ${weather.precipProbPct}%. Rules-engine read: wind tier ${score.windTier}, passing impact "${score.passingImpact}", field-goal range impact "${score.fgRangeImpact}". In 2-3 sentences, explain what this means for the passing game and kicking today. No disclaimers, no hedging filler.`;
     try {
       const result = await env.AI.run("@cf/meta/llama-3.2-3b-instruct", {
         messages: [{ role: "user", content: prompt }],
