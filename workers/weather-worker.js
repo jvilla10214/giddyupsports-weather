@@ -290,10 +290,17 @@ async function narrate(env, sport, score, weather, venue) {
   const cacheKey = `insight:${sport}:${venueLabel}:${todayIso()}:${Math.round(weather.windSpeedMph)}:${Math.round(weather.tempF)}`;
   return cached(env, cacheKey, 6 * 60 * 60, async () => {
     if (!env.AI) return { text: "AI narration unavailable (no AI binding configured).", cached: false };
-    const handedNote =
-      score.handedness && score.handedness.favors !== "neutral"
-        ? ` Platoon note: right field is carrying ${Math.abs(score.handedness.deltaFt)}ft more than left field, which favors ${score.handedness.favors}-handed pull hitters tonight — mention this briefly.`
-        : "";
+    // Spelled out this explicitly (and redundantly) after a real failure: a smaller model
+    // confused "left-handed" with "left field" and narrated the wrong field entirely (said wind
+    // favored left field while the data and its own headline both said left-handed hitters --
+    // lefties pull to RIGHT field, so that was self-contradictory). Naming the benefiting field
+    // directly, more than once, and stating the wrong pairing to avoid closes that gap.
+    let handedNote = "";
+    if (score.handedness && score.handedness.favors !== "neutral") {
+      const pullField = score.handedness.favors === "left" ? "right field" : "left field";
+      const wrongField = score.handedness.favors === "left" ? "left field" : "right field";
+      handedNote = ` Platoon note: wind is adding ${Math.abs(score.handedness.deltaFt)}ft more carry to ${pullField} than the opposite field. ${score.handedness.favors === "left" ? "Left" : "Right"}-handed hitters pull toward ${pullField}, so say ${pullField} is getting the wind boost — do NOT say ${wrongField}, that would be backwards.`
+    }
     const prompt =
       sport === "mlb"
         ? `You are a concise baseball weather analyst. Venue: ${venueLabel}. Conditions: ${weather.tempF}F, ${weather.humidityPct}% humidity, wind ${weather.windSpeedMph}mph ${score.windCompass}. Rules-engine read: estimated carry ${score.carryFt}ft vs. a neutral day (left field ${score.fieldCarry.left}ft, center ${score.fieldCarry.center}ft, right field ${score.fieldCarry.right}ft), wind is ${score.windZone}, overall lean: ${score.scoringLean}.${handedNote} In 2-3 sentences, explain what this means for hitters and scoring today. Be specific about field direction. No disclaimers, no hedging filler.`
