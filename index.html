@@ -1,12 +1,12 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-sport="mlb">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>GiddyUpSports Weather Command Center</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Bebas+Neue&family=Roboto+Slab:wght@400;500;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
   /* ---------- Design tokens: dark ("stadium at night") is the default identity ---------- */
@@ -36,6 +36,11 @@
     --font-display: "Big Shoulders Display", system-ui, sans-serif;
     --font-body: "Manrope", system-ui, -apple-system, sans-serif;
     --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+
+    --card-border-width: 1px;
+    --radius-lg: 22px;
+    --radius-md: 16px;
+    --insight-border-color: var(--line);
   }
 
   @media (prefers-color-scheme: light) {
@@ -61,6 +66,66 @@
 
       --shadow: 0 20px 50px -26px rgba(15, 30, 46, 0.22);
       --shadow-soft: 0 10px 26px -18px rgba(15, 30, 46, 0.16);
+    }
+  }
+
+  /* ---------- MLB theme: "Vintage Diamond" — 1950s ballpark signage ----------
+     Floodlight (above) stays the NFL identity until a football-specific direction is chosen.
+     Cream/mustard/forest-green parchment by default; a dark override for night viewing. Setting
+     data-sport="mlb" on <html> swaps every token below in, and every component that already
+     reads var(--font-display) etc. re-skins automatically — no component CSS duplicated. */
+  html[data-sport="mlb"] {
+    --bg: #f2e2c0;
+    --bg-elevated: #f8ecd2;
+    --bg-elevated-2: #ecdcb4;
+    --bg-glass: rgba(248, 236, 210, 0.85);
+    --text: #2f2517;
+    --text-muted: #6b5a3d;
+    --text-faint: #94815a;
+    --line: #2f2517;
+    --line-strong: #2f2517;
+
+    --accent-atmo: #3d6e8a;
+    --accent-atmo-dim: #dde6ea;
+    --accent-live: #2f5233;
+    --accent-live-dim: #dde6da;
+    --accent-ai: #a5402f;
+    --accent-ai-dim: #f3ddd6;
+    --accent-warn: #a5402f;
+    --accent-warn-dim: #f3ddd6;
+
+    --shadow: 0 14px 34px -20px rgba(47, 37, 23, 0.35);
+    --shadow-soft: 0 8px 20px -14px rgba(47, 37, 23, 0.3);
+
+    --font-display: "Bebas Neue", sans-serif;
+    --font-body: "Roboto Slab", serif;
+    --font-mono: "Roboto Slab", serif;
+
+    --card-border-width: 2px;
+    --radius-lg: 14px;
+    --radius-md: 10px;
+    --insight-border-color: var(--accent-live);
+  }
+  @media (prefers-color-scheme: dark) {
+    html[data-sport="mlb"] {
+      --bg: #1c1810;
+      --bg-elevated: #231d13;
+      --bg-elevated-2: #2c2417;
+      --bg-glass: rgba(35, 29, 19, 0.85);
+      --text: #f2e2c0;
+      --text-muted: #b8a67e;
+      --text-faint: #8a7a58;
+      --line: #f2e2c0;
+      --line-strong: #f2e2c0;
+
+      --accent-atmo: #8fc3de;
+      --accent-atmo-dim: #22301f;
+      --accent-live: #7fae8e;
+      --accent-live-dim: #22301f;
+      --accent-ai: #e08871;
+      --accent-ai-dim: #3a1f18;
+      --accent-warn: #e08871;
+      --accent-warn-dim: #3a1f18;
     }
   }
 
@@ -170,32 +235,6 @@
   .sport-toggle button:disabled { color: var(--text-faint); cursor: default; opacity: 0.5; }
   .sport-toggle button:not(:disabled):not([aria-pressed="true"]):hover { color: var(--text); }
 
-  .game-picker {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    background: var(--bg-elevated);
-    border: 1px solid var(--line);
-    padding: 6px 8px 6px 16px;
-    border-radius: 100px;
-  }
-  .game-picker svg.gp-icon { flex: none; stroke: var(--text-faint); }
-  .game-picker select {
-    appearance: none;
-    -webkit-appearance: none;
-    border: none;
-    background: transparent;
-    color: var(--text);
-    font-family: var(--font-mono);
-    font-size: 0.82rem;
-    flex: 1;
-    padding: 8px 4px;
-    cursor: pointer;
-  }
-  .game-picker select:disabled { color: var(--text-faint); cursor: default; }
-  .game-picker select option { background: var(--bg-elevated); color: var(--text); }
-  .game-picker svg.gp-chev { flex: none; stroke: var(--text-faint); margin-right: 6px; }
-
   /* ---------- Empty state ---------- */
   .empty-state {
     display: flex;
@@ -216,6 +255,35 @@
   .empty-state .icon-ring svg { stroke: var(--accent-atmo); }
   .empty-state p { margin: 0; font-size: 0.95rem; }
 
+  /* ---------- Quick-look grid: every game on today's slate, front and center ---------- */
+  .games-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+  .game-card {
+    display: flex; flex-direction: column; gap: 8px; text-align: left;
+    background: var(--bg-elevated); border: var(--card-border-width) solid var(--line);
+    border-radius: var(--radius-md); padding: 14px 16px; cursor: pointer;
+    font: inherit; color: inherit; box-shadow: var(--shadow-soft);
+    transition: transform 0.12s ease, border-color 0.12s ease;
+  }
+  .game-card:hover { transform: translateY(-2px); border-color: var(--accent-atmo); }
+  .game-card .gc-time {
+    font-family: var(--font-mono); font-size: 0.66rem; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--text-faint);
+  }
+  .game-card .gc-matchup { font-family: var(--font-display); font-weight: 700; font-size: 1.2rem; letter-spacing: 0.01em; }
+  .game-card .gc-matchup em { font-style: normal; color: var(--text-faint); font-weight: 400; font-family: var(--font-body); margin: 0 4px; }
+  .game-card .gc-weather { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.76rem; color: var(--text-muted); min-height: 1.1em; }
+  .game-card .gc-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); flex: none; }
+  .game-card .gc-dot.good { background: var(--accent-live); }
+  .game-card .gc-dot.warn { background: var(--accent-ai); }
+  .game-card .gc-dot.bad { background: var(--accent-warn); }
+
+  .back-btn {
+    display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+    font-family: var(--font-mono); font-size: 0.76rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+    background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0;
+  }
+  .back-btn:hover { color: var(--text); }
+
   /* ---------- Venue heading ---------- */
   .venue-heading { display: flex; flex-direction: column; gap: 2px; }
   .venue-heading .name {
@@ -235,9 +303,9 @@
   /* ---------- Hero: a static, centered, non-interactive picture — nothing overlays it ---------- */
   .hero {
     position: relative;
-    border-radius: 22px;
+    border-radius: var(--radius-lg);
     overflow: hidden;
-    border: 1px solid var(--line);
+    border: var(--card-border-width) solid var(--line);
     box-shadow: var(--shadow);
     height: clamp(340px, 42vw, 540px);
     background: var(--bg-elevated);
@@ -249,8 +317,8 @@
   /* ---------- Insight panel: a plain card below the picture, not an overlay on it ---------- */
   .insight-panel {
     background: var(--bg-elevated);
-    border: 1px solid var(--line);
-    border-radius: 16px;
+    border: var(--card-border-width) solid var(--insight-border-color);
+    border-radius: var(--radius-md);
     padding: 18px 20px;
     box-shadow: var(--shadow-soft);
   }
@@ -279,8 +347,8 @@
 
   .chip {
     background: var(--bg-elevated);
-    border: 1px solid var(--line);
-    border-radius: 16px;
+    border: var(--card-border-width) solid var(--line);
+    border-radius: var(--radius-md);
     padding: 14px 16px;
     display: flex; flex-direction: column; gap: 8px;
     box-shadow: var(--shadow-soft);
@@ -336,22 +404,21 @@
     </div>
   </div>
 
-  <div class="game-picker">
-    <svg class="gp-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-    <select id="gameSelect" disabled>
-      <option value="">Loading schedule…</option>
-    </select>
-    <svg class="gp-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-  </div>
-
   <div id="emptyState" class="empty-state">
     <div class="icon-ring">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
     </div>
-    <p>Pick a game above to see conditions and the AI read.</p>
+    <p id="emptyStateText">Loading today's slate…</p>
   </div>
 
+  <div id="gamesGrid" class="games-grid" style="display:none;"></div>
+
   <div id="gameView" style="display:none; flex-direction: column; gap: 16px;">
+    <button class="back-btn" id="backBtn">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+      All games
+    </button>
+
     <div class="venue-heading">
       <div class="name" id="venueTag">Loading venue…</div>
       <div class="meta" id="venueMeta"></div>
@@ -385,10 +452,12 @@
     : "https://giddyupsports-weather.giddyupsports.workers.dev";
 
   const sportToggle = document.getElementById("sportToggle");
-  const gameSelect = document.getElementById("gameSelect");
   const statusLine = document.getElementById("statusLine");
   const emptyState = document.getElementById("emptyState");
+  const emptyStateText = document.getElementById("emptyStateText");
+  const gamesGrid = document.getElementById("gamesGrid");
   const gameView = document.getElementById("gameView");
+  const backBtn = document.getElementById("backBtn");
   const venueTag = document.getElementById("venueTag");
   const dataStrip = document.getElementById("dataStrip");
   const insightText = document.getElementById("insightText");
@@ -559,6 +628,8 @@
         startTimeUtc: ev.date,
         away: away?.team?.displayName,
         home: home?.team?.displayName,
+        awayAbbr: away?.team?.abbreviation || null,
+        homeAbbr: home?.team?.abbreviation || null,
         venue: comp?.venue?.fullName,
         venueKey: home?.team?.abbreviation || null,
         status: ev.status?.type?.description,
@@ -566,10 +637,44 @@
     });
   }
 
+  function gameCardHtml(g, i) {
+    const time = new Date(g.startTimeUtc).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    return `<button class="game-card" data-idx="${i}">
+      <div class="gc-time">${time}</div>
+      <div class="gc-matchup">${g.awayAbbr || g.away}<em>@</em>${g.homeAbbr || g.home}</div>
+      <div class="gc-weather" id="gcw-${i}"><span class="gc-dot"></span>…</div>
+    </button>`;
+  }
+
+  async function loadGridPreviews(sport, games) {
+    await Promise.all(
+      games.map(async (g, i) => {
+        try {
+          const res = await fetch(`${WORKER_BASE}/api/game?sport=${sport}&venueKey=${g.venueKey}&preview=1`);
+          const data = await res.json();
+          const el = document.getElementById(`gcw-${i}`);
+          if (!el || data.error) return;
+          let cls = "";
+          if (sport === "mlb") {
+            cls = data.score.scoringLean === "hitter-friendly" ? "good" : data.score.scoringLean === "pitcher-friendly" ? "warn" : "";
+          } else {
+            cls = data.score.windTier === "light" || data.score.windTier === "none (closed roof)" ? "good" : data.score.windTier === "moderate" ? "warn" : "bad";
+          }
+          el.innerHTML = `<span class="gc-dot ${cls}"></span>${Math.round(data.weather.tempF)}°F · ${Math.round(data.weather.windSpeedMph)}mph ${data.score.windCompass || ""}`;
+        } catch {
+          // leave the placeholder — a single game's preview failing shouldn't disrupt the grid
+        }
+      })
+    );
+  }
+
   async function loadSchedule(sport) {
     currentSport = sport;
-    gameSelect.disabled = true;
-    gameSelect.innerHTML = '<option value="">Loading schedule…</option>';
+    document.documentElement.dataset.sport = sport;
+    gameView.style.display = "none";
+    gamesGrid.style.display = "none";
+    emptyState.style.display = "flex";
+    emptyStateText.textContent = `Loading today's ${sport.toUpperCase()} slate…`;
     setStatus(`Fetching ${sport.toUpperCase()} schedule…`);
     try {
       let games;
@@ -583,21 +688,17 @@
       }
       currentGames = games.filter((g) => g.venueKey);
       if (!currentGames.length) {
-        gameSelect.innerHTML = '<option value="">No games found for today</option>';
+        emptyStateText.textContent = "No games on the slate right now.";
         setStatus("No games on the slate right now.");
         return;
       }
-      gameSelect.innerHTML = currentGames
-        .map((g, i) => {
-          const time = new Date(g.startTimeUtc).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-          return `<option value="${i}">${g.away} @ ${g.home} — ${time}</option>`;
-        })
-        .join("");
-      gameSelect.disabled = false;
+      gamesGrid.innerHTML = currentGames.map(gameCardHtml).join("");
+      emptyState.style.display = "none";
+      gamesGrid.style.display = "grid";
       setStatus(`${currentGames.length} games loaded.`);
-      loadGame(sport, currentGames[0]);
+      loadGridPreviews(sport, currentGames);
     } catch (err) {
-      gameSelect.innerHTML = '<option value="">Failed to load schedule</option>';
+      emptyStateText.textContent = `Could not load the schedule: ${err.message}`;
       setStatus(`Error: ${err.message}`);
     }
   }
@@ -663,8 +764,9 @@
       `<span class="insight-zone">${zone}</span>`;
   }
 
-  async function loadGame(sport, game) {
+  async function showDetail(sport, game) {
     emptyState.style.display = "none";
+    gamesGrid.style.display = "none";
     gameView.style.display = "flex";
     venueTag.textContent = `${game.venue || "Venue"}…`;
     venueMeta.textContent = `${game.away} @ ${game.home}`;
@@ -698,9 +800,16 @@
     loadSchedule(btn.dataset.sport);
   });
 
-  gameSelect.addEventListener("change", () => {
-    const g = currentGames[Number(gameSelect.value)];
-    if (g) loadGame(currentSport, g);
+  gamesGrid.addEventListener("click", (e) => {
+    const btn = e.target.closest(".game-card");
+    if (!btn) return;
+    const g = currentGames[Number(btn.dataset.idx)];
+    if (g) showDetail(currentSport, g);
+  });
+
+  backBtn.addEventListener("click", () => {
+    gameView.style.display = "none";
+    gamesGrid.style.display = "grid";
   });
 
   loadSchedule(currentSport);

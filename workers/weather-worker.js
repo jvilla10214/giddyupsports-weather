@@ -10,9 +10,14 @@
  *   - Workers AI bound as `AI` (no API key needed — it's a native Cloudflare binding)
  *
  * Routes (all GET, all CORS-open for the GitHub Pages frontend):
- *   /api/schedule?sport=mlb                      -> today's MLB games
- *   /api/game?sport=mlb&gameId=...&venueKey=...   -> weather + rules-engine score + AI insight
- *   /api/game?sport=nfl&gameId=...&venueKey=...   -> same, NFL
+ *   /api/schedule?sport=mlb                                 -> today's MLB games (includes both
+ *                                                               teams' abbreviations for the
+ *                                                               front-page quick-look grid)
+ *   /api/game?sport=mlb&venueKey=...                        -> weather + score + AI insight
+ *   /api/game?sport=mlb&venueKey=...&preview=1               -> same, minus the AI call (cheap,
+ *                                                               used to populate every card in
+ *                                                               the quick-look grid at once)
+ *   /api/game?sport=nfl&venueKey=...[&preview=1]             -> same, NFL
  *
  * NFL schedule is NOT fetched here — ESPN's scoreboard API blocks Cloudflare Worker IPs but
  * allows browser CORS requests, so the frontend fetches it client-side instead. See DECISIONS.md.
@@ -67,6 +72,8 @@ async function fetchMlbSchedule(env) {
           startTimeUtc: g.gameDate,
           away: g.teams?.away?.team?.name,
           home: g.teams?.home?.team?.name,
+          awayAbbr: MLB_TEAM_ID_TO_KEY[g.teams?.away?.team?.id] || null,
+          homeAbbr: venueKey,
           venue: g.venue?.name,
           venueKey,
           status: g.status?.detailedState,
@@ -135,14 +142,20 @@ async function narrate(env, sport, score, weather, venueLabel) {
 
 async function handleGame(env, sport, params) {
   const venueKey = params.get("venueKey");
+  const preview = params.get("preview") === "1";
   const stadiums = sport === "mlb" ? MLB_STADIUMS : NFL_STADIUMS;
   const venue = stadiums[venueKey];
   if (!venue) return json({ error: `Unknown venueKey "${venueKey}" for sport ${sport}` }, 400);
 
   const weather = await fetchWeather(env, venue.lat, venue.lon);
   const score = sport === "mlb" ? scoreMlbGame(weather, venue) : scoreNflGame(weather, venue);
-  const insight = await narrate(env, sport, score, weather, venue.venue);
 
+  // Preview mode (used by the front-page quick-look grid, one call per game on the slate) skips
+  // the AI narration call entirely -- no point spending Workers AI neurons on insights for games
+  // nobody's opened yet. The rules-engine score above is pure JS, so it's free either way.
+  if (preview) return json({ sport, venue, weather, score, insight: null });
+
+  const insight = await narrate(env, sport, score, weather, venue.venue);
   return json({ sport, venue, weather, score, insight: insight.text });
 }
 
