@@ -706,9 +706,11 @@
   }
 
   function gameCardHtml(g, i) {
-    const time = new Date(g.startTimeUtc).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    const d = new Date(g.startTimeUtc);
+    const date = d.toLocaleDateString([], { weekday: "short", month: "numeric", day: "numeric" });
+    const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
     return `<button class="game-card" data-idx="${i}">
-      <div class="gc-time">${time}</div>
+      <div class="gc-time">${date} &middot; ${time}</div>
       <div class="gc-matchup">${g.awayAbbr || g.away}<em>@</em>${g.homeAbbr || g.home}</div>
       <div class="gc-weather" id="gcw-${i}"><span class="gc-dot"></span>…</div>
     </button>`;
