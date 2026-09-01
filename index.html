@@ -76,15 +76,14 @@
   button, select { font: inherit; color: inherit; }
   :focus-visible { outline: 2px solid var(--accent-atmo); outline-offset: 2px; }
 
-  /* Ambient wind-flow layer: sits behind everything, drifting arrows across the whole page —
-     never over the stadium picture, which stays clean per the design brief. */
+  /* Wind-flow layer: arrows drifting across the aerial picture itself, same as the racing
+     command center's track-wind visual over the track photo. */
   .wind-flow-canvas {
-    position: fixed;
+    position: absolute;
     inset: 0;
     width: 100%; height: 100%;
     pointer-events: none;
-    z-index: 0;
-    opacity: 1;
+    z-index: 440;
   }
 
   .page {
@@ -311,8 +310,6 @@
 </head>
 <body>
 
-<canvas id="windFlowCanvas" class="wind-flow-canvas"></canvas>
-
 <div class="page">
 
   <div class="masthead">
@@ -362,6 +359,7 @@
 
     <div class="hero" id="heroCard">
       <div id="map"></div>
+      <canvas id="windFlowCanvas" class="wind-flow-canvas"></canvas>
     </div>
 
     <div class="insight-panel">
@@ -403,15 +401,17 @@
 
   function setStatus(msg) { statusLine.textContent = msg || ""; }
 
-  // ---- Ambient wind-flow: arrows drifting across the whole page, same technique as the
-  // racing command center's track-wind visual (canvas particle streamlines), but here it runs
-  // behind the page content rather than over a photo, so nothing ever covers the stadium picture.
+  // ---- Wind-flow: arrows drifting across the aerial picture, same technique as the racing
+  // command center's track-wind visual (canvas particle streamlines) — sized and clipped to
+  // the hero picture itself, not the whole page.
   (function initWindFlow() {
     const canvas = document.getElementById("windFlowCanvas");
+    const hero = document.getElementById("heroCard");
     const ctx = canvas.getContext("2d");
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const PARTICLE_COUNT = 220;
+    const PARTICLE_COUNT = 90;
     let particles = [];
+    let w = 0, h = 0;
     let flowAngleDeg = 200; // gentle ambient default until real wind data loads
     let flowSpeedMph = 6;
     let strokeRgb = "111,215,255";
@@ -425,11 +425,13 @@
     }
 
     function resize() {
+      w = hero.clientWidth;
+      h = hero.clientHeight;
       const dpr = window.devicePixelRatio || 1;
-      canvas.width = window.innerWidth * dpr;
-      canvas.height = window.innerHeight * dpr;
-      canvas.style.width = window.innerWidth + "px";
-      canvas.style.height = window.innerHeight + "px";
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+      canvas.style.width = w + "px";
+      canvas.style.height = h + "px";
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
 
@@ -439,11 +441,11 @@
     }
 
     function respawn(p) {
-      p.x = Math.random() * window.innerWidth;
-      p.y = Math.random() * window.innerHeight;
+      p.x = Math.random() * w;
+      p.y = Math.random() * h;
       p.trail = [];
       p.age = 0;
-      p.maxAge = 140 + Math.random() * 160;
+      p.maxAge = 70 + Math.random() * 90;
       p.variance = 0.75 + Math.random() * 0.5;
     }
 
@@ -457,25 +459,26 @@
     }
 
     function step() {
+      if (!w || !h) return;
       const { dx, dy } = flowVector(flowAngleDeg);
       const speedPx = 0.35 + Math.min(flowSpeedMph, 30) * 0.055;
-      ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+      ctx.clearRect(0, 0, w, h);
       for (const p of particles) {
         p.x += dx * speedPx * p.variance;
         p.y += dy * speedPx * p.variance;
         p.age++;
         p.trail.push({ x: p.x, y: p.y });
-        if (p.trail.length > 22) p.trail.shift();
-        if (p.age > p.maxAge || p.x < -40 || p.x > window.innerWidth + 40 || p.y < -40 || p.y > window.innerHeight + 40) {
+        if (p.trail.length > 18) p.trail.shift();
+        if (p.age > p.maxAge || p.x < -20 || p.x > w + 20 || p.y < -20 || p.y > h + 20) {
           respawn(p);
           continue;
         }
         for (let i = 1; i < p.trail.length; i++) {
           const a = p.trail[i - 1];
           const b = p.trail[i];
-          const alpha = (i / p.trail.length) * 0.9;
+          const alpha = (i / p.trail.length) * 0.85;
           ctx.strokeStyle = `rgba(${strokeRgb},${alpha})`;
-          ctx.lineWidth = 2.2;
+          ctx.lineWidth = 2;
           ctx.lineCap = "round";
           ctx.beginPath();
           ctx.moveTo(a.x, a.y);
@@ -486,7 +489,7 @@
         if (p.trail.length >= 2) {
           const head = p.trail[p.trail.length - 1];
           const rad = Math.atan2(dy, dx);
-          const size = 5;
+          const size = 4.5;
           ctx.fillStyle = `rgba(${strokeRgb},0.95)`;
           ctx.beginPath();
           ctx.moveTo(head.x + Math.cos(rad) * size, head.y + Math.sin(rad) * size);
@@ -511,7 +514,7 @@
     refreshColor();
     resize();
     seed();
-    window.addEventListener("resize", resize);
+    new ResizeObserver(resize).observe(hero);
     matchMedia("(prefers-color-scheme: light)").addEventListener("change", refreshColor);
 
     if (reduceMotion) {
