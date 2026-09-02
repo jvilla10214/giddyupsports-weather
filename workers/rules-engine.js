@@ -15,6 +15,15 @@ function degToCompass16(deg) {
   return dirs[Math.round(((deg % 360) + 360) % 360 / 22.5) % 16];
 }
 
+// Below ~3mph, wind direction has no dominant driving force and is effectively noise -- caught
+// live when an uncached query showed the reading swing ~180deg in under half an hour at Nationals
+// Park. Showing a specific compass letter ("ENE") at that speed reads as more precise/confident
+// than the data actually is, regardless of how fresh the fetch was. Same threshold already used
+// to zero out direction-based carry/passing effects in scoreMlbGame/scoreNflGame below.
+function windCompassOrVariable(weather) {
+  return weather.windSpeedMph < 3 ? "variable" : degToCompass16(weather.windFromDeg);
+}
+
 // Angle between two bearings, normalized to [-180, 180].
 function angleDiff(a, b) {
   let d = (a - b) % 360;
@@ -114,7 +123,7 @@ function scoreMlbGame(weather, venue) {
     handedness,
     windZone,
     windCarryFt: Math.round(cfWindCarryFt * 10) / 10,
-    windCompass: degToCompass16(weather.windFromDeg),
+    windCompass: windCompassOrVariable(weather),
     scoringLean,
     notes,
   };
@@ -166,11 +175,11 @@ function scoreNflGame(weather, venue) {
     sport: "NFL",
     roofClosed: false,
     windTier,
-    windCompass: degToCompass16(weather.windFromDeg),
+    windCompass: windCompassOrVariable(weather),
     passingImpact,
     fgRangeImpact,
     notes,
   };
 }
 
-export { scoreMlbGame, scoreNflGame, degToCompass16, angleDiff };
+export { scoreMlbGame, scoreNflGame, degToCompass16, angleDiff, windCompassOrVariable };

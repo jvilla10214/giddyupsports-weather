@@ -33,7 +33,7 @@
  */
 
 import { MLB_STADIUMS, NFL_STADIUMS, MLB_TEAM_ID_TO_KEY, MLB_KEY_TO_TEAM_ID } from "../data/stadiums.js";
-import { scoreMlbGame, scoreNflGame, degToCompass16 } from "./rules-engine.js";
+import { scoreMlbGame, scoreNflGame, windCompassOrVariable } from "./rules-engine.js";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -101,8 +101,14 @@ async function fetchMlbSchedule(env) {
 // ---- Weather ----
 
 async function fetchWeather(env, lat, lon) {
+  // Real case caught by the user at Nationals Park: an uncached direct query showed wind
+  // direction had swung from 66deg to 252deg -- nearly a full reversal -- in under 30 minutes,
+  // because wind that light (0.7-2.7mph) is inherently erratic with no dominant driving force.
+  // The 30min cache TTL meant the site could show a snapshot already stale by the time someone
+  // looked at it, disagreeing with what they could see/feel in real time. 10 minutes trades a bit
+  // more Open-Meteo traffic (still free, still keyless) for meaningfully fresher wind direction.
   const hourKey = new Date().toISOString().slice(0, 13);
-  return cached(env, `weather:${lat},${lon}:${hourKey}`, 30 * 60, async () => {
+  return cached(env, `weather:${lat},${lon}:${hourKey}`, 10 * 60, async () => {
     const url =
       `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
       `&current=temperature_2m,relative_humidity_2m,precipitation_probability,wind_speed_10m,wind_direction_10m` +
@@ -249,7 +255,7 @@ async function findAlmanacMatch(env, venue, teamId, todayWeather) {
     weather: {
       tempF: Math.round(best.weather.tempF),
       windSpeedMph: Math.round(best.weather.windSpeedMph),
-      windCompass: degToCompass16(best.weather.windFromDeg),
+      windCompass: windCompassOrVariable(best.weather),
     },
     game: {
       away: best.game.away,

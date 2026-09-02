@@ -6,6 +6,30 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## Weather cache: 30min -> 10min, and hide wind direction below 3mph
+**Date:** 2026-09-02
+**Decision:** `fetchWeather`'s KV cache TTL dropped from 30 minutes to 10. Separately,
+`windCompass` now returns the literal string `"variable"` instead of a specific compass letter
+whenever `windSpeedMph < 3` (same threshold already used to zero out direction-based carry/passing
+effects) — added as `windCompassOrVariable()` in rules-engine.js, used everywhere a compass
+direction is shown (both sports' live game endpoint and the historical almanac).
+**Why:** User reported Nationals Park showing positive field-carry numbers and a hitter-friendly
+writeup while wind was "clearly blowing in" in real life. Investigation: an uncached direct
+Open-Meteo query showed wind direction had swung from 66deg to 252deg — nearly a full reversal —
+in under 30 minutes, because wind that light (0.7-2.7mph observed) has no dominant driving force
+and is inherently erratic. The 30min cache meant the site could serve a snapshot already stale
+and reversed by the time someone looked at it. Shortening the cache reduces how large that window
+can get, but doesn't eliminate it (light wind can still flip within 10 minutes) — so the second
+half of the fix is showing "variable" instead of a specific direction at low speed, which is
+honest about the real uncertainty regardless of cache freshness. The underlying math was never
+wrong here (2.7mph is genuinely below the "meaningful enough to model" bar), the problem was
+presentation implying more precision/confidence than the data supports.
+**Alternatives considered:** Dropping the cache entirely (rejected — defeats the purpose of
+caching, and freshness beyond ~10min doesn't meaningfully change the "is this a real, sustained
+wind or just noise" question anyway); a much shorter TTL like 2-3 minutes (rejected — diminishing
+returns once "variable" is shown below 3mph regardless, and it would meaningfully increase
+Open-Meteo traffic for no real accuracy gain at that point).
+
 ## AI narration: stopped asking the model to restate per-field numbers or handedness
 **Date:** 2026-09-02
 **Decision:** The MLB insight prompt no longer asks the model to (a) state which batter
