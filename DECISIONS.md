@@ -6,6 +6,40 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## Backtest: does the carry model's predicted lean actually correlate with real scoring?
+**Date:** 2026-09-02
+**What:** `scripts/backtest-carry-model.js` — a standalone Node script (no Cloudflare bindings,
+run locally) that pulls a full season's real home-game results (MLB Stats API) and matching daily
+weather (Open-Meteo archive) for every open-air MLB venue, runs each day through the actual
+`scoreMlbGame` from `rules-engine.js`, and checks whether the model's predicted `carryFt`/
+`scoringLean` correlates with real combined runs. Same spirit as the racing app's standalone
+Weather Bias Predictor Score tuning script. Run with `node scripts/backtest-carry-model.js
+[season]` (defaults to last full year).
+**2025 season results** (22 open-air venues, 1,786 games):
+- Pearson correlation, predicted carryFt vs. actual combined runs: **r = 0.117**
+- By predicted lean: hitter-friendly n=933 mean 9.43 runs · neutral n=389 mean 8.60 · pitcher-
+  friendly n=464 mean 8.51 — correctly ordered (hitter-friendly > neutral > pitcher-friendly).
+- With Coors Field excluded (its ~40ft altitude bonus alone clears the hitter-friendly threshold
+  regardless of wind, so it's worth checking the effect isn't just one famous outlier park): still
+  r = 0.095, same correct ordering — the signal generalizes beyond Coors, just gets a bit weaker.
+- Isolating only the wind-driven component (excluding the fixed temp/altitude baseline every park
+  carries regardless of the day's wind) against real runs, all parks pooled: r = 0.084 — wind
+  timing itself, the thing this product actually claims to read game-by-game, has a real but modest
+  independent relationship to scoring.
+**Read on this:** the model has genuine, non-spurious, correctly-signed predictive validity — it is
+not noise, and it is not just repackaging a well-known park factor. But r≈0.08-0.12 means it
+explains roughly 1-1.5% of the variance in game scoring, which is honestly weak on its own — MLB
+scoring is dominated by starting pitching quality, lineup strength, and other factors miles bigger
+than same-day wind. This is the expected order of magnitude for a single weather signal against a
+noisy outcome, not a red flag, but it's real information for how much confidence a user should put
+in "hitter-friendly" as a standalone signal: real tilt, not a strong prediction.
+**Not changed as a result of this pass:** the ±12ft hitter/pitcher-friendly threshold in
+`scoreMlbGame` is still the original hand-derived physics estimate, not fit to this data. Real
+outcome data now exists to inform whether that threshold is well-placed (e.g. checking what
+percentile of the real carryFt distribution 12ft actually represents) — a natural next step, but a
+big enough decision (changes what "hitter-friendly" means site-wide) that it wasn't done
+unilaterally here.
+
 ## Fixed: outdoor temp/humidity leaking into carryFt behind a closed roof
 **Date:** 2026-09-02
 **Decision:** `scoreMlbGame`'s `baseCarryFt` now only adds the temperature/humidity component when
