@@ -356,7 +356,13 @@ async function narrate(env, sport, score, weather, venue) {
     };
   }
 
-  const cacheKey = `insight:${sport}:${venueLabel}:${todayIso()}:${Math.round(weather.windSpeedMph)}:${Math.round(weather.tempF)}`;
+  // Direction has to be part of the key, not just speed/temp -- a swing from "blowing out toward
+  // right field" to "blowing in from right field" can happen with speed/temp barely moving (the
+  // Nationals Park case that motivated the 10min weather-cache TTL below), which would otherwise
+  // leave a stale, direction-wrong insight served for up to 6hrs. windCompass already folds
+  // "variable" (sub-3mph, no dominant direction) into one bucket, so this doesn't over-fragment
+  // the cache on direction noise at low speed.
+  const cacheKey = `insight:${sport}:${venueLabel}:${todayIso()}:${Math.round(weather.windSpeedMph)}:${Math.round(weather.tempF)}:${score.windCompass || score.windTier || "na"}`;
   return cached(env, cacheKey, 6 * 60 * 60, async () => {
     if (!env.AI) return { text: "AI narration unavailable (no AI binding configured).", cached: false };
     // Gave up trying to prompt-engineer the model into correctly pairing handedness with field
@@ -394,13 +400,23 @@ async function narrate(env, sport, score, weather, venue) {
     // never wrong), so the model's only job is the single windZone phrase (one string, not three
     // numbers to pair up) and the overall carry/lean -- much smaller surface area to get wrong.
     const isCalm = score.windZone === "calm";
+    // Fifth real failure, live-caught during this audit at Nationals Park: even with an explicit
+    // "blowing TOWARD the SSW, not where it's coming from" instruction in the prompt, the model's
+    // own free-text sentence still said "...from the southwest" -- flatly backwards (SSW is where
+    // the wind was headed; it was blowing FROM the north). Explaining the FROM/TOWARD distinction
+    // to the model and trusting it to hold that distinction while composing a fresh sentence didn't
+    // work, same class of failure as the field/handedness scrambling above. windZone ("blowing in
+    // from left field" / "blowing out toward right field") already states direction unambiguously
+    // in plain English with the correct preposition baked in by deterministic code -- so the raw
+    // compass letter is no longer given to the model to rephrase at all. It's still shown in the UI
+    // stat chips directly from score.windCompass, just never passed through the AI's own wording.
     const mlbWindLine = isCalm
       ? `Wind is negligible today — under 3mph, or not meaningfully directional — so carry is the same in every direction: ${score.carryFt}ft vs. a neutral day, from temperature/humidity alone. Do NOT say balls carry farther to any particular field or mention a wind direction advantage — there isn't one today.`
-      : `Wind is ${score.windZone}, ${weather.windSpeedMph}mph ${score.windCompass} — this is a ${score.carryFt < 0 ? "REDUCTION in carry (wind is suppressing distance, use words like 'reducing' or 'cutting down' carry toward that field, not just 'carry to' that field, which reads as a gain)" : "an INCREASE in carry (wind is adding distance, 'adding' or 'boosting' carry toward that field is accurate)"}. Overall estimated carry vs. a neutral day: ${score.carryFt}ft. Mention the wind direction (${score.windZone}) in your answer, but do NOT state specific distance numbers for individual fields (left/center/right) — those are already shown separately in the UI and you have gotten them scrambled before. Talk about the wind direction and overall carry only.`;
+      : `Wind is ${score.windZone} at ${weather.windSpeedMph}mph — this is a ${score.carryFt < 0 ? "REDUCTION in carry (wind is suppressing distance, use words like 'reducing' or 'cutting down' carry toward that field, not just 'carry to' that field, which reads as a gain)" : "an INCREASE in carry (wind is adding distance, 'adding' or 'boosting' carry toward that field is accurate)"}. Overall estimated carry vs. a neutral day: ${score.carryFt}ft. Use the exact phrase "${score.windZone}" verbatim when describing wind direction — do NOT invent your own compass direction, cardinal letters, or a "from the [direction]" phrasing; the phrase given already states direction correctly. Also do NOT state specific distance numbers for individual fields (left/center/right) — those are already shown separately in the UI and you have gotten them scrambled before. Talk about the wind direction and overall carry only.`;
     const prompt =
       sport === "mlb"
         ? `You are a concise baseball weather analyst. Venue: ${venueLabel}. Conditions: ${weather.tempF}F, ${weather.humidityPct}% humidity. ${mlbWindLine} Overall lean: ${score.scoringLean}.${handedNote} In 2-3 sentences, explain in plain language what this means for hitters and scoring today. No disclaimers, no hedging filler.`
-        : `You are a concise NFL weather analyst. Venue: ${venueLabel}. Conditions: ${weather.tempF}F, wind ${weather.windSpeedMph}mph ${score.windCompass || ""}, precip chance ${weather.precipProbPct}%. Rules-engine read: wind tier ${score.windTier}, passing impact "${score.passingImpact}", field-goal range impact "${score.fgRangeImpact}". In 2-3 sentences, explain what this means for the passing game and kicking today. No disclaimers, no hedging filler.`;
+        : `You are a concise NFL weather analyst. Venue: ${venueLabel}. Conditions: ${weather.tempF}F, wind at ${weather.windSpeedMph}mph, precip chance ${weather.precipProbPct}%. Rules-engine read: wind tier ${score.windTier}, passing impact "${score.passingImpact}", field-goal range impact "${score.fgRangeImpact}". Do NOT state a compass direction or cardinal letter for the wind — none is reliably known, so only describe speed/tier and its effect. In 2-3 sentences, explain what this means for the passing game and kicking today. No disclaimers, no hedging filler.`;
     try {
       const result = await env.AI.run("@cf/meta/llama-3.2-3b-instruct", {
         messages: [{ role: "user", content: prompt }],

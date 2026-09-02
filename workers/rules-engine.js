@@ -20,8 +20,18 @@ function degToCompass16(deg) {
 // Park. Showing a specific compass letter ("ENE") at that speed reads as more precise/confident
 // than the data actually is, regardless of how fresh the fetch was. Same threshold already used
 // to zero out direction-based carry/passing effects in scoreMlbGame/scoreNflGame below.
+//
+// weather.windFromDeg is the meteorological convention: the direction wind is blowing FROM. This
+// function reports the opposite -- the direction it's blowing TOWARD, i.e. which way it's actually
+// pushing a fly ball or a pass -- since that's what every carry/passing effect in this app is
+// described in terms of ("blowing out toward right field") and what a general audience reads
+// intuitively, without needing to mentally flip a "from" compass letter by 180deg. The carry/
+// passing math (windCarryAt below, and the frontend's wind-flow arrows) already computes this
+// TOWARD vector internally; this is just the one place a human-readable label gets built from it.
 function windCompassOrVariable(weather) {
-  return weather.windSpeedMph < 3 ? "variable" : degToCompass16(weather.windFromDeg);
+  if (weather.windSpeedMph < 3) return "variable";
+  const towardDeg = (weather.windFromDeg + 180) % 360;
+  return degToCompass16(towardDeg);
 }
 
 // Angle between two bearings, normalized to [-180, 180].

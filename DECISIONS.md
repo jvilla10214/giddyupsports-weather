@@ -6,6 +6,48 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## Wind-direction audit: fixed a real FROM/TOWARD bug in the human-readable label, and a 5th AI phrasing failure
+**Date:** 2026-09-02
+**Decision:** Systematically grepped every use of `windFromDeg`/`windCompass`/`blowsToward` end to
+end (carry math, wind-arrow animation, compass label, both AI prompts, cache key) in response to
+"make sure the AI calls are synced up with wind direction (the direction the wind is blowing, NOT
+where it is coming from)." Found and fixed two real bugs:
+1. `windCompassOrVariable()` — the function producing the human-readable compass letter shown in
+   stat chips, grid previews, the almanac card, and fed into both AI prompts — was computing
+   `degToCompass16(weather.windFromDeg)`, i.e. the direction wind is blowing FROM, while every other
+   part of the app (carry math, wind-flow arrows) had always correctly used the TOWARD vector. Fixed
+   by converting FROM->TOWARD before computing the letter, matching `windCarryAt`'s existing
+   `(windFromDeg + 180) % 360` conversion.
+2. The AI insight cache key (`insight:{sport}:{venue}:{date}:{speed}:{temp}`) never included
+   direction, only rounded speed/temp. Since direction can flip (e.g. onshore to offshore) without
+   speed or temp moving enough to change the rounded key — exactly the kind of swing already proven
+   to happen within 30 minutes at Nationals Park — a stale, direction-wrong insight could be served
+   for up to its full 6hr cache TTL. Fixed by appending `score.windCompass` (falls back to
+   `windTier` for NFL, which doesn't compute a compass letter) to the key.
+**Fifth AI narration failure found live during verification:** even after fix #1, and even with an
+explicit "blowing TOWARD the SSW... not where it's coming from" clause in the prompt, the model's
+own generated sentence for Nationals Park said "...from the southwest" — backwards (SSW was where
+the wind was headed; it was blowing FROM the north). Explaining the FROM/TOWARD distinction and
+trusting the model to preserve it while composing a fresh sentence didn't hold, the same class of
+failure as the four earlier field/handedness-scrambling incidents documented below. Fixed the same
+way those were fixed: stopped giving the model the raw compass letter to rephrase at all. `windZone`
+(e.g. "blowing in from left field") already states direction unambiguously in plain English with
+the correct preposition baked in by deterministic code, so the prompt now says "use the exact phrase
+[windZone] verbatim... do NOT invent your own compass direction, cardinal letters, or a 'from the
+[direction]' phrasing." The NFL prompt no longer receives a compass letter either (NFL doesn't have
+a per-field breakdown to hang direction off of, so it added risk with no informational value) — it
+was told explicitly not to state a compass direction and to describe speed/tier effects only. The
+raw compass letter is still shown in the UI directly from `score.windCompass`, deterministic and
+correct — it's just never passed through the AI's own wording anymore.
+**Verified live** post-deploy across three real games with real wind (Fenway 12.7mph blowing in from
+RF, Nationals Park 6.7mph blowing in from LF, Coors Field 8.1mph blowing in from RF/adding carry):
+all three insights correctly framed reduction vs. increase, matched `windZone`, and contained zero
+invented compass letters or "from the [direction]" phrasing.
+**Broader audit, no other issues found:** re-checked cache TTLs (weather 10min, schedule 15min,
+insight 6hr, historical/NWS-station-lookup 60-90 days, almanac 24hr) — all still reasonable for
+their data's actual volatility, no changes needed. Re-checked schedule freshness and roof-status
+handling — unchanged from prior audits, still correct.
+
 ## Wind source: real NWS station observations preferred over Open-Meteo's nowcast
 **Date:** 2026-09-02
 **Decision:** `fetchWeather` now tries a real NWS observation station (nearest to the venue, found
