@@ -592,6 +592,15 @@
     ? "http://localhost:8787"
     : "https://giddyupsports-weather.giddyupsports.workers.dev";
 
+  // Aerial-view framing: half-extent in real-world meters around the venue's lat/lon, fed to
+  // fitBounds (see ensureMap) so the picture always shows the same physical area regardless of
+  // container size -- a fixed zoom level looked right on desktop but cropped the stadium on
+  // mobile's smaller container. Sized separately per sport since NFL stadiums (huge dome roof
+  // structures especially -- SoFi Stadium's roof alone runs ~330m/1,000ft+ long) are real-world
+  // larger than MLB parks on average. Values measured live off the largest venue in each sport
+  // (Coors Field for MLB, SoFi Stadium for NFL) so every smaller venue also fits with margin.
+  const STADIUM_HALF_EXTENT_M = { mlb: 95, nfl: 190 };
+
   const sportToggle = document.getElementById("sportToggle");
   const statusLine = document.getElementById("statusLine");
   const emptyState = document.getElementById("emptyState");
@@ -877,15 +886,21 @@
     }
   }
 
-  function ensureMap(lat, lon) {
-    // Zoomed in tight enough that the stadium bowl fills most of the frame, not the surrounding
-    // city -- checked live against Great American Ball Park (large modern bowl), Fenway Park
-    // (much smaller, irregular urban footprint), and Coors Field (large, sprawling) to find a
-    // single zoom that reads as "close-up on the stadium" across very different real footprint
-    // sizes, since there's no per-venue footprint data to fit bounds exactly. A compact park like
-    // Fenway will still frame a bit looser than a large one like Coors at this same zoom -- that's
-    // the real-size tradeoff of one shared zoom level, not a bug.
-    const STADIUM_ZOOM = 18.4;
+  // Converts a real-world half-extent (meters) around a point into a lat/lng box, for fitBounds.
+  // A fixed zoom level only frames correctly at the one container size/aspect it was tuned
+  // against -- checked live and confirmed it breaks on mobile, where the hero picture is both
+  // narrower AND shorter in absolute pixels than desktop, so the same zoom shows meaningfully
+  // less real-world area and crops the stadium. fitBounds with a real-world-sized box instead
+  // guarantees the same physical area is always fully visible, whatever the container's size or
+  // aspect ratio -- mobile just zooms out further to fit the same box, rather than cropping it.
+  function metersToLatLngBox(lat, lon, halfExtentM) {
+    const dLat = halfExtentM / 111320;
+    const dLon = halfExtentM / (111320 * Math.cos((lat * Math.PI) / 180));
+    return L.latLngBounds([lat - dLat, lon - dLon], [lat + dLat, lon + dLon]);
+  }
+
+  function ensureMap(lat, lon, halfExtentM) {
+    const bounds = metersToLatLngBox(lat, lon, halfExtentM);
     if (!map) {
       // Fully static picture: every interaction handler off, so the stadium view can't be
       // panned or zoomed — it just shows the venue, centered, and nothing else.
@@ -899,17 +914,23 @@
         keyboard: false,
         touchZoom: false,
         tap: false,
-      }).setView([lat, lon], STADIUM_ZOOM);
+      }).fitBounds(bounds);
       L.tileLayer(
         "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         { maxZoom: 19 }
       ).addTo(map);
       marker = L.marker([lat, lon], { interactive: false }).addTo(map);
     } else {
-      map.setView([lat, lon], STADIUM_ZOOM);
+      map.fitBounds(bounds);
       marker.setLatLng([lat, lon]);
     }
-    setTimeout(() => map.invalidateSize(), 150);
+    // fitBounds needs the container's real on-screen size to pick the right zoom -- if the hero
+    // was just made visible (display:none -> flex) the browser may not have reflowed yet, so this
+    // re-measures and re-fits once that's settled, same as the invalidateSize delay this replaced.
+    setTimeout(() => {
+      map.invalidateSize();
+      map.fitBounds(bounds, { animate: false });
+    }, 150);
   }
 
   function renderDataStrip(sport, weather, venue, score) {
@@ -1062,7 +1083,7 @@
       const res = await fetch(`${WORKER_BASE}/api/game?sport=${sport}&venueKey=${game.venueKey}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      ensureMap(data.venue.lat, data.venue.lon);
+      ensureMap(data.venue.lat, data.venue.lon, STADIUM_HALF_EXTENT_M[sport]);
       const suffix =
         sport === "mlb"
           ? `${data.venue.altitudeFt} ft elevation${data.venue.roofType !== "open" ? ` · ${data.venue.roofType} roof` : ""}`

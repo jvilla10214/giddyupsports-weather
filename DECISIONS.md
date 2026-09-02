@@ -6,20 +6,34 @@ racing command center's `DECISIONS.md`.
 
 ---
 
-## Hero picture: smaller on-screen, zoomed in much tighter on the stadium
+## Hero picture: smaller on-screen, zoomed in tight — via fitBounds, not a fixed zoom level
 **Date:** 2026-09-02
 **Decision:** `.hero` height reduced from `clamp(340px, 42vw, 540px)` to `clamp(220px, 28vw,
-360px)`, and `STADIUM_ZOOM` (Leaflet zoom on the aerial view) raised from 17.4 to 18.4.
-**Why:** Requested directly — the picture was taking up too much screen space and the stadium
-read as a small part of a wider aerial view rather than the clear subject.
-**Tuning note:** checked live (not just computed) against three very differently-sized real
-footprints — Great American Ball Park (large modern bowl), Fenway Park (much smaller, irregular
-urban footprint hemmed in by streets), and Coors Field (large, sprawling) — since there's no
-per-venue footprint/bounds data to fit each stadium exactly (`lat`/`lon` in `data/stadiums.js` are
-venue centroids, not survey-grade). 18.4 reads as a tight, dominant close-up on all three; a small
-park like Fenway frames a little looser than a large one like Coors at the same zoom, which is the
-real-size tradeoff of a single shared zoom level rather than a bug. Revisit with per-venue zoom or
-real footprint bounds if a specific park still looks off.
+360px)`. The aerial map's framing changed from a fixed Leaflet zoom level to `map.fitBounds()`
+against a real-world box built from a per-sport half-extent in meters (`STADIUM_HALF_EXTENT_M =
+{ mlb: 95, nfl: 190 }`, see `metersToLatLngBox`/`ensureMap` in `index.html`) centered on the venue.
+**Why:** Requested directly, in two rounds. First round: the picture was taking up too much screen
+space and the stadium read as a small part of a wider aerial view. A fixed zoom (first landed on
+18.4, checked live against Great American Ball Park/Fenway/Coors Field) fixed that on desktop. But
+checking NFL stadiums at that same zoom (per the follow-up request "check other stadiums in NFL
+too... crop it so the entire stadium is visible") showed SoFi Stadium's roof cropped down to
+unrecognizable texture — NFL stadiums, especially large domes, are real-world bigger than MLB parks
+on average, so one shared zoom couldn't fit both sports. Dropping to a looser NFL-only zoom (17.0)
+fixed that, but checking mobile (per the same request) then showed MLB cropping too: the hero
+container is both narrower AND shorter in absolute pixels on a phone than on desktop, so the same
+zoom level shows meaningfully less real-world area there, cropping stadiums that fit fine on
+desktop — a fixed zoom level only ever frames correctly at the one container size it was tuned
+against.
+**Fix:** replaced fixed zoom with `fitBounds` against a fixed real-world box (in meters, not
+pixels/zoom) around each venue. This guarantees the same physical area is always fully visible
+regardless of container size or aspect ratio — mobile just zooms out further automatically to fit
+the same box, rather than cropping it. Box sizes were measured live off the largest venue in each
+sport (Coors Field for MLB, SoFi Stadium for NFL) so every smaller venue also fits with margin.
+**Verified live:** desktop and mobile (375×812), MLB (Great American Ball Park, Fenway, Coors) and
+NFL (Lumen Field, SoFi, Soldier Field, Ford Field, AT&T Stadium, Allegiant Stadium, Bank of America
+Stadium) — no cropping on any of them, including known-oddly-shaped Soldier Field. `lat`/`lon` in
+`data/stadiums.js` are still venue centroids, not survey-grade, so a specific park could still be
+off-center within its box; revisit with real per-venue footprint data if one looks wrong.
 
 ## Almanac: aggregate across all similar-weather games, not just the single closest match
 **Date:** 2026-09-02
