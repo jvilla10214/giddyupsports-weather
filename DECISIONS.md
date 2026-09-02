@@ -6,6 +6,40 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## Wind/weather: point-forecast at scheduled game time, not always "right now"
+**Date:** 2026-09-02
+**Decision:** `fetchWeather(env, lat, lon, targetTimeIso)` now takes the game's scheduled start
+time (the schedule's own `startTimeUtc`, passed through from the frontend on every `/api/game` and
+`/api/almanac` call). When the target is more than ~90 minutes out, it fetches Open-Meteo's hourly
+forecast (`forecast_days=16`, cached per venue per hour so every game at a venue shares one fetch)
+and picks the hour bucket closest to the scheduled start. Within ~90 minutes of start (or for a
+game already underway/past), it falls back to the existing current-conditions path (NWS live
+station reading preferred, Open-Meteo nowcast as fallback) unchanged.
+**Why:** requested directly, from a self-audit ("more accurate AI weather predictions"). Previously
+every request — whether checked at 2pm for a 7:40pm game or checked at 7:35pm right before first
+pitch — got the exact same "right now" reading. Checking a night game hours ahead of time wasn't
+predicting anything; it was describing an afternoon that has nothing to do with game conditions.
+**Guardrails:** if the picked forecast hour is still more than 3hrs from the actual target (only
+possible if a game is scheduled further out than the 16-day forecast window, or the target time is
+otherwise unparseable), the forecast is treated as unavailable and it falls back to current
+conditions — better than confidently mislabeling a different day's weather as game time.
+**AI narration:** the model was telling users these were "current conditions" even when they were a
+forecast for hours later — accurate numbers, misleading framing. Fixed by explicitly telling it
+whether to describe the numbers as "current conditions" or "the forecast for game time"
+(`conditionsLabel` in `narrate()`) rather than leaving that framing to guesswork. Insight cache key
+also now includes the forecast/current flag, since rounded speed/temp/direction could coincidentally
+match across that transition without busting the key on their own.
+**Known limitation:** forecasts beyond ~7-10 days are meteorologically low-skill (closer to
+climatology than prediction) — Open-Meteo will still return a number for a game 12 days out, and
+the UI shows it as a forecast, but no confidence/uncertainty framing is surfaced yet. Not solved
+here; a future pass could scale the "forecast" language by lead time, or add a real Open-Meteo
+uncertainty/ensemble read for far-out games.
+**Not done here:** the current-conditions path prefers a real NWS station observation over
+Open-Meteo's nowcast (see the NWS decision below); the forecast path uses Open-Meteo only. NWS also
+publishes gridpoint hourly forecasts, which would be a natural next upgrade in the same spirit, but
+that's a meaningfully larger addition (different response shape, a new gridpoint lookup) — scoped
+out of this pass to keep it contained.
+
 ## Hero picture: smaller on-screen, zoomed in tight — via fitBounds, not a fixed zoom level
 **Date:** 2026-09-02
 **Decision:** `.hero` height reduced from `clamp(340px, 42vw, 540px)` to `clamp(220px, 28vw,

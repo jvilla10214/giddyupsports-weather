@@ -832,7 +832,7 @@
     await Promise.all(
       games.map(async (g, i) => {
         try {
-          const res = await fetch(`${WORKER_BASE}/api/game?sport=${sport}&venueKey=${g.venueKey}&preview=1`);
+          const res = await fetch(`${WORKER_BASE}/api/game?sport=${sport}&venueKey=${g.venueKey}&preview=1&startTimeUtc=${encodeURIComponent(g.startTimeUtc)}`);
           const data = await res.json();
           const el = document.getElementById(`gcw-${i}`);
           if (!el || data.error) return;
@@ -1028,7 +1028,7 @@
     almanacCard.style.display = "block";
     almanacBody.innerHTML = "Searching 15 years of history…";
     try {
-      const res = await fetch(`${WORKER_BASE}/api/almanac?sport=mlb&venueKey=${game.venueKey}`);
+      const res = await fetch(`${WORKER_BASE}/api/almanac?sport=mlb&venueKey=${game.venueKey}&startTimeUtc=${encodeURIComponent(game.startTimeUtc)}`);
       const data = await res.json();
       if (data.error || !data.aggregate || !data.aggregate.sampleSize) {
         almanacBody.textContent = "No comparable historical home games found.";
@@ -1080,7 +1080,7 @@
     setStatus("Fetching conditions…");
     loadAlmanac(sport, game); // fire-and-forget, doesn't block the main view
     try {
-      const res = await fetch(`${WORKER_BASE}/api/game?sport=${sport}&venueKey=${game.venueKey}`);
+      const res = await fetch(`${WORKER_BASE}/api/game?sport=${sport}&venueKey=${game.venueKey}&startTimeUtc=${encodeURIComponent(game.startTimeUtc)}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       ensureMap(data.venue.lat, data.venue.lon, STADIUM_HALF_EXTENT_M[sport]);
@@ -1089,7 +1089,10 @@
           ? `${data.venue.altitudeFt} ft elevation${data.venue.roofType !== "open" ? ` · ${data.venue.roofType} roof` : ""}`
           : `${data.venue.roofType} roof`;
       venueTag.textContent = data.venue.venue;
-      venueMeta.textContent = `${game.away} @ ${game.home} · ${suffix}`;
+      const forecastNote = data.weather.isForecast
+        ? ` · conditions forecast for ${new Date(data.weather.forecastForIso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} (game time)`
+        : "";
+      venueMeta.textContent = `${game.away} @ ${game.home} · ${suffix}${forecastNote}`;
       renderDataStrip(sport, data.weather, data.venue, data.score);
       renderLeanTop(sport, data.score);
       renderFieldCarry(sport, data.score);

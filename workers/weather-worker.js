@@ -13,12 +13,18 @@
  *   /api/schedule?sport=mlb                                 -> today's MLB games (includes both
  *                                                               teams' abbreviations for the
  *                                                               front-page quick-look grid)
- *   /api/game?sport=mlb&venueKey=...                        -> weather + score + AI insight
+ *   /api/game?sport=mlb&venueKey=...[&startTimeUtc=...]      -> weather + score + AI insight.
+ *                                                               startTimeUtc (from the schedule's
+ *                                                               own game object) gets a point-
+ *                                                               forecast for that hour instead of
+ *                                                               right-now conditions when the game
+ *                                                               is >90min out; omitted or a near/
+ *                                                               past time uses current conditions.
  *   /api/game?sport=mlb&venueKey=...&preview=1               -> same, minus the AI call (cheap,
  *                                                               used to populate every card in
  *                                                               the quick-look grid at once)
  *   /api/game?sport=nfl&venueKey=...[&preview=1]             -> same, NFL
- *   /api/almanac?sport=mlb&venueKey=...                      -> aggregate across every home game
+ *   /api/almanac?sport=mlb&venueKey=...[&startTimeUtc=...]   -> aggregate across every home game
  *                                                               at this venue (last 15 years) whose
  *                                                               weather closely matched today's --
  *                                                               avg combined runs/HRs across that
@@ -149,7 +155,79 @@ async function fetchNwsWind(env, stationId) {
   });
 }
 
-async function fetchWeather(env, lat, lon) {
+// Hourly point-forecast, cached once per venue per hour (not per specific game/target time) so
+// every game at a venue on a given day shares one fetch -- the right hour is picked out of the
+// cached array afterward. `timezone=UTC` keeps hourly.time in UTC (no offset suffix; Open-Meteo
+// omits it regardless of the requested zone, so a "Z" is appended before parsing) so it lines up
+// directly with the schedule's own startTimeUtc without a timezone-conversion step.
+async function fetchWeatherForecastHours(env, lat, lon) {
+  const hourKey = new Date().toISOString().slice(0, 13);
+  return cached(env, `weather-forecast:${lat},${lon}:${hourKey}`, 60 * 60, async () => {
+    const url =
+      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+      `&hourly=temperature_2m,relative_humidity_2m,precipitation_probability,wind_speed_10m,wind_direction_10m,wind_gusts_10m` +
+      `&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=UTC&forecast_days=16`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Open-Meteo forecast ${res.status}`);
+    const data = await res.json();
+    return data.hourly || null;
+  });
+}
+
+function pickForecastHour(hourly, targetIso) {
+  if (!hourly?.time?.length) return -1;
+  const targetMs = new Date(targetIso).getTime();
+  let bestIdx = -1;
+  let bestDiff = Infinity;
+  for (let i = 0; i < hourly.time.length; i++) {
+    const diff = Math.abs(new Date(hourly.time[i] + "Z").getTime() - targetMs);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
+}
+
+async function fetchWeather(env, lat, lon, targetTimeIso) {
+  // A game checked hours before first pitch used to get the RIGHT NOW reading, not a prediction of
+  // conditions when the game actually starts -- for a 7:40pm game checked at 2pm, that's showing
+  // 2pm's wind and calling it today's read. Within ~90 minutes of the scheduled start (or for a
+  // game already underway/in the past), current conditions ARE the best available estimate of
+  // game-time conditions, and NWS's live ground-truth reading below is strictly better than a
+  // forecast bucket -- so the forecast path is only used outside that window.
+  const targetMs = targetTimeIso ? new Date(targetTimeIso).getTime() : NaN;
+  const hoursUntilTarget = Number.isFinite(targetMs) ? (targetMs - Date.now()) / (60 * 60 * 1000) : 0;
+
+  if (hoursUntilTarget > 1.5) {
+    try {
+      const hourly = await fetchWeatherForecastHours(env, lat, lon);
+      const idx = pickForecastHour(hourly, targetTimeIso);
+      // forecast_days=16 covers every game on the schedule today, but if a target ever falls
+      // outside that window, the "closest" hour is really just whatever's left at the edge of the
+      // array -- a different day's weather mislabeled as game time, which is worse than admitting
+      // there's no forecast and falling back to current conditions instead.
+      const pickedDiffMs = idx >= 0 ? Math.abs(new Date(hourly.time[idx] + "Z").getTime() - targetMs) : Infinity;
+      if (idx >= 0 && pickedDiffMs <= 3 * 60 * 60 * 1000) {
+        return {
+          tempF: hourly.temperature_2m[idx],
+          humidityPct: hourly.relative_humidity_2m[idx],
+          precipProbPct: hourly.precipitation_probability[idx],
+          windSpeedMph: hourly.wind_speed_10m[idx],
+          windFromDeg: hourly.wind_direction_10m[idx],
+          windGustMph: hourly.wind_gusts_10m?.[idx] ?? null,
+          observedAt: hourly.time[idx] + "Z",
+          source: "Open-Meteo",
+          windSource: "Open-Meteo (forecast)",
+          isForecast: true,
+          forecastForIso: hourly.time[idx] + "Z",
+        };
+      }
+    } catch {
+      // Forecast fetch failed -- fall through to current conditions rather than error the request.
+    }
+  }
+
   // Real case caught by the user at Nationals Park: an uncached direct query showed wind
   // direction had swung from 66deg to 252deg -- nearly a full reversal -- in under 30 minutes,
   // because wind that light (0.7-2.7mph) is inherently erratic with no dominant driving force.
@@ -175,6 +253,8 @@ async function fetchWeather(env, lat, lon) {
       windGustMph: c.wind_gusts_10m ?? null,
       observedAt: c.time,
       source: "Open-Meteo",
+      isForecast: false,
+      forecastForIso: null,
     };
 
     let nwsWind = null;
@@ -395,8 +475,11 @@ async function narrate(env, sport, score, weather, venue) {
   // Nationals Park case that motivated the 10min weather-cache TTL below), which would otherwise
   // leave a stale, direction-wrong insight served for up to 6hrs. windCompass already folds
   // "variable" (sub-3mph, no dominant direction) into one bucket, so this doesn't over-fragment
-  // the cache on direction noise at low speed.
-  const cacheKey = `insight:${sport}:${venueLabel}:${todayIso()}:${Math.round(weather.windSpeedMph)}:${Math.round(weather.tempF)}:${score.windCompass || score.windTier || "na"}`;
+  // the cache on direction noise at low speed. The forecast/current flag also has to be in the key
+  // -- the model is told to describe one or the other (see conditionsLabel below), and speed/temp
+  // could round the same across that transition (forecast checked hours out vs. current once the
+  // game's about to start) without busting the key on their own.
+  const cacheKey = `insight:${sport}:${venueLabel}:${todayIso()}:${Math.round(weather.windSpeedMph)}:${Math.round(weather.tempF)}:${score.windCompass || score.windTier || "na"}:${weather.isForecast ? "f" : "c"}`;
   return cached(env, cacheKey, 6 * 60 * 60, async () => {
     if (!env.AI) return { text: "AI narration unavailable (no AI binding configured).", cached: false };
     // Gave up trying to prompt-engineer the model into correctly pairing handedness with field
@@ -447,10 +530,16 @@ async function narrate(env, sport, score, weather, venue) {
     const mlbWindLine = isCalm
       ? `Wind is negligible today — under 3mph, or not meaningfully directional — so carry is the same in every direction: ${score.carryFt}ft vs. a neutral day, from temperature/humidity alone. Do NOT say balls carry farther to any particular field or mention a wind direction advantage — there isn't one today.`
       : `Wind is ${score.windZone} at ${weather.windSpeedMph}mph — this is a ${score.carryFt < 0 ? "REDUCTION in carry (wind is suppressing distance, use words like 'reducing' or 'cutting down' carry toward that field, not just 'carry to' that field, which reads as a gain)" : "an INCREASE in carry (wind is adding distance, 'adding' or 'boosting' carry toward that field is accurate)"}. Overall estimated carry vs. a neutral day: ${score.carryFt}ft. Use the exact phrase "${score.windZone}" verbatim when describing wind direction — do NOT invent your own compass direction, cardinal letters, or a "from the [direction]" phrasing; the phrase given already states direction correctly. Also do NOT state specific distance numbers for individual fields (left/center/right) — those are already shown separately in the UI and you have gotten them scrambled before. Talk about the wind direction and overall carry only.`;
+    // Once fetchWeather started returning a point-forecast for games meaningfully in the future
+    // instead of always "right now" (see DECISIONS.md), the model's own wording still defaulted to
+    // "current conditions" unprompted -- accurate numbers, misleading framing, since a forecast for
+    // 7 hours from now isn't what's happening outside right now. Telling it explicitly which framing
+    // to use fixed it in testing; left unprompted it reliably guessed "current."
+    const conditionsLabel = weather.isForecast ? "the forecast for game time" : "current conditions";
     const prompt =
       sport === "mlb"
-        ? `You are a concise baseball weather analyst. Venue: ${venueLabel}. Conditions: ${weather.tempF}F, ${weather.humidityPct}% humidity. ${mlbWindLine} Overall lean: ${score.scoringLean}.${handedNote} In 2-3 sentences, explain in plain language what this means for hitters and scoring today. No disclaimers, no hedging filler.`
-        : `You are a concise NFL weather analyst. Venue: ${venueLabel}. Conditions: ${weather.tempF}F, wind at ${weather.windSpeedMph}mph, precip chance ${weather.precipProbPct}%. Rules-engine read: wind tier ${score.windTier}, passing impact "${score.passingImpact}", field-goal range impact "${score.fgRangeImpact}". Do NOT state a compass direction or cardinal letter for the wind — none is reliably known, so only describe speed/tier and its effect. In 2-3 sentences, explain what this means for the passing game and kicking today. No disclaimers, no hedging filler.`;
+        ? `You are a concise baseball weather analyst. Venue: ${venueLabel}. These are ${conditionsLabel}: ${weather.tempF}F, ${weather.humidityPct}% humidity. ${mlbWindLine} Overall lean: ${score.scoringLean}.${handedNote} In 2-3 sentences, explain in plain language what this means for hitters and scoring today. Describe these as ${conditionsLabel}, not as something else. No disclaimers, no hedging filler.`
+        : `You are a concise NFL weather analyst. Venue: ${venueLabel}. These are ${conditionsLabel}: ${weather.tempF}F, wind at ${weather.windSpeedMph}mph, precip chance ${weather.precipProbPct}%. Rules-engine read: wind tier ${score.windTier}, passing impact "${score.passingImpact}", field-goal range impact "${score.fgRangeImpact}". Do NOT state a compass direction or cardinal letter for the wind — none is reliably known, so only describe speed/tier and its effect. Describe these as ${conditionsLabel}, not as something else. In 2-3 sentences, explain what this means for the passing game and kicking today. No disclaimers, no hedging filler.`;
     try {
       const result = await env.AI.run("@cf/meta/llama-3.2-3b-instruct", {
         messages: [{ role: "user", content: prompt }],
@@ -468,11 +557,12 @@ async function narrate(env, sport, score, weather, venue) {
 async function handleGame(env, sport, params) {
   const venueKey = params.get("venueKey");
   const preview = params.get("preview") === "1";
+  const startTimeUtc = params.get("startTimeUtc");
   const stadiums = sport === "mlb" ? MLB_STADIUMS : NFL_STADIUMS;
   const venue = stadiums[venueKey];
   if (!venue) return json({ error: `Unknown venueKey "${venueKey}" for sport ${sport}` }, 400);
 
-  const weather = await fetchWeather(env, venue.lat, venue.lon);
+  const weather = await fetchWeather(env, venue.lat, venue.lon, startTimeUtc);
   const score = sport === "mlb" ? scoreMlbGame(weather, venue) : scoreNflGame(weather, venue);
 
   // Preview mode (used by the front-page quick-look grid, one call per game on the slate) skips
@@ -487,10 +577,11 @@ async function handleGame(env, sport, params) {
 async function handleAlmanac(env, sport, params) {
   if (sport !== "mlb") return json({ error: "Historical almanac is MLB-only — no free historical box-score API for NFL" }, 400);
   const venueKey = params.get("venueKey");
+  const startTimeUtc = params.get("startTimeUtc");
   const venue = MLB_STADIUMS[venueKey];
   if (!venue) return json({ error: `Unknown venueKey "${venueKey}" for sport mlb` }, 400);
 
-  const weather = await fetchWeather(env, venue.lat, venue.lon);
+  const weather = await fetchWeather(env, venue.lat, venue.lon, startTimeUtc);
   const aggregate = await getAlmanacMatch(env, venueKey, venue, weather);
   return json({ aggregate });
 }
