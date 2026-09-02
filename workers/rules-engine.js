@@ -53,10 +53,22 @@ function scoreMlbGame(weather, venue) {
 
   // Air density / carry index, in estimated feet of extra fly-ball distance vs. a 70F/50%RH/sea-level
   // baseline. This part is direction-independent -- it applies the same to a ball hit anywhere in the park.
+  //
+  // Temperature/humidity are outdoor readings -- real, and physically what drives carry, but only
+  // when there's outdoor air to feel them. When the roof is closed the interior is climate-
+  // controlled, so those two stop applying entirely (a real bug found live: a 97F day outside a
+  // closed-roof Globe Life Field was still adding +10.5ft of "carry" driven by that outdoor heat,
+  // directly contradicting this same function's own roofClosed framing everywhere else, and the
+  // AI narration's "temperature has no bearing" text right next to that very number). Altitude is
+  // different -- it's the venue's fixed elevation/air pressure, not outdoor weather, so it still
+  // applies indoors (moot for every current MLB dome, none of which sit at real altitude, but
+  // correct in principle and free to keep).
   let baseCarryFt = 0;
-  const tempDelta = weather.tempF - 75;
-  baseCarryFt += (tempDelta / 10) * 3; // colder air costs distance symmetrically to how hot air adds it
-  baseCarryFt += (weather.humidityPct - 50) / 50 * 2; // small humidity nudge, +2ft at 100% RH vs 50%
+  if (!roofClosed) {
+    const tempDelta = weather.tempF - 75;
+    baseCarryFt += (tempDelta / 10) * 3; // colder air costs distance symmetrically to how hot air adds it
+    baseCarryFt += (weather.humidityPct - 50) / 50 * 2; // small humidity nudge, +2ft at 100% RH vs 50%
+  }
   const altitudeBonusFt = (venue.altitudeFt / 5280) * 40; // ~40ft (~10% of a 400ft flyball) at Coors-level altitude
   baseCarryFt += altitudeBonusFt;
   if (altitudeBonusFt > 15) notes.push(`Elevation (${venue.altitudeFt}ft) adds an estimated +${altitudeBonusFt.toFixed(0)}ft of carry.`);

@@ -57,4 +57,23 @@ assert(rfWind.handedness.favors === "left", "Wind carrying RF more than LF shoul
 // Symmetric case (wind straight out to CF, Coors Field) -> no handedness edge either way.
 assert(coors.handedness.favors === "neutral", "Wind blowing straight out to center should not favor either handedness");
 
+// Closed-roof MLB venue on a scorching outdoor day -> outdoor temp/humidity must NOT leak into
+// carryFt, since the interior is climate-controlled. Real bug found live: Globe Life Field (TEX,
+// retractable, assumed closed) showed +10.5ft of "carry" driven by a 97F outdoor reading, directly
+// contradicting the narration text right next to it saying temperature has no bearing indoors.
+// Compare two wildly different outdoor readings at the same closed-roof venue -- carryFt should be
+// identical (driven only by the venue's fixed altitude), proving temp/humidity have zero effect,
+// without hardcoding the exact altitude-bonus math here.
+const closedRoofHot = scoreMlbGame(
+  { tempF: 97, humidityPct: 15, windSpeedMph: 12, windFromDeg: 90, precipProbPct: 0 },
+  MLB_STADIUMS.TEX
+);
+const closedRoofCold = scoreMlbGame(
+  { tempF: 40, humidityPct: 90, windSpeedMph: 12, windFromDeg: 90, precipProbPct: 0 },
+  MLB_STADIUMS.TEX
+);
+console.log("Globe Life Field (closed roof), 97F vs 40F outside:", closedRoofHot.carryFt, closedRoofCold.carryFt);
+assert(closedRoofHot.roofClosed === true, "Globe Life Field's retractable roof must be assumed closed");
+assert(closedRoofHot.carryFt === closedRoofCold.carryFt, "Outdoor temp/humidity must not affect carry behind a closed roof");
+
 console.log("\nAll rules-engine sanity checks passed.");

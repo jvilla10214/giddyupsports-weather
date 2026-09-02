@@ -6,6 +6,21 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## Fixed: outdoor temp/humidity leaking into carryFt behind a closed roof
+**Date:** 2026-09-02
+**Decision:** `scoreMlbGame`'s `baseCarryFt` now only adds the temperature/humidity component when
+`!roofClosed`; the altitude component still always applies (a fixed property of the venue's
+location, not outdoor weather).
+**Why:** found while starting the carry-model backtest below — needed to decide whether to exclude
+dome venues from the historical sample, and checking one live turned up a real bug: Globe Life
+Field (TEX, retractable roof, assumed closed) was showing +10.5ft of "carry" on a 97F day, entirely
+driven by outdoor heat that has no way to reach a climate-controlled interior. That number sat
+directly next to this same function's `roofClosed: true` flag and the AI narration's own text
+("Conditions are climate-controlled, so wind, temperature, and precipitation have no bearing") --
+directly self-contradicting. No existing test covered a closed-roof MLB venue's `carryFt` at all,
+which is how this got past every previous audit. Added a regression test comparing the same
+closed-roof venue at 97F vs. 40F outside -- `carryFt` must come out identical.
+
 ## Wind/weather: point-forecast at scheduled game time, not always "right now"
 **Date:** 2026-09-02
 **Decision:** `fetchWeather(env, lat, lon, targetTimeIso)` now takes the game's scheduled start
