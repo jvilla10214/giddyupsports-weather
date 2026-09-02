@@ -390,7 +390,7 @@
     overflow: hidden;
     border: var(--card-border-width) solid var(--line);
     box-shadow: var(--shadow);
-    height: clamp(340px, 42vw, 540px);
+    height: clamp(220px, 28vw, 360px);
     background: var(--bg-elevated);
   }
   #map { position: absolute; inset: 0; cursor: default !important; }
@@ -878,10 +878,14 @@
   }
 
   function ensureMap(lat, lon) {
-    // Zoomed in enough that the stadium is the clear subject of the picture, not the surrounding
-    // city -- tuned against Great American Ball Park; a handful of larger/smaller venues may want
-    // their own adjustment later, but there's no per-venue footprint data to fit bounds exactly.
-    const STADIUM_ZOOM = 17.4;
+    // Zoomed in tight enough that the stadium bowl fills most of the frame, not the surrounding
+    // city -- checked live against Great American Ball Park (large modern bowl), Fenway Park
+    // (much smaller, irregular urban footprint), and Coors Field (large, sprawling) to find a
+    // single zoom that reads as "close-up on the stadium" across very different real footprint
+    // sizes, since there's no per-venue footprint data to fit bounds exactly. A compact park like
+    // Fenway will still frame a bit looser than a large one like Coors at this same zoom -- that's
+    // the real-size tradeoff of one shared zoom level, not a bug.
+    const STADIUM_ZOOM = 18.4;
     if (!map) {
       // Fully static picture: every interaction handler off, so the stadium view can't be
       // panned or zoomed — it just shows the venue, centered, and nothing else.

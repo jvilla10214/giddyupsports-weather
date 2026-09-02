@@ -6,6 +6,21 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## Hero picture: smaller on-screen, zoomed in much tighter on the stadium
+**Date:** 2026-09-02
+**Decision:** `.hero` height reduced from `clamp(340px, 42vw, 540px)` to `clamp(220px, 28vw,
+360px)`, and `STADIUM_ZOOM` (Leaflet zoom on the aerial view) raised from 17.4 to 18.4.
+**Why:** Requested directly — the picture was taking up too much screen space and the stadium
+read as a small part of a wider aerial view rather than the clear subject.
+**Tuning note:** checked live (not just computed) against three very differently-sized real
+footprints — Great American Ball Park (large modern bowl), Fenway Park (much smaller, irregular
+urban footprint hemmed in by streets), and Coors Field (large, sprawling) — since there's no
+per-venue footprint/bounds data to fit each stadium exactly (`lat`/`lon` in `data/stadiums.js` are
+venue centroids, not survey-grade). 18.4 reads as a tight, dominant close-up on all three; a small
+park like Fenway frames a little looser than a large one like Coors at the same zoom, which is the
+real-size tradeoff of a single shared zoom level rather than a bug. Revisit with per-venue zoom or
+real footprint bounds if a specific park still looks off.
+
 ## Almanac: aggregate across all similar-weather games, not just the single closest match
 **Date:** 2026-09-02
 **Decision:** `findAlmanacMatch` (single closest day) replaced with `findAlmanacAggregate`. It still
