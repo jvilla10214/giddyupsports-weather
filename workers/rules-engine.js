@@ -80,14 +80,24 @@ function scoreMlbGame(weather, venue) {
         ? { favors: "left", deltaFt: handedDeltaFt } // RF carries more -> favors left-handed pull power
         : { favors: "right", deltaFt: handedDeltaFt }; // LF carries more -> favors right-handed pull power
 
+  // Classify by whichever of the three fields the wind is actually affecting most, rather than
+  // hand-tuned angle buckets on the CF bearing alone -- the previous version only recognized wind
+  // blowing OUT toward center (diff near 0) as a "center" case, so wind blowing almost directly IN
+  // from center (diff near +/-180, the opposite extreme) fell through every bucket and was
+  // mislabeled "mostly crosswind" even though cfWindCarryFt was the largest, most negative number
+  // of the three. Picking by magnitude handles every angle correctly by construction.
   let windZone = "calm";
   if (!roofClosed && weather.windSpeedMph >= 3) {
-    const blowsToward = (weather.windFromDeg + 180) % 360;
-    const diff = angleDiff(blowsToward, venue.cfBearingDeg);
-    if (Math.abs(diff) <= 30) windZone = cfWindCarryFt > 0 ? "blowing out to center" : "blowing in from center";
-    else if (diff > 30 && diff <= 100) windZone = cfWindCarryFt > 0 ? "blowing out toward right field" : "blowing in from right field";
-    else if (diff < -30 && diff >= -100) windZone = cfWindCarryFt > 0 ? "blowing out toward left field" : "blowing in from left field";
-    else windZone = "mostly crosswind";
+    const candidates = [
+      { name: "center", ft: cfWindCarryFt },
+      { name: "right field", ft: rfWindCarryFt },
+      { name: "left field", ft: lfWindCarryFt },
+    ];
+    const strongest = candidates.reduce((a, b) => (Math.abs(b.ft) > Math.abs(a.ft) ? b : a));
+    windZone =
+      Math.abs(strongest.ft) < 1
+        ? "calm"
+        : `blowing ${strongest.ft > 0 ? "out toward" : "in from"} ${strongest.name}`;
   } else if (venue.roofType === "dome") {
     notes.push(`${venue.venue} is a fixed dome — always closed, so wind has no effect here.`);
   } else if (roofClosed) {

@@ -290,20 +290,47 @@ async function narrate(env, sport, score, weather, venue) {
   const cacheKey = `insight:${sport}:${venueLabel}:${todayIso()}:${Math.round(weather.windSpeedMph)}:${Math.round(weather.tempF)}`;
   return cached(env, cacheKey, 6 * 60 * 60, async () => {
     if (!env.AI) return { text: "AI narration unavailable (no AI binding configured).", cached: false };
-    // Spelled out this explicitly (and redundantly) after a real failure: a smaller model
-    // confused "left-handed" with "left field" and narrated the wrong field entirely (said wind
-    // favored left field while the data and its own headline both said left-handed hitters --
-    // lefties pull to RIGHT field, so that was self-contradictory). Naming the benefiting field
-    // directly, more than once, and stating the wrong pairing to avoid closes that gap.
-    let handedNote = "";
-    if (score.handedness && score.handedness.favors !== "neutral") {
-      const pullField = score.handedness.favors === "left" ? "right field" : "left field";
-      const wrongField = score.handedness.favors === "left" ? "left field" : "right field";
-      handedNote = ` Platoon note: wind is adding ${Math.abs(score.handedness.deltaFt)}ft more carry to ${pullField} than the opposite field. ${score.handedness.favors === "left" ? "Left" : "Right"}-handed hitters pull toward ${pullField}, so say ${pullField} is getting the wind boost — do NOT say ${wrongField}, that would be backwards.`
-    }
+    // Gave up trying to prompt-engineer the model into correctly pairing handedness with field
+    // direction after THREE distinct failures caught live, each a different flavor of the same
+    // underlying confusion: (1) said wind favored left field while calling it a left-handed edge
+    // (backwards -- lefties pull to right field); (2) said a field was getting an absolute "boost"
+    // when its actual carry was still negative, just less suppressed than the other pull side;
+    // (3) named the correct field but then attributed it to the wrong handedness anyway. Each fix
+    // closed the specific failure caught but the model found a new way to conflate "left-handed"
+    // with "left field" every time. The deterministic handedness badge in the UI (rules-engine
+    // output, never AI-generated) has been correct in all three cases -- so the AI's job now is
+    // just to describe the wind/field-carry numbers, and it's told explicitly to leave handedness
+    // out of its own prose entirely rather than trying to get it to state the pairing correctly.
+    const handedNote =
+      score.handedness && score.handedness.favors !== "neutral"
+        ? ` Do not mention batter handedness (left-handed/right-handed/platoon/pull side) anywhere in your response — that's shown separately in the UI and you have gotten it backwards before. Describe only the field-direction wind effect using the numbers above.`
+        : "";
+
+    // Second real failure, caught by the user at Nationals Park: wind was only 2.7mph (below the
+    // 3mph threshold where the rules engine even bothers modeling direction), so windZone was
+    // "calm" and all three fieldCarry values were IDENTICAL -- yet the model still invented "balls
+    // will carry farther to right field... slightly shorter to left field," a pure fabrication
+    // with zero grounding in the numbers it was given. The old prompt's unconditional "be specific
+    // about field direction" instruction was actively pushing it to invent one even when none
+    // exists. Now that instruction only appears when there's a real directional signal; the calm
+    // case gets an explicit ban on directional claims instead.
+    //
+    // Fourth real failure, same Fenway case as the handedness failures above: even after handedness
+    // was removed from its job, the model STILL scrambled which of the three field-carry numbers
+    // belonged to which field ("wind blowing in from left field" -- it was right field -- with the
+    // left/center/right figures shuffled to the wrong labels too). This isn't a handedness-specific
+    // confusion, it's this model being generally unreliable at restating 3+ paired values
+    // correctly. Rather than prompt-engineer around that indefinitely, it's no longer asked to: the
+    // per-field numbers are already shown correctly in the UI's LF/CF/RF chips (deterministic,
+    // never wrong), so the model's only job is the single windZone phrase (one string, not three
+    // numbers to pair up) and the overall carry/lean -- much smaller surface area to get wrong.
+    const isCalm = score.windZone === "calm";
+    const mlbWindLine = isCalm
+      ? `Wind is negligible today — under 3mph, or not meaningfully directional — so carry is the same in every direction: ${score.carryFt}ft vs. a neutral day, from temperature/humidity alone. Do NOT say balls carry farther to any particular field or mention a wind direction advantage — there isn't one today.`
+      : `Wind is ${score.windZone}, ${weather.windSpeedMph}mph ${score.windCompass} — this is a ${score.carryFt < 0 ? "REDUCTION in carry (wind is suppressing distance, use words like 'reducing' or 'cutting down' carry toward that field, not just 'carry to' that field, which reads as a gain)" : "an INCREASE in carry (wind is adding distance, 'adding' or 'boosting' carry toward that field is accurate)"}. Overall estimated carry vs. a neutral day: ${score.carryFt}ft. Mention the wind direction (${score.windZone}) in your answer, but do NOT state specific distance numbers for individual fields (left/center/right) — those are already shown separately in the UI and you have gotten them scrambled before. Talk about the wind direction and overall carry only.`;
     const prompt =
       sport === "mlb"
-        ? `You are a concise baseball weather analyst. Venue: ${venueLabel}. Conditions: ${weather.tempF}F, ${weather.humidityPct}% humidity, wind ${weather.windSpeedMph}mph ${score.windCompass}. Rules-engine read: estimated carry ${score.carryFt}ft vs. a neutral day (left field ${score.fieldCarry.left}ft, center ${score.fieldCarry.center}ft, right field ${score.fieldCarry.right}ft), wind is ${score.windZone}, overall lean: ${score.scoringLean}.${handedNote} In 2-3 sentences, explain what this means for hitters and scoring today. Be specific about field direction. No disclaimers, no hedging filler.`
+        ? `You are a concise baseball weather analyst. Venue: ${venueLabel}. Conditions: ${weather.tempF}F, ${weather.humidityPct}% humidity. ${mlbWindLine} Overall lean: ${score.scoringLean}.${handedNote} In 2-3 sentences, explain in plain language what this means for hitters and scoring today. No disclaimers, no hedging filler.`
         : `You are a concise NFL weather analyst. Venue: ${venueLabel}. Conditions: ${weather.tempF}F, wind ${weather.windSpeedMph}mph ${score.windCompass || ""}, precip chance ${weather.precipProbPct}%. Rules-engine read: wind tier ${score.windTier}, passing impact "${score.passingImpact}", field-goal range impact "${score.fgRangeImpact}". In 2-3 sentences, explain what this means for the passing game and kicking today. No disclaimers, no hedging filler.`;
     try {
       const result = await env.AI.run("@cf/meta/llama-3.2-3b-instruct", {

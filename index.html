@@ -933,7 +933,15 @@
 
     if (score.handedness && score.handedness.favors !== "neutral") {
       const who = score.handedness.favors === "left" ? "Left-handed" : "Right-handed";
-      handedNoteEl.innerHTML = `<span class="hn-dot"></span>${who} hitters may have an edge tonight — ${Math.abs(score.handedness.deltaFt)}ft more carry to their pull side.`;
+      // "Edge" and "more carry" alone read as an absolute gain -- but the pull field can still be
+      // below a neutral day (just less suppressed than the opposite field), which is a relative
+      // edge inside an overall bad-for-offense day, not a real boost. Say which one it actually is.
+      const pullFieldFt = score.handedness.favors === "left" ? score.fieldCarry.right : score.fieldCarry.left;
+      const phrasing =
+        pullFieldFt < 0
+          ? `may be hurt less tonight — their pull side is carrying ${Math.abs(score.handedness.deltaFt)}ft better than the opposite field, though still below a neutral day`
+          : `may have an edge tonight — ${Math.abs(score.handedness.deltaFt)}ft more carry to their pull side`;
+      handedNoteEl.innerHTML = `<span class="hn-dot"></span>${who} hitters ${phrasing}.`;
       handedNoteEl.style.display = "flex";
     } else {
       handedNoteEl.style.display = "none";

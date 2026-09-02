@@ -6,6 +6,39 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## AI narration: stopped asking the model to restate per-field numbers or handedness
+**Date:** 2026-09-02
+**Decision:** The MLB insight prompt no longer asks the model to (a) state which batter
+handedness benefits, or (b) restate the individual left/center/right field carry numbers. Both
+are computed correctly and shown directly in the UI (the field-carry chips and the handedness
+badge are pure rules-engine output, never AI-generated) — the model's job is now limited to
+describing the single `windZone` phrase and the overall carry/lean in plain language.
+**Why:** Four distinct factual errors were caught live by the user, in order: (1) called wind
+favoring left-handed hitters while describing it pushing toward left field — backwards, since
+lefties pull to right field; (2) called a still-negative field carry (-10.4ft, below a neutral
+day) an absolute "boost," when it was only a relative edge over an even-worse-suppressed opposite
+field; (3) after fixing #1, named the correct benefiting field but attributed it to the wrong
+handedness anyway; (4) after removing handedness from its job entirely, it separately scrambled
+which of the three field-carry numbers belonged to which field, and misnamed the windZone
+direction in its own prose (said "left field" when the data said right field). Each fix closed
+the specific failure caught, but the model kept finding new ways to mishandle the same underlying
+task: reliably pairing 3+ related values in freeform text. Rather than keep prompt-engineering
+around a small (3B) free-tier model's demonstrated limit, the fix was architectural — narrow what
+it's asked to generate down to what it's actually reliable at (a short natural-language summary
+given one clear directional fact), and let deterministic code own everything that requires
+correctly tracking multiple paired values.
+**Also fixed in the same pass:** a real (non-AI) bug in `windZone` classification — wind blowing
+almost directly in from center field (angle near 180° from the "blowing out" reference) fell
+through every angle bucket and was mislabeled `"mostly crosswind"`. Replaced hand-tuned angle
+buckets with picking whichever of the three fields' computed wind-carry values has the largest
+magnitude, which handles every angle correctly by construction (this was the Fenway case the user
+caught, not the Nationals one).
+**How to apply:** If more AI-narrated multi-value facts get added later (e.g. a future NFL
+handedness-equivalent), assume this model needs the same treatment — either give it exactly one
+value to talk about, or compute the sentence deterministically and skip generation for that part
+entirely. Don't assume more/better prompt instructions will fix a pattern like this; test with a
+real example immediately, and if it recurs after one fix, narrow scope instead of patching further.
+
 ## Historical almanac: schedule-first search, not weather-first
 **Date:** 2026-09-02
 **Decision:** `/api/almanac` finds the closest-matching historical weather day at a venue by
