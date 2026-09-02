@@ -6,6 +6,31 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## Tried and reverted: barometric pressure as a carry-model input
+**Date:** 2026-09-02
+**Tried:** added `pressure_msl` (mean-sea-level pressure, hPa) to `scoreMlbGame`'s `baseCarryFt` —
+same air-density mechanism as the existing altitude term, but day-to-day rather than fixed per
+venue. Coefficient (0.23ft per hPa below the 1013.25hPa standard) was derived for internal
+consistency with the existing altitude term's own implied rate (its ~40ft bonus at Coors' 5280ft
+corresponds to a ~174.75hPa drop in standard atmosphere). Applied regardless of roof status, unlike
+temp/humidity, since current MLB roofs are rigid structures that don't pressurize their interior
+the way an old air-supported dome design would have. Threaded through `fetchWeather` (both the
+current-conditions and point-forecast paths) and the season backtest script.
+**Result: reverted, not shipped.** Re-ran the same 2025-season backtest with pressure included:
+r moved from 0.1172 to 0.1177 — a difference of 0.0005 against a standard error of ~0.024 at this
+sample size (n=1,786), i.e. about 2% of one standard error. Indistinguishable from zero. The
+hitter-vs-pitcher-friendly scoring gap at the same 20ft threshold was actually very slightly worse
+with pressure included (1.30 vs. 1.37 runs) — also within noise, but certainly no improvement
+either way. Concluded the coefficient's physical derivation, while internally consistent, doesn't
+translate into a detectable real-world signal at the pressure swings MLB games actually see
+(typically a much narrower day-to-day range than the ~175hPa spread used to derive the rate from
+Coors' altitude) — reverted rather than ship complexity with no measured benefit.
+**Why this is worth keeping on record:** avoids re-attempting the same idea later without knowing
+it was tried and tested. If revisited, the open question is whether the coefficient itself needs
+a different derivation (not assuming linear consistency with the altitude term across such
+different scales of pressure change), not whether pressure matters at all in principle.
+**Not affected:** this was purely an addition on top of the recalibrated 20ft threshold below —
+reverting it changed nothing about that recalibration, which remains live.
 ## Recalibrated the hitter-/pitcher-friendly threshold using the backtest data
 **Date:** 2026-09-02
 **Decision:** `CARRY_LEAN_THRESHOLD_FT` (the `|carryFt|` cutoff for the `scoringLean` label) moved
