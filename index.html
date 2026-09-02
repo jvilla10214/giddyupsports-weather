@@ -875,9 +875,14 @@
     // score.roofClosed means wind can't reach the field (fixed dome, or a retractable roof
     // assumed closed) -- showing the raw outdoor wind reading here would be actively misleading,
     // since it plays no part in the carry/passing numbers right next to it.
+    // A meaningfully higher gust than sustained speed means conditions are genuinely gusty/
+    // variable, not steady -- worth surfacing directly, since the sustained number alone can
+    // undersell how much the wind is actually shifting moment to moment (confirmed live: this is
+    // exactly the pattern near an active thunderstorm's outflow).
+    const gustNote = weather.windGustMph != null && weather.windGustMph - weather.windSpeedMph >= 5 ? ` · gusts ${Math.round(weather.windGustMph)}` : "";
     const windChip = score.roofClosed
       ? chip("wind", "Wind", "Indoors", "no effect")
-      : chip("wind", "Wind", weather.windSpeedMph.toFixed(1), `mph ${score.windCompass || ""}`);
+      : chip("wind", "Wind", weather.windSpeedMph.toFixed(1), `mph ${score.windCompass || ""}${gustNote}`);
     const chips = [
       chip("temp", "Temp", Math.round(weather.tempF), "°F"),
       chip("humidity", "Humidity", Math.round(weather.humidityPct), "%"),

@@ -100,6 +100,54 @@ async function fetchMlbSchedule(env) {
 
 // ---- Weather ----
 
+const NWS_HEADERS = { "User-Agent": "GiddyUpSports-Weather/1.0 (weather.giddyupsports contact: jvilla10214@gmail.com)" };
+
+// Open-Meteo's "current" wind is a high-resolution model nowcast, not a live instrument reading --
+// good in steady conditions, but caught genuinely missing a real thunderstorm live: at the same
+// moment Open-Meteo reported 0.7mph "mainly clear," the real METAR for the nearest airport showed
+// an active storm ("06012KT ... TS BKN035CB", wind 12kt/13.8mph, lightning) via a SPECI report --
+// the kind of sudden, fast-moving convective wind event models nowcast poorly. NWS station
+// observations are real ground-truth instrument readings, so they're used as the primary US wind
+// source when available, with Open-Meteo as the fallback (covers Toronto, the one non-US venue,
+// and any moment NWS's own data pipeline comes back incomplete -- see fetchNwsWind for why that
+// needs defensive null-checking too).
+
+async function findNearestNwsStation(env, lat, lon) {
+  return cached(env, `nws-station:${lat},${lon}`, 60 * 60 * 24 * 90, async () => {
+    const point = await fetch(`https://api.weather.gov/points/${lat},${lon}`, { headers: NWS_HEADERS });
+    if (!point.ok) return null;
+    const pointData = await point.json();
+    const stationsUrl = pointData.properties?.observationStations;
+    if (!stationsUrl) return null;
+    const stations = await fetch(stationsUrl, { headers: NWS_HEADERS });
+    if (!stations.ok) return null;
+    const stationsData = await stations.json();
+    return stationsData.features?.[0]?.properties?.stationIdentifier || null;
+  });
+}
+
+async function fetchNwsWind(env, stationId) {
+  return cached(env, `nws-obs:${stationId}`, 10 * 60, async () => {
+    const res = await fetch(`https://api.weather.gov/stations/${stationId}/observations/latest`, { headers: NWS_HEADERS });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const p = data.properties || {};
+    // NWS's structured fields have shown up null (quality code "Z" = missing) even when the raw
+    // METAR text clearly had valid wind data for the same report -- a real gap in their JSON
+    // pipeline, confirmed live. Rather than parse raw METAR text to work around it, just fall back
+    // to Open-Meteo whenever either field is missing -- simpler, and Open-Meteo is a perfectly
+    // reasonable fallback for the (presumably minority of) moments this happens.
+    if (p.windSpeed?.value == null || p.windDirection?.value == null) return null;
+    return {
+      windSpeedMph: Math.round(p.windSpeed.value * 0.621371 * 10) / 10, // km/h -> mph
+      windFromDeg: p.windDirection.value,
+      windGustMph: p.windGust?.value != null ? Math.round(p.windGust.value * 0.621371 * 10) / 10 : null,
+      observedAt: p.timestamp,
+      source: "NWS",
+    };
+  });
+}
+
 async function fetchWeather(env, lat, lon) {
   // Real case caught by the user at Nationals Park: an uncached direct query showed wind
   // direction had swung from 66deg to 252deg -- nearly a full reversal -- in under 30 minutes,
@@ -111,20 +159,35 @@ async function fetchWeather(env, lat, lon) {
   return cached(env, `weather:${lat},${lon}:${hourKey}`, 10 * 60, async () => {
     const url =
       `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
-      `&current=temperature_2m,relative_humidity_2m,precipitation_probability,wind_speed_10m,wind_direction_10m` +
+      `&current=temperature_2m,relative_humidity_2m,precipitation_probability,wind_speed_10m,wind_direction_10m,wind_gusts_10m` +
       `&temperature_unit=fahrenheit&wind_speed_unit=mph`;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Open-Meteo ${res.status}`);
     const data = await res.json();
     const c = data.current || {};
-    return {
+    const openMeteo = {
       tempF: c.temperature_2m,
       humidityPct: c.relative_humidity_2m,
       precipProbPct: c.precipitation_probability,
       windSpeedMph: c.wind_speed_10m,
       windFromDeg: c.wind_direction_10m,
+      windGustMph: c.wind_gusts_10m ?? null,
       observedAt: c.time,
+      source: "Open-Meteo",
     };
+
+    let nwsWind = null;
+    try {
+      const stationId = await findNearestNwsStation(env, lat, lon);
+      if (stationId) nwsWind = await fetchNwsWind(env, stationId);
+    } catch {
+      // Any NWS failure (network, parsing, non-US location) just means we keep the Open-Meteo
+      // wind -- never let this secondary source take down the primary request.
+    }
+
+    return nwsWind
+      ? { ...openMeteo, windSpeedMph: nwsWind.windSpeedMph, windFromDeg: nwsWind.windFromDeg, windGustMph: nwsWind.windGustMph ?? openMeteo.windGustMph, windSource: "NWS" }
+      : { ...openMeteo, windSource: "Open-Meteo" };
   });
 }
 

@@ -6,6 +6,35 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## Wind source: real NWS station observations preferred over Open-Meteo's nowcast
+**Date:** 2026-09-02
+**Decision:** `fetchWeather` now tries a real NWS observation station (nearest to the venue, found
+via `api.weather.gov/points` and cached ~90 days since that mapping never changes) first for wind
+speed/direction/gusts, falling back to Open-Meteo whenever NWS is unavailable, errored, returns
+null fields, or the venue is outside the US (Rogers Centre, Toronto — the only non-US venue in
+either sport). Temperature/humidity/precipitation still come from Open-Meteo either way.
+**Why:** Investigating the Nationals Park report below turned up a real, demonstrated accuracy gap
+during fast-moving weather: at the same moment Open-Meteo's "current" endpoint reported 0.7mph and
+"mainly clear," the real METAR for the nearest airport (KDCA) had just issued a SPECI (a report
+triggered specifically by sudden significant weather) showing an active thunderstorm — real wind
+at 12kt/13.8mph with lightning. Open-Meteo's current data is a high-resolution model nowcast, not
+a live instrument reading; it's good in steady conditions but can meaningfully lag sudden
+convective events. NWS station data is real ground truth when available.
+**Known limitation, found while validating this fix:** NWS's own structured JSON observation
+endpoint returned null wind fields (quality-control code "Z" = missing) for KDCA during the very
+storm this fix was meant to catch — even though the raw METAR text for the same report clearly had
+valid wind data. Rather than add a raw-METAR-text parser to work around NWS's own pipeline gap,
+`fetchNwsWind` just treats null fields as "unavailable" and falls back to Open-Meteo — tested live
+across several venues (NYY, CHC, CHI succeeded via NWS; SF and WSH fell back cleanly, no errors).
+This means the one specific storm-driven case that motivated the fix can still occasionally fall
+through to the same imperfect Open-Meteo nowcast on both ends of the fallback chain — an inherent
+limit of free data sources during genuinely fast-moving weather, not a bug in the fallback logic.
+**Also added:** `windGustMph`, surfaced in the UI wind chip ("· gusts 12") whenever gust exceeds
+sustained speed by 5mph+, since a single averaged sustained-speed number can undersell how gusty/
+variable conditions actually are — directly addresses "wind blowing in occasionally" reports where
+the *average* reads calm but individual gusts don't. Deliberately kept out of the AI prompt (see
+the AI narration decision below for why adding another number for the model to juggle is risky).
+
 ## Weather cache: 30min -> 10min, and hide wind direction below 3mph
 **Date:** 2026-09-02
 **Decision:** `fetchWeather`'s KV cache TTL dropped from 30 minutes to 10. Separately,
