@@ -352,6 +352,21 @@
   }
   .back-btn:hover { color: var(--text); }
 
+  /* ---------- Game strip: jump straight to any other game without leaving the detail view ---------- */
+  .game-strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+  .game-strip .gs-pill {
+    flex: none; display: flex; align-items: baseline; gap: 6px;
+    background: var(--bg-elevated); border: var(--card-border-width) solid var(--line);
+    border-radius: 999px; padding: 7px 14px; cursor: pointer; font: inherit;
+    font-family: var(--font-mono); font-size: 0.76rem; font-weight: 600;
+    color: var(--text-muted); white-space: nowrap;
+    transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+  }
+  .game-strip .gs-pill:hover { border-color: var(--accent-atmo); color: var(--text); }
+  .game-strip .gs-pill.active { background: var(--accent-atmo); border-color: var(--accent-atmo); color: var(--bg); }
+  .game-strip .gs-pill .gs-time { color: var(--text-faint); font-weight: 400; }
+  .game-strip .gs-pill.active .gs-time { color: var(--bg); opacity: 0.75; }
+
   /* ---------- Venue heading ---------- */
   .venue-heading { display: flex; flex-direction: column; gap: 2px; }
   .venue-heading .name {
@@ -469,10 +484,18 @@
     margin-bottom: 10px;
   }
   .almanac-body { font-size: 0.9rem; color: var(--text-muted); }
-  .almanac-date { font-family: var(--font-display); font-weight: 700; font-size: 1.15rem; color: var(--text); margin-bottom: 2px; }
-  .almanac-weather { font-family: var(--font-mono); font-size: 0.82rem; color: var(--text-muted); margin-bottom: 8px; }
-  .almanac-game { font-size: 0.92rem; color: var(--text); }
-  .almanac-game b { color: var(--accent-live); }
+  .almanac-summary { display: flex; gap: 28px; margin-bottom: 10px; }
+  .almanac-stat { display: flex; flex-direction: column; }
+  .almanac-stat .v { font-family: var(--font-display); font-weight: 700; font-size: 1.7rem; color: var(--text); line-height: 1; }
+  .almanac-stat .l { font-family: var(--font-mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); margin-top: 4px; }
+  .almanac-note { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 10px; }
+  .almanac-games { display: flex; flex-direction: column; gap: 5px; border-top: var(--card-border-width) solid var(--line); padding-top: 9px; }
+  .almanac-game-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 0.8rem; }
+  .almanac-game-row .d { font-family: var(--font-mono); color: var(--text-faint); flex: none; width: 62px; }
+  .almanac-game-row .m { flex: 1; color: var(--text-muted); }
+  .almanac-game-row .m b { color: var(--text); font-weight: 600; }
+  .almanac-game-row .hr { font-family: var(--font-mono); color: var(--text-faint); flex: none; }
+  .almanac-more { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-faint); padding-top: 2px; }
 
   footer {
     display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
@@ -528,6 +551,8 @@
       All games
     </button>
 
+    <div class="game-strip" id="gameStrip"></div>
+
     <div class="venue-heading">
       <div class="name" id="venueTag">Loading venue…</div>
       <div class="meta" id="venueMeta"></div>
@@ -548,7 +573,7 @@
     <div class="stats" id="dataStrip"></div>
 
     <div class="almanac-card" id="almanacCard" style="display:none;">
-      <div class="almanac-label">Closest Historical Match — Last 15 Years</div>
+      <div class="almanac-label">Similar Weather Days — Last 15 Years</div>
       <div class="almanac-body" id="almanacBody">Searching…</div>
     </div>
   </div>
@@ -574,6 +599,7 @@
   const gamesGrid = document.getElementById("gamesGrid");
   const gameView = document.getElementById("gameView");
   const backBtn = document.getElementById("backBtn");
+  const gameStrip = document.getElementById("gameStrip");
   const venueTag = document.getElementById("venueTag");
   const dataStrip = document.getElementById("dataStrip");
   const insightText = document.getElementById("insightText");
@@ -782,6 +808,17 @@
     </button>`;
   }
 
+  function gameStripHtml(g, i, activeIdx) {
+    const time = new Date(g.startTimeUtc).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    return `<button class="gs-pill${i === activeIdx ? " active" : ""}" data-idx="${i}">
+      ${g.awayAbbr || g.away} @ ${g.homeAbbr || g.home} <span class="gs-time">${time}</span>
+    </button>`;
+  }
+
+  function renderGameStrip(activeIdx) {
+    gameStrip.innerHTML = currentGames.map((g, i) => gameStripHtml(g, i, activeIdx)).join("");
+  }
+
   async function loadGridPreviews(sport, games) {
     await Promise.all(
       games.map(async (g, i) => {
@@ -955,6 +992,9 @@
 
   // Historical weather-match: loaded independently of the main game fetch, since a cache-miss
   // search across 15 years can take a few seconds -- no reason to hold up the primary view for it.
+  // Shows an aggregate across every home game whose weather was genuinely similar, not just the
+  // single closest day -- one outlier game (a 15-run blowout) shouldn't stand in for "what usually
+  // happens in this weather."
   async function loadAlmanac(sport, game) {
     if (sport !== "mlb") {
       almanacCard.style.display = "none";
@@ -965,17 +1005,34 @@
     try {
       const res = await fetch(`${WORKER_BASE}/api/almanac?sport=mlb&venueKey=${game.venueKey}`);
       const data = await res.json();
-      if (data.error || !data.match) {
-        almanacBody.textContent = "No comparable historical home game found.";
+      if (data.error || !data.aggregate || !data.aggregate.sampleSize) {
+        almanacBody.textContent = "No comparable historical home games found.";
         return;
       }
-      const m = data.match;
-      const dateStr = new Date(`${m.date}T00:00:00`).toLocaleDateString([], { year: "numeric", month: "long", day: "numeric" });
-      const totalHr = m.game.awayHomeRuns != null && m.game.homeHomeRuns != null ? m.game.awayHomeRuns + m.game.homeHomeRuns : null;
+      const a = data.aggregate;
+      const shown = a.games.slice(0, 6);
+      const moreCount = a.games.length - shown.length;
+      const rowsHtml = shown
+        .map((g) => {
+          const d = new Date(`${g.date}T00:00:00`).toLocaleDateString([], { month: "short", day: "numeric", year: "2-digit" });
+          const hr = g.awayHomeRuns != null && g.homeHomeRuns != null ? `${g.awayHomeRuns + g.homeHomeRuns} HR` : "";
+          return `<div class="almanac-game-row">
+            <span class="d">${d}</span>
+            <span class="m">${g.away} <b>${g.awayScore}</b> @ ${g.home} <b>${g.homeScore}</b></span>
+            <span class="hr">${hr}</span>
+          </div>`;
+        })
+        .join("");
       almanacBody.innerHTML = `
-        <div class="almanac-date">${dateStr}</div>
-        <div class="almanac-weather">${m.weather.tempF}°F · ${m.weather.windSpeedMph}mph ${m.weather.windCompass}</div>
-        <div class="almanac-game">${m.game.away} <b>${m.game.awayScore}</b> @ ${m.game.home} <b>${m.game.homeScore}</b>${totalHr !== null ? ` · ${totalHr} total HR` : ""}</div>
+        <div class="almanac-summary">
+          <div class="almanac-stat"><span class="v">${a.avgCombinedRuns ?? "—"}</span><span class="l">Avg Combined Runs</span></div>
+          <div class="almanac-stat"><span class="v">${a.avgCombinedHomeRuns ?? "—"}</span><span class="l">Avg Combined HR</span></div>
+        </div>
+        <div class="almanac-note">Based on ${a.sampleSize} similar day${a.sampleSize === 1 ? "" : "s"} (avg ${a.avgWeather.tempF}°F, ${a.avgWeather.windSpeedMph}mph)${a.looseMatch ? " — closest available, not all tightly matched" : ""}.</div>
+        <div class="almanac-games">
+          ${rowsHtml}
+          ${moreCount > 0 ? `<div class="almanac-more">+${moreCount} more similar day${moreCount === 1 ? "" : "s"}</div>` : ""}
+        </div>
       `;
     } catch (err) {
       almanacBody.textContent = `Couldn't load historical match: ${err.message}`;
@@ -986,6 +1043,7 @@
     emptyState.style.display = "none";
     gamesGrid.style.display = "none";
     gameView.style.display = "flex";
+    renderGameStrip(currentGames.indexOf(game));
     venueTag.textContent = `${game.venue || "Venue"}…`;
     venueMeta.textContent = `${game.away} @ ${game.home}`;
     insightText.textContent = "Loading AI read…";
@@ -1029,6 +1087,13 @@
   gamesGrid.addEventListener("click", (e) => {
     const btn = e.target.closest(".game-card");
     if (!btn) return;
+    const g = currentGames[Number(btn.dataset.idx)];
+    if (g) showDetail(currentSport, g);
+  });
+
+  gameStrip.addEventListener("click", (e) => {
+    const btn = e.target.closest(".gs-pill");
+    if (!btn || btn.classList.contains("active")) return;
     const g = currentGames[Number(btn.dataset.idx)];
     if (g) showDetail(currentSport, g);
   });

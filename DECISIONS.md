@@ -6,6 +6,38 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## Almanac: aggregate across all similar-weather games, not just the single closest match
+**Date:** 2026-09-02
+**Decision:** `findAlmanacMatch` (single closest day) replaced with `findAlmanacAggregate`. It still
+pulls every home game in a +/-5 day window across the last 15 years and scores each by
+`weatherDistance` against today, but instead of keeping only the #1 closest day, it now keeps every
+day within a similarity cap (`ALMANAC_DIST_CAP = 9`, roughly within ~7F/~4mph of today) up to 20
+games, and averages their real combined runs/HRs. If fewer than 6 games qualify under the cap (a
+real possibility for uncommon weather at a given park), the cap is relaxed to take the 6 closest
+regardless, flagged as `looseMatch: true` so the UI can say the sample isn't as tightly matched
+rather than silently presenting it as equally reliable.
+**Why:** A single closest-match day can be a statistical outlier (a 15-run blowout on a day whose
+weather happened to line up closest) and reads as "here's what this weather does" when it's really
+one data point. Averaging across every genuinely similar day answers "what does this weather
+usually produce" instead.
+**API/cache change:** `/api/almanac` response field renamed `match` -> `aggregate` (now `{
+sampleSize, looseMatch, avgWeather, avgCombinedRuns, avgCombinedHomeRuns, games[] }`). Cache key
+prefix changed `almanac:` -> `almanac-agg:` specifically so the new code never deserializes an old
+single-match-shaped cached entry left over from before this change. Frontend now shows the two
+averages up top, a one-line similarity note (sample size + avg conditions), and a compact list of
+the individual comparable games (capped display of 6, "+N more" for the rest) underneath for
+transparency/drill-down.
+
+## Detail view: game strip for jumping between games without returning to the grid
+**Date:** 2026-09-02
+**Decision:** Added a horizontal strip of condensed game pills (`#gameStrip`) at the top of the
+game-detail view, populated from the same `currentGames` list backing the front-page grid, with the
+currently-viewed game highlighted. Clicking a pill calls `showDetail` directly — it does not
+navigate back through the grid. The "All games" back button is unchanged and still returns to the
+grid view.
+**Why:** Requested directly — comparing conditions across several games in a slate previously
+required going back to the grid and re-clicking each time.
+
 ## Wind-direction audit: fixed a real FROM/TOWARD bug in the human-readable label, and a 5th AI phrasing failure
 **Date:** 2026-09-02
 **Decision:** Systematically grepped every use of `windFromDeg`/`windCompass`/`blowsToward` end to

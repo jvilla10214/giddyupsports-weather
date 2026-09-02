@@ -18,12 +18,13 @@
  *                                                               used to populate every card in
  *                                                               the quick-look grid at once)
  *   /api/game?sport=nfl&venueKey=...[&preview=1]             -> same, NFL
- *   /api/almanac?sport=mlb&venueKey=...                      -> closest-matching historical
- *                                                               weather day at this venue (last
- *                                                               15 years) plus that day's actual
- *                                                               home-game result. MLB only — no
- *                                                               free historical box-score API for
- *                                                               NFL, see DECISIONS.md.
+ *   /api/almanac?sport=mlb&venueKey=...                      -> aggregate across every home game
+ *                                                               at this venue (last 15 years) whose
+ *                                                               weather closely matched today's --
+ *                                                               avg combined runs/HRs across that
+ *                                                               sample, not just one game. MLB
+ *                                                               only — no free historical box-score
+ *                                                               API for NFL, see DECISIONS.md.
  *
  * NFL schedule is NOT fetched here — ESPN's scoreboard API blocks Cloudflare Worker IPs but
  * allows browser CORS requests, so the frontend fetches it client-side instead. See DECISIONS.md.
@@ -276,7 +277,17 @@ async function fetchBoxscoreHomeRuns(env, gamePk) {
   });
 }
 
-async function findAlmanacMatch(env, venue, teamId, todayWeather) {
+// Rather than surfacing one arbitrary closest-matching day (which can read as a coincidence -- a
+// single 12-run outlier doesn't tell you what similar weather *usually* does), this pulls every
+// candidate day within a "genuinely similar" distance of today's weather and averages their real
+// results. If too few days qualify (a real possibility for less-common weather at a given park),
+// the cap is relaxed and the closest available days are used instead, flagged via `looseMatch` so
+// the UI can be honest that the sample isn't as tightly matched.
+const ALMANAC_DIST_CAP = 9; // roughly: within ~7F and ~4mph of today, direction weighted lightly
+const ALMANAC_MIN_SAMPLE = 6;
+const ALMANAC_MAX_SAMPLE = 20;
+
+async function findAlmanacAggregate(env, venue, teamId, todayWeather) {
   const monthDay = todayIso().slice(5); // "MM-DD"
   const currentYear = new Date().getUTCFullYear();
   const YEARS_BACK = 15;
@@ -294,7 +305,7 @@ async function findAlmanacMatch(env, venue, teamId, todayWeather) {
     })
   );
 
-  let best = null;
+  const candidates = [];
   for (const { weatherData, games } of perYear) {
     if (!weatherData?.daily?.time || !games.length) continue;
     const { time, temperature_2m_mean, wind_speed_10m_max, wind_direction_10m_dominant } = weatherData.daily;
@@ -306,35 +317,58 @@ async function findAlmanacMatch(env, venue, teamId, todayWeather) {
         windSpeedMph: wind_speed_10m_max[idx],
         windFromDeg: wind_direction_10m_dominant[idx],
       };
-      const distance = weatherDistance(dayWeather, todayWeather);
-      if (!best || distance < best.distance) best = { date: game.date, weather: dayWeather, distance, game };
+      candidates.push({ date: game.date, weather: dayWeather, distance: weatherDistance(dayWeather, todayWeather), game });
     }
   }
-  if (!best) return null;
+  if (!candidates.length) return null;
 
-  const box = await fetchBoxscoreHomeRuns(env, best.game.gamePk);
+  candidates.sort((a, b) => a.distance - b.distance);
+  let pool = candidates.filter((c) => c.distance <= ALMANAC_DIST_CAP);
+  const looseMatch = pool.length < ALMANAC_MIN_SAMPLE;
+  if (looseMatch) pool = candidates.slice(0, ALMANAC_MIN_SAMPLE);
+  pool = pool.slice(0, ALMANAC_MAX_SAMPLE);
+
+  const boxscores = await Promise.all(pool.map((c) => fetchBoxscoreHomeRuns(env, c.game.gamePk)));
+
+  const games = pool.map((c, i) => ({
+    date: c.date,
+    away: c.game.away,
+    home: c.game.home,
+    awayScore: c.game.awayScore,
+    homeScore: c.game.homeScore,
+    awayHomeRuns: boxscores[i]?.away ?? null,
+    homeHomeRuns: boxscores[i]?.home ?? null,
+    tempF: Math.round(c.weather.tempF),
+    windSpeedMph: Math.round(c.weather.windSpeedMph),
+  }));
+
+  const runsSamples = games.map((g) => g.awayScore + g.homeScore).filter((n) => Number.isFinite(n));
+  const hrSamples = games
+    .map((g) => (g.awayHomeRuns != null && g.homeHomeRuns != null ? g.awayHomeRuns + g.homeHomeRuns : null))
+    .filter((n) => n != null);
+  const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
+
   return {
-    date: best.date,
-    weather: {
-      tempF: Math.round(best.weather.tempF),
-      windSpeedMph: Math.round(best.weather.windSpeedMph),
-      windCompass: windCompassOrVariable(best.weather),
+    sampleSize: games.length,
+    looseMatch,
+    avgWeather: {
+      tempF: Math.round(avg(pool.map((c) => c.weather.tempF))),
+      windSpeedMph: Math.round(avg(pool.map((c) => c.weather.windSpeedMph)) * 10) / 10,
     },
-    game: {
-      away: best.game.away,
-      home: best.game.home,
-      awayScore: best.game.awayScore,
-      homeScore: best.game.homeScore,
-      awayHomeRuns: box?.away ?? null,
-      homeHomeRuns: box?.home ?? null,
-    },
+    avgCombinedRuns: runsSamples.length ? Math.round(avg(runsSamples) * 10) / 10 : null,
+    avgCombinedHomeRuns: hrSamples.length ? Math.round(avg(hrSamples) * 10) / 10 : null,
+    hrSampleSize: hrSamples.length,
+    games,
   };
 }
 
 async function getAlmanacMatch(env, venueKey, venue, todayWeather) {
   const teamId = MLB_KEY_TO_TEAM_ID[venueKey];
   if (!teamId) return null;
-  return cached(env, `almanac:${venueKey}:${todayIso()}`, 60 * 60 * 24, () => findAlmanacMatch(env, venue, teamId, todayWeather));
+  // Cache key prefix changed from "almanac:" to "almanac-agg:" alongside the switch from a single
+  // best-match game to an aggregate across many similar-weather games -- the response shape changed
+  // entirely, so this avoids serving an old-shaped cached entry under the new code.
+  return cached(env, `almanac-agg:${venueKey}:${todayIso()}`, 60 * 60 * 24, () => findAlmanacAggregate(env, venue, teamId, todayWeather));
 }
 
 // ---- AI narration ----
@@ -457,8 +491,8 @@ async function handleAlmanac(env, sport, params) {
   if (!venue) return json({ error: `Unknown venueKey "${venueKey}" for sport mlb` }, 400);
 
   const weather = await fetchWeather(env, venue.lat, venue.lon);
-  const match = await getAlmanacMatch(env, venueKey, venue, weather);
-  return json({ match });
+  const aggregate = await getAlmanacMatch(env, venueKey, venue, weather);
+  return json({ aggregate });
 }
 
 export default {
