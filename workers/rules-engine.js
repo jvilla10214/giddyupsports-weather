@@ -10,6 +10,20 @@
 //   significantly 15-20mph, severely past 20mph. Field goal % drops from ~83.8% (<10mph) to ~76.9%
 //   (>20mph gusts). Indoor/closed-roof venues zero out all wind/precip effects.
 
+// carryFt threshold for the hitter-/pitcher-friendly scoringLean label. Originally a round,
+// hand-picked physics estimate (12ft); backtested against a full real season (2025, 1,786 games,
+// scripts/backtest-carry-model.js) and recalibrated. Real finding: most MLB parks are oriented
+// ~0-67.5deg (facing away from the setting sun, per MLB Rule 1.04 -- see data/stadiums.js), and
+// real prevailing summer wind commonly blows FROM the SW toward that same range -- a genuine,
+// physically real tendency for wind to blow out toward center field on a typical day, not a bug in
+// the angle math (median real wind blew FROM ~202deg, i.e. TOWARD ~22deg, squarely inside that
+// cluster). Net effect: the OLD 12ft cutoff sat below the real median carryFt (+14.4ft) --
+// "hitter-friendly" was firing on 78% of real games, the opposite of a selective, notable label.
+// 20ft sits between the real median and 75th percentile (median +14.4ft, p75 +28.6ft) and nearly
+// doubles the real hitter-vs-pitcher-friendly scoring gap in backtesting (0.92 -> 1.37 runs) while
+// keeping both flagged buckets a healthy size (750/308 out of 1,786) rather than over-thinning them.
+const CARRY_LEAN_THRESHOLD_FT = 20;
+
 function degToCompass16(deg) {
   const dirs = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
   return dirs[Math.round(((deg % 360) + 360) % 360 / 22.5) % 16];
@@ -135,7 +149,8 @@ function scoreMlbGame(weather, venue) {
     notes.push(`${venue.venue}'s retractable roof status isn't known in advance for free — if closed, wind has no effect. Verify before relying on this.`);
   }
 
-  const scoringLean = carryFt > 12 ? "hitter-friendly" : carryFt < -12 ? "pitcher-friendly" : "neutral";
+  const scoringLean =
+    carryFt > CARRY_LEAN_THRESHOLD_FT ? "hitter-friendly" : carryFt < -CARRY_LEAN_THRESHOLD_FT ? "pitcher-friendly" : "neutral";
 
   return {
     sport: "MLB",

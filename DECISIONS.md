@@ -6,6 +6,37 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## Recalibrated the hitter-/pitcher-friendly threshold using the backtest data
+**Date:** 2026-09-02
+**Decision:** `CARRY_LEAN_THRESHOLD_FT` (the `|carryFt|` cutoff for the `scoringLean` label) moved
+from a hand-picked 12ft to a backtested 20ft.
+**Why:** Checked where 12ft actually fell in the real 2025-season distribution
+(`scripts/backtest-carry-model.js`) before assuming it needed changing. It was badly miscalibrated:
+median real carryFt was **+14.4ft** — already above the "hitter-friendly" cutoff — so 78% of real
+games were being classified hitter- or pitcher-friendly, the opposite of a selective, notable
+label. Investigated why the distribution skewed positive at all (first suspected the 75F temp
+baseline, since real games actually averaged a *cooler* 67.5F — which would push carryFt down, not
+up, ruling that out). The real cause: isolating just the wind-driven component showed a +10.7ft
+median on its own, and most MLB parks cluster at a `cfBearingDeg` of 0-67.5deg (facing away from
+the setting sun per MLB Rule 1.04), while the median real wind across the whole sample blew FROM
+~202deg -- i.e. TOWARD ~22deg, squarely inside that same cluster. That's a genuine, physically real
+tendency for wind to blow out toward center field at most parks on a typical day, not a bug in the
+angle math -- confirmed by checking the raw numbers rather than assuming either explanation.
+**Recalibration:** swept threshold values from 4ft to 32ft against real combined-runs outcomes.
+20ft sits between the real median (+14.4ft) and 75th percentile (+28.6ft), and nearly doubles the
+real hitter-vs-pitcher-friendly scoring gap found in the original backtest (0.92 -> 1.37 runs)
+while keeping both flagged buckets a healthy size (750 hitter-friendly / 308 pitcher-friendly /
+728 neutral, out of 1,786) rather than over-thinning them at a more extreme cutoff.
+**A concrete effect of this change, verified live:** Coors Field's ~40ft altitude bonus alone
+always cleared the old 12ft bar, so it was unconditionally "hitter-friendly" regardless of the
+day's actual wind. At 20ft, a day where wind is blowing in enough to meaningfully offset that
+altitude bonus can now correctly land as neutral instead -- the label reflects the day's total
+predicted effect again, not just which park it's in.
+**Not touched:** the underlying carryFt computation itself (temp/humidity/altitude math, wind angle
+math) -- both were confirmed correct and physically grounded during this investigation, not the
+source of the miscalibration. Also not touched: the separate 8ft handedness-advantage threshold,
+which wasn't covered by this backtest (would need real platoon-split outcome data, not just
+combined runs, to calibrate the same way) -- a natural next backtest if this gets revisited.
 ## Backtest: does the carry model's predicted lean actually correlate with real scoring?
 **Date:** 2026-09-02
 **What:** `scripts/backtest-carry-model.js` — a standalone Node script (no Cloudflare bindings,

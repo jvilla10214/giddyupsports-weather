@@ -61,6 +61,14 @@ async function fetchSeasonWeather(lat, lon, season) {
   return byDate;
 }
 
+function percentile(arr, p) {
+  const sorted = [...arr].sort((a, b) => a - b);
+  const idx = (p / 100) * (sorted.length - 1);
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return sorted[lo];
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+}
 function mean(arr) {
   return arr.reduce((a, b) => a + b, 0) / arr.length;
 }
@@ -112,6 +120,9 @@ async function main() {
           windCarryFt: score.windCarryFt,
           scoringLean: score.scoringLean,
           combinedRuns: g.awayScore + g.homeScore,
+          tempF: w.tempF,
+          windFromDeg: w.windFromDeg,
+          cfBearingDeg: venue.cfBearingDeg,
         });
         matched++;
       }
@@ -162,6 +173,54 @@ async function main() {
   // scoring, independent of which park a game happens to be in.
   const rWindOnly = pearson(samples.map((s) => s.windCarryFt), samples.map((s) => s.combinedRuns));
   console.log(`\nPearson correlation (wind-only component vs. runs, all parks pooled): ${rWindOnly.toFixed(4)}`);
+
+  // The +/-12ft hitter/pitcher-friendly threshold in scoreMlbGame was a hand-derived physics
+  // estimate, never checked against real outcomes. Two questions worth separating: (1) where does
+  // 12ft actually fall in the real distribution of carryFt -- is it a rare extreme or a routine
+  // value? and (2) does some OTHER threshold separate real scoring outcomes better?
+  const temps = samples.map((s) => s.tempF);
+  console.log(`\n=== Empirical temperature check ===`);
+  console.log(`Real games' mean daily-mean tempF: ${mean(temps).toFixed(1)}F (model's "neutral" baseline is 75F)`);
+  console.log(`Real games' median tempF: ${percentile(temps, 50).toFixed(1)}F`);
+  const windOnlyMedian = percentile(
+    samples.map((s) => s.windCarryFt),
+    50
+  );
+  console.log(`Median wind-only component (should be ~0 if wind direction/timing is unbiased across a full season): ${windOnlyMedian.toFixed(1)}ft`);
+  // If most parks are oriented ~0-67.5deg (facing away from the setting sun, per MLB Rule 1.04 --
+  // see the comment at the top of data/stadiums.js) AND real prevailing summer wind commonly blows
+  // FROM the SW/S (a well-known climatological pattern for much of the US in summer, i.e. TOWARD
+  // the NE), those two facts would line up and consistently blow wind OUT toward center field --
+  // a real, physically-grounded reason for a positive median, not a bug in the angle math.
+  const windFromMedian = percentile(
+    samples.map((s) => s.windFromDeg),
+    50
+  );
+  console.log(`Median real wind FROM direction across all samples: ${windFromMedian.toFixed(0)}deg (SW is ~225deg)`);
+  const cfBearingCounts = {};
+  for (const s of samples) cfBearingCounts[s.cfBearingDeg] = (cfBearingCounts[s.cfBearingDeg] || 0) + 1;
+  console.log(`Sample count by park's cfBearingDeg: ${JSON.stringify(cfBearingCounts)}`);
+
+  console.log(`\n=== carryFt distribution (all ${samples.length} samples) ===`);
+  for (const p of [5, 10, 25, 50, 75, 90, 95]) {
+    console.log(`  p${p}: ${percentile(carryFts, p).toFixed(1)}ft`);
+  }
+  const currentThresholdPct = (carryFts.filter((c) => Math.abs(c) > 12).length / carryFts.length) * 100;
+  console.log(`  Games currently classified hitter- or pitcher-friendly (|carryFt| > 12): ${currentThresholdPct.toFixed(1)}%`);
+
+  console.log(`\n=== Threshold sweep: which +/-Xft cut best separates real scoring? ===`);
+  console.log(`${"T(ft)".padEnd(7)}${"hit n".padEnd(8)}${"hit mean".padEnd(10)}${"pit n".padEnd(8)}${"pit mean".padEnd(10)}${"gap".padEnd(8)}neutral n`);
+  for (const t of [4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32]) {
+    const hit = samples.filter((s) => s.carryFt > t).map((s) => s.combinedRuns);
+    const pit = samples.filter((s) => s.carryFt < -t).map((s) => s.combinedRuns);
+    const neu = samples.filter((s) => Math.abs(s.carryFt) <= t);
+    const hitMean = hit.length ? mean(hit) : NaN;
+    const pitMean = pit.length ? mean(pit) : NaN;
+    const gap = hitMean - pitMean;
+    console.log(
+      `${String(t).padEnd(7)}${String(hit.length).padEnd(8)}${hitMean.toFixed(2).padEnd(10)}${String(pit.length).padEnd(8)}${pitMean.toFixed(2).padEnd(10)}${gap.toFixed(2).padEnd(8)}${neu.length}`
+    );
+  }
 }
 
 main().catch((err) => {
