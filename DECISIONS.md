@@ -6,6 +6,58 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## Real per-park wind orientation data (Clem's Baseball), and a wrong-field AI-narration bug
+**Date:** 2026-09-03
+**AI narration bug (found first, real root cause of a live user report):** the user flagged that
+wind blowing IN at PNC Park was still being narrated as favoring home runs there. The rules-engine
+output (`fieldCarry`, `windZone`) was already correct -- the bug was in `weather-worker.js`'s prompt
+builder, which decided whether to tell the model "this is an INCREASE" or "a REDUCTION" in carry by
+checking `score.carryFt`, which is **always the center-field number**, regardless of which field
+`windZone` actually names. When wind hit left or right field hardest while center happened to read
+the opposite sign, the model was handed backwards framing and (correctly, given what it was told)
+wrote text that contradicted the real per-field numbers. Fixed by deriving the framing from
+`windZone`'s own "out toward"/"in from" wording instead, which always matches whichever field it
+names. Also added `score.windZone` into the AI-insight cache key (it was keyed on `windCompass`
+before, a proxy for the prompt's actual input, not the input itself) so a future fix like this one
+invalidates stale cached insight text immediately instead of leaving it served for up to 6 more
+hours.
+
+**Full per-park orientation audit, requested after the above fix (a *different*, deeper problem):**
+investigating the PNC Park report also surfaced that `cfBearingDeg` itself was wrong for PIT (315,
+should be ~112.5) -- and the file's own comment admitted why: most parks had never been individually
+measured, just defaulted to a generic 67.5 (ENE, "what MLB Rule 1.04 recommends") "as a first pass."
+Tried to fix this by eyeballing real aerial photos (Esri World Imagery via a static-export endpoint)
+for all 30 parks, first by hand, then with a Python/PIL/scipy connected-component script to find each
+field's grass blob and its major axis programmatically. **Both approaches turned out to be too
+imprecise to trust**: a sanity check against Fenway Park (whose real orientation, ~45 NE, is about as
+well-documented as any fact in the sport) showed the two visual methods disagreeing with each other
+by ~80 degrees, and the programmatic version clustered ~15 different real stadiums suspiciously close
+to due north -- a strong sign of a systematic bias in the pixel-reading itself, not a real pattern.
+Abandoned pixel-measurement entirely in favor of a real source: **Clem's Baseball**
+(andrewclem.com/Baseball/Stadium_statistics.html), a long-established stadium-history reference
+citing Lowry's "Green Cathedrals," Ritter, and the ESPN Sports Almanac, with a specific "CF
+Orientation" column for every park plus a load-bearing validating rule -- "no MLB stadium is oriented
+toward any direction between 150 and 315 degrees" -- that this session's own earlier PIT guess (180,
+picked from the eyeballed photo) and SF guess (22.5) both violated. Recalibrated all 29 real MLB
+parks' `cfBearingDeg` against this source (only `ATH`, Sutter Health Park, has no entry -- it's a
+temporary AAA facility with no MLB tenancy history -- so its old default value was left in place,
+unsourced). Re-ran `scripts/backtest-carry-model.js` against the full real 2025 season under the
+corrected bearings: `CARRY_LEAN_THRESHOLD_FT` (20ft) is still right around the gap-maximizing cutoff
+(1.26 at T=20 vs. a maximum of 1.28 at T=28, with T=20 keeping healthier bucket sizes) and the overall
+carryFt distribution barely moved (p50 14.7ft, p75 27.8ft vs. the original calibration's 14.4/28.6) --
+so no threshold change was needed despite ~20 of 29 parks' bearings changing, often substantially.
+Also fixed `rules-engine.test.js`'s Yankee Stadium per-field-carry test, which hardcoded a
+`windFromDeg` computed from NYY's *old* bearing (0) and silently broke once NYY's bearing corrected
+to 67.5 -- now derives the wind direction from the venue's own `cfBearingDeg` at test-run time, same
+self-adjusting pattern the Coors Field test already used, so a future bearing correction can't break
+it silently again.
+**Lesson for future sessions:** don't trust a single self-derived aerial-photo reading for orientation
+claims beyond the one-off, well-corroborated case (PIT's downtown-skyline fact was strong enough on
+its own); a real per-park sourced dataset is worth the extra search effort before touching this file
+again.
+
+---
+
 ## Redesign follow-ups: manual theme toggle, first-load map race condition, PNC Park orientation fix, wind-arrow rework
 **Date:** 2026-09-03
 **Manual light/dark toggle:** the redesign only ever reacted to OS `prefers-color-scheme`, with no

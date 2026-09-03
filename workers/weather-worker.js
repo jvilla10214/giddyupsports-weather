@@ -484,13 +484,18 @@ async function narrate(env, sport, score, weather, venue) {
   // Direction has to be part of the key, not just speed/temp -- a swing from "blowing out toward
   // right field" to "blowing in from right field" can happen with speed/temp barely moving (the
   // Nationals Park case that motivated the 10min weather-cache TTL below), which would otherwise
-  // leave a stale, direction-wrong insight served for up to 6hrs. windCompass already folds
-  // "variable" (sub-3mph, no dominant direction) into one bucket, so this doesn't over-fragment
-  // the cache on direction noise at low speed. The forecast/current flag also has to be in the key
-  // -- the model is told to describe one or the other (see conditionsLabel below), and speed/temp
-  // could round the same across that transition (forecast checked hours out vs. current once the
-  // game's about to start) without busting the key on their own.
-  const cacheKey = `insight:${sport}:${venueLabel}:${todayIso()}:${Math.round(weather.windSpeedMph)}:${Math.round(weather.tempF)}:${score.windCompass || score.windTier || "na"}:${weather.isForecast ? "f" : "c"}`;
+  // leave a stale, direction-wrong insight served for up to 6hrs. The forecast/current flag also
+  // has to be in the key -- the model is told to describe one or the other (see conditionsLabel
+  // below), and speed/temp could round the same across that transition (forecast checked hours
+  // out vs. current once the game's about to start) without busting the key on their own.
+  //
+  // score.windZone (MLB) is used here instead of the raw windCompass letter -- it's the actual
+  // deterministic output the prompt is built from (see mlbWindLine below), not just a proxy for
+  // it, so a fix to the rules engine or a venue's cfBearingDeg (like the PIT correction this key
+  // choice was found while diagnosing) invalidates any already-cached insight immediately instead
+  // of leaving a stale, now-provably-wrong one served for up to 6 more hours. windCompass/windTier
+  // stay as the fallback for NFL, which has no windZone.
+  const cacheKey = `insight:${sport}:${venueLabel}:${todayIso()}:${Math.round(weather.windSpeedMph)}:${Math.round(weather.tempF)}:${score.windZone || score.windCompass || score.windTier || "na"}:${weather.isForecast ? "f" : "c"}`;
   return cached(env, cacheKey, 6 * 60 * 60, async () => {
     if (!env.AI) return { text: "AI narration unavailable (no AI binding configured).", cached: false };
     // Gave up trying to prompt-engineer the model into correctly pairing handedness with field
@@ -538,9 +543,19 @@ async function narrate(env, sport, score, weather, venue) {
     // in plain English with the correct preposition baked in by deterministic code -- so the raw
     // compass letter is no longer given to the model to rephrase at all. It's still shown in the UI
     // stat chips directly from score.windCompass, just never passed through the AI's own wording.
+    // Sixth real failure, live-caught by the user at PNC Park: windZone can name ANY of the three
+    // fields (whichever the wind is hitting hardest), but this line used to decide REDUCTION vs.
+    // INCREASE off score.carryFt -- which is always the CENTER-field number (fieldCarry.center),
+    // not the carry for the field windZone actually names. "Blowing in from left field" with a
+    // positive center carry (e.g. wind mostly hurting LF while helping CF/RF a little less) told
+    // the model "this is an INCREASE," which it then dutifully wrote as "adding distance to left
+    // field" -- backwards, since fieldCarry.left was actually negative. windZone's own wording
+    // ("out toward" vs. "in from") already unambiguously encodes the correct sign for whichever
+    // field it names, so derive the framing from that phrase instead of a different field's number.
+    const windIsOut = score.windZone.startsWith("blowing out toward");
     const mlbWindLine = isCalm
       ? `Wind is negligible today — under 3mph, or not meaningfully directional — so carry is the same in every direction: ${score.carryFt}ft vs. a neutral day, from temperature/humidity alone. Do NOT say balls carry farther to any particular field or mention a wind direction advantage — there isn't one today.`
-      : `Wind is ${score.windZone} at ${weather.windSpeedMph}mph — this is a ${score.carryFt < 0 ? "REDUCTION in carry (wind is suppressing distance, use words like 'reducing' or 'cutting down' carry toward that field, not just 'carry to' that field, which reads as a gain)" : "an INCREASE in carry (wind is adding distance, 'adding' or 'boosting' carry toward that field is accurate)"}. Overall estimated carry vs. a neutral day: ${score.carryFt}ft. Use the exact phrase "${score.windZone}" verbatim when describing wind direction — do NOT invent your own compass direction, cardinal letters, or a "from the [direction]" phrasing; the phrase given already states direction correctly. Also do NOT state specific distance numbers for individual fields (left/center/right) — those are already shown separately in the UI and you have gotten them scrambled before. Talk about the wind direction and overall carry only.`;
+      : `Wind is ${score.windZone} at ${weather.windSpeedMph}mph — this is a ${windIsOut ? "an INCREASE in carry (wind is adding distance, 'adding' or 'boosting' carry toward that field is accurate)" : "REDUCTION in carry (wind is suppressing distance, use words like 'reducing' or 'cutting down' carry toward that field, not just 'carry to' that field, which reads as a gain)"}. Overall estimated carry vs. a neutral day, at the park's center-field bearing: ${score.carryFt}ft -- this may have a different sign than the wind effect on the field named above, since it's a different location in the park; do not treat them as the same number. Use the exact phrase "${score.windZone}" verbatim when describing wind direction — do NOT invent your own compass direction, cardinal letters, or a "from the [direction]" phrasing; the phrase given already states direction correctly. Also do NOT state specific distance numbers for individual fields (left/center/right) — those are already shown separately in the UI and you have gotten them scrambled before. Talk about the wind direction and overall carry only.`;
     // Once fetchWeather started returning a point-forecast for games meaningfully in the future
     // instead of always "right now" (see DECISIONS.md), the model's own wording still defaulted to
     // "current conditions" unprompted -- accurate numbers, misleading framing, since a forecast for

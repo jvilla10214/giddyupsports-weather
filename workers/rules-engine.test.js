@@ -43,9 +43,14 @@ console.log("Soldier Field, 25mph wind:", openWindy);
 assert(openWindy.windTier === "severe", "25mph wind at an open venue should be classified severe");
 
 // Per-field carry breakdown: wind blowing toward right field (45deg off Yankee Stadium's CF
-// bearing of 0) should carry right field the most, left field the least.
+// bearing) should carry right field the most, left field the least. Wind direction is derived
+// from the venue's own cfBearingDeg (not hardcoded) so this doesn't silently go stale if that
+// bearing is ever corrected -- exactly what happened here once before, when NYY's bearing was
+// recalibrated from a generic default and this test's hardcoded windFromDeg no longer pointed at
+// RF under the corrected value, breaking silently until the suite was actually run.
+const nyyRfBearing = (MLB_STADIUMS.NYY.cfBearingDeg + 45) % 360;
 const rfWind = scoreMlbGame(
-  { tempF: 75, humidityPct: 50, windSpeedMph: 15, windFromDeg: 225, precipProbPct: 0 },
+  { tempF: 75, humidityPct: 50, windSpeedMph: 15, windFromDeg: (nyyRfBearing + 180) % 360, precipProbPct: 0 },
   MLB_STADIUMS.NYY
 );
 console.log("Yankee Stadium, wind blowing toward RF:", rfWind.fieldCarry);
