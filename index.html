@@ -115,7 +115,11 @@
     --insight-border-color: var(--accent-live);
   }
   @media (prefers-color-scheme: dark) {
-    html[data-sport="mlb"] {
+    /* :not([data-theme="light"]) so an explicit light-mode toggle (below) can still win even when
+       the system itself prefers dark -- without this guard the media query always applies dark
+       regardless of any manual override, which is exactly the bug that made the toggle needed in
+       the first place look broken on a dark-system machine. */
+    html[data-sport="mlb"]:not([data-theme="light"]) {
       --bg: #0c0f13;
       --bg-elevated: #151a21;
       --bg-elevated-2: #1e2530;
@@ -135,6 +139,30 @@
       --accent-warn: #d3726b;
       --accent-warn-dim: #342325;
     }
+  }
+  /* Explicit dark-mode toggle, wins regardless of system preference (see themeToggle in the
+     script below). Same values as the media-query block above -- kept as a literal duplicate
+     rather than a shared class list so this stays a plain CSS override with no specificity
+     surprises, matching how data-sport itself already works. */
+  html[data-sport="mlb"][data-theme="dark"] {
+    --bg: #0c0f13;
+    --bg-elevated: #151a21;
+    --bg-elevated-2: #1e2530;
+    --bg-glass: rgba(21, 26, 33, 0.85);
+    --text: #edeff2;
+    --text-muted: #8a93a0;
+    --text-faint: #5d6674;
+    --line: #262e39;
+    --line-strong: #37414e;
+
+    --accent-atmo: #6fa9cc;
+    --accent-atmo-dim: #202e38;
+    --accent-live: #5fa86a;
+    --accent-live-dim: #1d2e24;
+    --accent-ai: #d99a3f;
+    --accent-ai-dim: #352b1c;
+    --accent-warn: #d3726b;
+    --accent-warn-dim: #342325;
   }
 
   /* ---------- NFL theme: "Gridiron Pressure" — frozen turf under floodlight ----------
@@ -176,7 +204,9 @@
     --insight-border-color: var(--accent-live);
   }
   @media (prefers-color-scheme: light) {
-    html[data-sport="nfl"] {
+    /* :not([data-theme="dark"]) mirrors the MLB guard above -- lets an explicit dark-mode toggle
+       still win even when the system itself prefers light. */
+    html[data-sport="nfl"]:not([data-theme="dark"]) {
       --bg: #edeef0;
       --bg-elevated: #ffffff;
       --bg-elevated-2: #e3e5e8;
@@ -199,6 +229,31 @@
       --shadow: 0 20px 50px -26px rgba(20, 23, 27, 0.16), 0 1px 2px rgba(20, 23, 27, 0.05);
       --shadow-soft: 0 10px 26px -18px rgba(20, 23, 27, 0.12);
     }
+  }
+  /* Explicit light-mode toggle for NFL, wins regardless of system preference -- same values as
+     the media-query block above, literal duplicate for the same reason noted on MLB's dark block. */
+  html[data-sport="nfl"][data-theme="light"] {
+    --bg: #edeef0;
+    --bg-elevated: #ffffff;
+    --bg-elevated-2: #e3e5e8;
+    --bg-glass: rgba(255, 255, 255, 0.85);
+    --text: #14171b;
+    --text-muted: #585e66;
+    --text-faint: #878d95;
+    --line: #d1d4d9;
+    --line-strong: #b6bac1;
+
+    --accent-atmo: #3e7089;
+    --accent-atmo-dim: #d5dce2;
+    --accent-live: #2e7d4f;
+    --accent-live-dim: #d2ded9;
+    --accent-ai: #96731a;
+    --accent-ai-dim: #e1ddd2;
+    --accent-warn: #a8433d;
+    --accent-warn-dim: #e3d6d7;
+
+    --shadow: 0 20px 50px -26px rgba(20, 23, 27, 0.16), 0 1px 2px rgba(20, 23, 27, 0.05);
+    --shadow-soft: 0 10px 26px -18px rgba(20, 23, 27, 0.12);
   }
 
   * { box-sizing: border-box; }
@@ -309,6 +364,21 @@
   .sport-toggle button[aria-pressed="true"] { background: var(--accent-live-dim); color: var(--accent-live); }
   .sport-toggle button:disabled { color: var(--text-faint); cursor: default; opacity: 0.5; }
   .sport-toggle button:not(:disabled):not([aria-pressed="true"]):hover { color: var(--text); }
+
+  /* ---------- Theme toggle: explicit override for the system-preference-only dark/light split ----------
+     Before this the site only ever reacted to prefers-color-scheme with no way to override it --
+     someone on a light-system machine who wanted the (very deliberately designed) dark identity had
+     no way to get it. A half-moon icon that fills in when dark mode is active, echoing the
+     sport-toggle's own pressed-state treatment. */
+  .theme-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 38px; height: 38px; flex: none;
+    background: var(--bg-elevated); border: 1px solid var(--line); border-radius: 100px;
+    color: var(--text-muted); cursor: pointer; padding: 0;
+  }
+  .theme-toggle:hover { color: var(--text); border-color: var(--line-strong); }
+  .theme-toggle[aria-pressed="true"] { background: var(--accent-live-dim); color: var(--accent-live); border-color: transparent; }
+  .theme-toggle[aria-pressed="true"] svg { fill: currentColor; }
 
   /* ---------- Landing: the suite's front door, shown before a sport is picked ----------
      Chrome (background/text) still reads from the currently-active html[data-sport] tokens, but
@@ -619,6 +689,9 @@
       <button disabled title="Coming soon">Tennis</button>
       <button disabled title="Coming soon">Golf</button>
     </div>
+    <button class="theme-toggle" id="themeToggle" type="button" aria-pressed="false" title="Night mode">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11Z"/></svg>
+    </button>
   </div>
 
   <div id="landingView" class="landing">
@@ -759,6 +832,7 @@
   const statusLine = document.getElementById("statusLine");
   const landingView = document.getElementById("landingView");
   const brandLogo = document.getElementById("brandLogo");
+  const themeToggle = document.getElementById("themeToggle");
   const emptyState = document.getElementById("emptyState");
   const emptyStateText = document.getElementById("emptyStateText");
   const gamesGrid = document.getElementById("gamesGrid");
@@ -787,6 +861,7 @@
   let map, marker;
   let currentGames = [];
   let currentSport = null; // null until a sport is picked from the landing page
+  let lastWeather = null; // most recently rendered game's weather, for theme-change canvas redraws
 
   function setStatus(msg) { statusLine.textContent = msg || ""; }
 
@@ -798,17 +873,43 @@
     const hero = document.getElementById("heroCard");
     const ctx = canvas.getContext("2d");
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const PARTICLE_COUNT = 150;
+    // Fewer, longer streaklines read as a flow field; the old 150-short-dart version read as
+    // scattered particles. Each one gets a persistent per-particle curl so paths bow gently
+    // instead of running dead straight, like a real windvis (Windy.com etc.), not a sprite trail.
+    const PARTICLE_COUNT = 90;
+    const TRAIL_LEN = 26;
     let particles = [];
     let w = 0, h = 0;
     let flowAngleDeg = 200; // gentle ambient default until real wind data loads
     let flowSpeedMph = 6;
-    // Fixed bright color rather than a theme token: this draws over a live satellite photo whose
-    // brightness varies constantly (roads, roofs, grass, water), not over a themed card
-    // background, so it needs to read clearly regardless of what's underneath or which sport's
-    // theme is active. A dark outline stroke drawn under each segment (see step()) does the rest,
-    // same contrast trick the racing command center's track-wind visual uses.
-    const strokeRgb = "255,204,51";
+    let t = 0;
+    // Base gold, refreshed from the active sport's --accent-ai token every ~40 frames so the
+    // flow tints itself to whichever theme is live (MLB gold vs NFL gold read close but not
+    // identical) without paying a getComputedStyle call every single frame.
+    let accent = { r: 255, g: 204, b: 51 };
+    let accentAge = 999;
+
+    function hexToRgb(hex) {
+      const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec((hex || "").trim());
+      if (!m) return null;
+      return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
+    }
+
+    function refreshAccent() {
+      const raw = getComputedStyle(document.documentElement).getPropertyValue("--accent-ai");
+      const rgb = hexToRgb(raw);
+      if (rgb) accent = rgb;
+      accentAge = 0;
+    }
+
+    function shade(rgb, factor) {
+      // factor <1 dims toward black (tail), >1 lifts toward white (head) -- a cheap two-stop
+      // "energy" gradient along each streakline without allocating a canvas gradient per segment.
+      const mix = (c) => (factor >= 1
+        ? Math.round(c + (255 - c) * Math.min(1, factor - 1))
+        : Math.round(c * Math.max(0, factor)));
+      return `${mix(rgb.r)},${mix(rgb.g)},${mix(rgb.b)}`;
+    }
 
     function resize() {
       w = hero.clientWidth;
@@ -831,8 +932,10 @@
       p.y = Math.random() * h;
       p.trail = [];
       p.age = 0;
-      p.maxAge = 70 + Math.random() * 90;
-      p.variance = 0.75 + Math.random() * 0.5;
+      p.maxAge = 110 + Math.random() * 130;
+      p.variance = 0.7 + Math.random() * 0.55;
+      p.curlSeed = Math.random() * 1000;
+      p.curlAmp = 6 + Math.random() * 10;
     }
 
     function seed() {
@@ -846,62 +949,64 @@
 
     function step() {
       if (!w || !h) return;
-      const { dx, dy } = flowVector(flowAngleDeg);
+      t++;
+      accentAge++;
+      if (accentAge > 40) refreshAccent();
       // Wide range so a calm day and a windy one are visibly, not just numerically, different.
-      const speedPx = 0.25 + Math.min(flowSpeedMph, 35) * 0.11;
+      const speedPx = 0.22 + Math.min(flowSpeedMph, 35) * 0.1;
       ctx.clearRect(0, 0, w, h);
       for (const p of particles) {
+        // Gentle organic curl: a slow two-frequency wobble per particle around the base heading,
+        // so streaklines bow instead of running as dead-straight darts.
+        const wobble = Math.sin(p.curlSeed + t * 0.006) * p.curlAmp
+          + Math.sin(p.curlSeed * 1.7 + t * 0.0023) * p.curlAmp * 0.4;
+        const { dx, dy } = flowVector(flowAngleDeg + wobble);
         p.x += dx * speedPx * p.variance;
         p.y += dy * speedPx * p.variance;
         p.age++;
         p.trail.push({ x: p.x, y: p.y });
-        if (p.trail.length > 18) p.trail.shift();
+        if (p.trail.length > TRAIL_LEN) p.trail.shift();
         if (p.age > p.maxAge || p.x < -20 || p.x > w + 20 || p.y < -20 || p.y > h + 20) {
           respawn(p);
           continue;
         }
-        for (let i = 1; i < p.trail.length; i++) {
+        const n = p.trail.length;
+        for (let i = 1; i < n; i++) {
           const a = p.trail[i - 1];
           const b = p.trail[i];
-          const alpha = (i / p.trail.length) * 0.9;
-          // Dark outline pass first so the arrow stays legible over bright patches of the photo
-          // (roads, rooftops), then the bright color on top -- same trick as the racing app's.
-          ctx.strokeStyle = `rgba(10,10,10,${alpha * 0.55})`;
-          ctx.lineWidth = 3.4;
+          const frac = i / n; // 0 near the tail, 1 at the leading edge
+          const alpha = (0.12 + frac * 0.7) * 0.95; // faint at the tail, not invisible -- reads as a streak, not a dot
+          const width = 0.6 + frac * 2.1;
+          // Dark outline pass first so the streak stays legible over bright patches of the photo
+          // (roads, rooftops), then the tinted color on top -- same contrast trick as before.
+          ctx.strokeStyle = `rgba(8,8,8,${alpha * 0.5})`;
+          ctx.lineWidth = width + 1.3;
           ctx.lineCap = "round";
           ctx.beginPath();
           ctx.moveTo(a.x, a.y);
           ctx.lineTo(b.x, b.y);
           ctx.stroke();
-          ctx.strokeStyle = `rgba(${strokeRgb},${alpha})`;
-          ctx.lineWidth = 2.2;
+          const rgb = shade(accent, 0.55 + frac * 0.85); // dim gold tail -> near-white head
+          ctx.strokeStyle = `rgba(${rgb},${alpha})`;
+          ctx.lineWidth = width;
           ctx.beginPath();
           ctx.moveTo(a.x, a.y);
           ctx.lineTo(b.x, b.y);
           ctx.stroke();
         }
-        // Arrowhead at the leading edge of each trail, angled with the flow direction.
-        if (p.trail.length >= 2) {
-          const head = p.trail[p.trail.length - 1];
-          const rad = Math.atan2(dy, dx);
-          const size = 5.5;
-          const tip = { x: head.x + Math.cos(rad) * size, y: head.y + Math.sin(rad) * size };
-          const l = { x: head.x + Math.cos(rad + 2.5) * size, y: head.y + Math.sin(rad + 2.5) * size };
-          const r = { x: head.x + Math.cos(rad - 2.5) * size, y: head.y + Math.sin(rad - 2.5) * size };
-          ctx.fillStyle = "rgba(10,10,10,0.5)";
+        // Soft glowing head instead of a hard chevron -- additive blend gives it a lit-particle
+        // look that survives sitting on top of a busy aerial photo.
+        if (n >= 2) {
+          const head = p.trail[n - 1];
+          ctx.globalCompositeOperation = "lighter";
+          const glow = ctx.createRadialGradient(head.x, head.y, 0, head.x, head.y, 6.5);
+          glow.addColorStop(0, `rgba(${shade(accent, 1.5)},0.85)`);
+          glow.addColorStop(1, `rgba(${shade(accent, 1.5)},0)`);
+          ctx.fillStyle = glow;
           ctx.beginPath();
-          ctx.moveTo(tip.x + 0.6, tip.y + 0.6);
-          ctx.lineTo(l.x + 0.6, l.y + 0.6);
-          ctx.lineTo(r.x + 0.6, r.y + 0.6);
-          ctx.closePath();
+          ctx.arc(head.x, head.y, 6.5, 0, Math.PI * 2);
           ctx.fill();
-          ctx.fillStyle = `rgba(${strokeRgb},1)`;
-          ctx.beginPath();
-          ctx.moveTo(tip.x, tip.y);
-          ctx.lineTo(l.x, l.y);
-          ctx.lineTo(r.x, r.y);
-          ctx.closePath();
-          ctx.fill();
+          ctx.globalCompositeOperation = "source-over";
         }
       }
     }
@@ -918,6 +1023,7 @@
 
     resize();
     seed();
+    refreshAccent();
     new ResizeObserver(resize).observe(hero);
 
     if (reduceMotion) {
@@ -1074,6 +1180,14 @@
 
   function ensureMap(lat, lon, halfExtentM) {
     const bounds = metersToLatLngBox(lat, lon, halfExtentM);
+    // Real bug found live: on the very first stadium view after a fresh page load, Leaflet's
+    // container can still be mid-layout (display:none -> flex just happened in this same call
+    // stack) at the exact moment fitBounds runs, so it reads a stale/zero container size and
+    // falls back to zoom 0 -- the whole world in one tile, confirmed by inspecting the actual
+    // tile URL requested (".../tile/0/0/0"). Every SUBSEQUENT venue switch worked fine, because
+    // by then the container was already laid out. invalidateSize() right before fitBounds (not
+    // just in the delayed safety-net below) forces Leaflet to re-measure synchronously first, so
+    // even the very first call sees the real size.
     if (!map) {
       // Fully static picture: every interaction handler off, so the stadium view can't be
       // panned or zoomed — it just shows the venue, centered, and nothing else.
@@ -1087,19 +1201,21 @@
         keyboard: false,
         touchZoom: false,
         tap: false,
-      }).fitBounds(bounds);
+      });
       L.tileLayer(
         "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         { maxZoom: 19 }
       ).addTo(map);
       marker = L.marker([lat, lon], { interactive: false }).addTo(map);
     } else {
-      map.fitBounds(bounds);
       marker.setLatLng([lat, lon]);
     }
-    // fitBounds needs the container's real on-screen size to pick the right zoom -- if the hero
-    // was just made visible (display:none -> flex) the browser may not have reflowed yet, so this
-    // re-measures and re-fits once that's settled, same as the invalidateSize delay this replaced.
+    map.invalidateSize();
+    map.fitBounds(bounds, { animate: false });
+    // Belt-and-suspenders: if the container's layout is STILL settling even after the synchronous
+    // invalidateSize above (e.g. a font/image load still reflowing the page), this catches it a
+    // moment later. Cheap no-op re-confirmation on the common case where the first fit was already
+    // correct.
     setTimeout(() => {
       map.invalidateSize();
       map.fitBounds(bounds, { animate: false });
@@ -1399,6 +1515,7 @@
         ? ` · conditions forecast for ${new Date(data.weather.forecastForIso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} (game time)`
         : "";
       venueMeta.textContent = `${game.away} @ ${game.home} · ${suffix}${forecastNote}`;
+      lastWeather = data.weather;
       renderInstrumentCluster(data.weather, data.score);
       renderStatPairs(sport, data.venue, data.score);
       renderWindRose(data.weather, data.score);
@@ -1435,6 +1552,28 @@
     landingView.style.display = "flex";
     setStatus("");
   });
+
+  function isDarkNow() {
+    const explicit = document.documentElement.dataset.theme;
+    if (explicit === "dark") return true;
+    if (explicit === "light") return false;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+
+  function syncThemeToggleUI() {
+    const dark = isDarkNow();
+    themeToggle.setAttribute("aria-pressed", String(dark));
+    themeToggle.title = dark ? "Day mode" : "Night mode";
+  }
+
+  themeToggle.addEventListener("click", () => {
+    const goingDark = !isDarkNow();
+    document.documentElement.dataset.theme = goingDark ? "dark" : "light";
+    syncThemeToggleUI();
+    if (lastWeather) renderSparkline(lastWeather);
+  });
+
+  syncThemeToggleUI();
 
   gamesGrid.addEventListener("click", (e) => {
     const btn = e.target.closest(".game-card");

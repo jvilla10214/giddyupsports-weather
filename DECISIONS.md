@@ -6,6 +6,46 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## Redesign follow-ups: manual theme toggle, first-load map race condition, PNC Park orientation fix, wind-arrow rework
+**Date:** 2026-09-03
+**Manual light/dark toggle:** the redesign only ever reacted to OS `prefers-color-scheme`, with no
+way to override it. Added a half-moon button (`#themeToggle`) next to the sport switcher that sets
+`document.documentElement.dataset.theme` to `"dark"`/`"light"`. Both sport theme blocks already had
+a light-default + dark-media-query cascade; restructured each to add an explicit
+`html[data-sport="x"][data-theme="dark"|"light"]` override block (guarded with `:not([data-theme=...])`
+on the media-query blocks) so a manual pick wins over system preference in either direction. State
+resolves from `dataset.theme` first, falling back to `matchMedia` only when unset — a naive boolean
+flip gets stuck once an explicit value exists.
+
+**First-load aerial map bug (found, fixed):** on a hard reload, clicking straight into the first game
+sometimes rendered the Leaflet map fully zoomed out (a world tile at `z=0`) instead of the stadium.
+Switching venues afterward always framed correctly. Root cause: `ensureMap()` called `.fitBounds()`
+synchronously as part of map creation, with no `invalidateSize()` first — the container's layout
+wasn't always settled yet on a genuinely first paint, and the existing `setTimeout(150)` safety net
+didn't reliably catch it. Fixed by making map creation and re-use both fall through to one shared
+path that unconditionally calls `invalidateSize()` immediately before `fitBounds()`; the delayed
+re-fit stays as a second safety net.
+
+**PNC Park orientation was wrong:** `cfBearingDeg` for PIT was coded as 315° (NW). Prompted by a
+user question about wind at PNC Park seeming to help hitters despite blowing "in," re-examined the
+venue with the (now-fixed) aerial photo — PNC Park's defining feature is the downtown Pittsburgh
+skyline visible beyond the outfield wall, which sits across the Allegheny River roughly south of the
+park, not northwest. Pixel-measured the real aerial photo's diamond orientation directly (home plate
+to the deepest point of the outfield wall) and got ~187°, confirming the true bearing is close to due
+south, not 315°. Corrected to `cfBearingDeg: 180`. This only affects PIT — every other venue's
+bearing was left untouched since this was a single bad data entry, not a systemic issue. The
+wind FROM/TOWARD math itself was independently re-verified correct before making this change.
+
+**Wind-flow-arrows visual rework:** replaced the old 150-particle short-dart/hard-chevron trail
+system with fewer (90), longer (26-point) streaklines that curl gently via a per-particle two-frequency
+sine wobble instead of running dead-straight, taper in width and fade from a dim to a near-white gold
+along their length, and end in a soft additive-blend glow instead of a flat triangle arrowhead. Tints
+itself from the active sport's `--accent-ai` token (re-read every ~40 frames, not every frame) so it
+follows both sport and theme. Same dark-outline-then-color legibility trick as before, since it still
+draws over a live, brightness-varying satellite photo.
+
+---
+
 ## Redesign shipped: "Diamond Atmospherics" (MLB) / "Gridiron Pressure" (NFL), plus a suite landing page
 **Date:** 2026-09-03
 **Decision:** Replaced the live "Vintage Diamond" (MLB) and "Gridiron" (NFL) themes with a new

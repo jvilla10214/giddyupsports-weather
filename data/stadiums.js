@@ -33,7 +33,7 @@ export const MLB_STADIUMS = {
   NYY: { team: "Yankees", venue: "Yankee Stadium", city: "Bronx, NY", lat: 40.8296, lon: -73.9262, roofType: "open", altitudeFt: 55, cfBearingDeg: 0 },
   ATH: { team: "Athletics", venue: "Sutter Health Park", city: "West Sacramento, CA", lat: 38.5805, lon: -121.5133, roofType: "open", altitudeFt: 25, cfBearingDeg: 45 },
   PHI: { team: "Phillies", venue: "Citizens Bank Park", city: "Philadelphia, PA", lat: 39.9061, lon: -75.1665, roofType: "open", altitudeFt: 20, cfBearingDeg: 22.5 },
-  PIT: { team: "Pirates", venue: "PNC Park", city: "Pittsburgh, PA", lat: 40.4469, lon: -80.0057, roofType: "open", altitudeFt: 730, cfBearingDeg: 315 },
+  PIT: { team: "Pirates", venue: "PNC Park", city: "Pittsburgh, PA", lat: 40.4469, lon: -80.0057, roofType: "open", altitudeFt: 730, cfBearingDeg: 180 },
   SD: { team: "Padres", venue: "Petco Park", city: "San Diego, CA", lat: 32.7076, lon: -117.1569, roofType: "open", altitudeFt: 20, cfBearingDeg: 0 },
   SF: { team: "Giants", venue: "Oracle Park", city: "San Francisco, CA", lat: 37.7786, lon: -122.3893, roofType: "open", altitudeFt: 10, cfBearingDeg: 337.5 },
   SEA: { team: "Mariners", venue: "T-Mobile Park", city: "Seattle, WA", lat: 47.5914, lon: -122.3325, roofType: "retractable", altitudeFt: 15, cfBearingDeg: 22.5 },
