@@ -6,7 +6,7 @@
 <title>GiddyUpSports Weather Command Center</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Bebas+Neue&family=Roboto+Slab:wght@400;500;700&family=Anton&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Big+Shoulders+Display:wght@700;800;900&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=Anton&family=Barlow+Semi+Condensed:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
   /* ---------- Base tokens ("Floodlight") — inert fallback, always overridden below ----------
@@ -74,126 +74,130 @@
     }
   }
 
-  /* ---------- MLB theme: "Vintage Diamond" — 1950s ballpark signage ----------
-     Floodlight (above) stays the NFL identity until a football-specific direction is chosen.
-     Cream/mustard/forest-green parchment by default; a dark override for night viewing. Setting
-     data-sport="mlb" on <html> swaps every token below in, and every component that already
-     reads var(--font-display) etc. re-skins automatically — no component CSS duplicated. */
+  /* ---------- MLB theme: "Diamond Atmospherics" — instrument panel, not a fan site ----------
+     Replaced "Vintage Diamond" (2026-09-03): a precise, data-forward identity built around the
+     product's real substance (a backtested physics model, recalibrated against a real season) —
+     stadium-lights amber as the signature/AI accent, storm-front blue as the wind/atmosphere data
+     accent. Same html[data-sport="mlb"] mechanism as before, values sourced from the approved
+     design concept (see DECISIONS.md) rather than re-derived here. accent-atmo/live/ai/warn keep
+     their existing semantic roles; ai/atmo now carry the two-accent identity (accent=amber=ai,
+     accent-2=storm-blue=atmo) while live/warn map to that same design's good/bad tokens. */
   html[data-sport="mlb"] {
-    --bg: #f2e2c0;
-    --bg-elevated: #f8ecd2;
-    --bg-elevated-2: #ecdcb4;
-    --bg-glass: rgba(248, 236, 210, 0.85);
-    --text: #2f2517;
-    --text-muted: #6b5a3d;
-    --text-faint: #94815a;
-    --line: #2f2517;
-    --line-strong: #2f2517;
+    --bg: #eef1f4;
+    --bg-elevated: #ffffff;
+    --bg-elevated-2: #e5e9ed;
+    --bg-glass: rgba(255, 255, 255, 0.85);
+    --text: #12181f;
+    --text-muted: #59636e;
+    --text-faint: #88929c;
+    --line: #d2d8de;
+    --line-strong: #b9c1c9;
 
-    --accent-atmo: #3d6e8a;
-    --accent-atmo-dim: #dde6ea;
-    --accent-live: #2f5233;
-    --accent-live-dim: #dde6da;
-    --accent-ai: #a5402f;
-    --accent-ai-dim: #f3ddd6;
-    --accent-warn: #a5402f;
-    --accent-warn-dim: #f3ddd6;
+    --accent-atmo: #2e6b8f;
+    --accent-atmo-dim: #d3dee6;
+    --accent-live: #2e7d4f;
+    --accent-live-dim: #d3e1dd;
+    --accent-ai: #a8681f;
+    --accent-ai-dim: #e4ded6;
+    --accent-warn: #a8433d;
+    --accent-warn-dim: #e4d9da;
 
-    --shadow: 0 14px 34px -20px rgba(47, 37, 23, 0.35);
-    --shadow-soft: 0 8px 20px -14px rgba(47, 37, 23, 0.3);
+    --shadow: 0 20px 50px -26px rgba(18, 24, 31, 0.16), 0 1px 2px rgba(18, 24, 31, 0.05);
+    --shadow-soft: 0 10px 26px -18px rgba(18, 24, 31, 0.12);
 
-    --font-display: "Bebas Neue", sans-serif;
-    --font-body: "Roboto Slab", serif;
-    --font-mono: "Roboto Slab", serif;
+    --font-display: "Big Shoulders Display", sans-serif;
+    --font-body: "IBM Plex Sans", sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
 
-    --card-border-width: 2px;
-    --radius-lg: 14px;
-    --radius-md: 10px;
+    --card-border-width: 1px;
+    --radius-lg: 6px;
+    --radius-md: 4px;
     --insight-border-color: var(--accent-live);
   }
   @media (prefers-color-scheme: dark) {
     html[data-sport="mlb"] {
-      --bg: #1c1810;
-      --bg-elevated: #231d13;
-      --bg-elevated-2: #2c2417;
-      --bg-glass: rgba(35, 29, 19, 0.85);
-      --text: #f2e2c0;
-      --text-muted: #b8a67e;
-      --text-faint: #8a7a58;
-      --line: #f2e2c0;
-      --line-strong: #f2e2c0;
+      --bg: #0c0f13;
+      --bg-elevated: #151a21;
+      --bg-elevated-2: #1e2530;
+      --bg-glass: rgba(21, 26, 33, 0.85);
+      --text: #edeff2;
+      --text-muted: #8a93a0;
+      --text-faint: #5d6674;
+      --line: #262e39;
+      --line-strong: #37414e;
 
-      --accent-atmo: #8fc3de;
-      --accent-atmo-dim: #22301f;
-      --accent-live: #7fae8e;
-      --accent-live-dim: #22301f;
-      --accent-ai: #e08871;
-      --accent-ai-dim: #3a1f18;
-      --accent-warn: #e08871;
-      --accent-warn-dim: #3a1f18;
+      --accent-atmo: #6fa9cc;
+      --accent-atmo-dim: #202e38;
+      --accent-live: #5fa86a;
+      --accent-live-dim: #1d2e24;
+      --accent-ai: #d99a3f;
+      --accent-ai-dim: #352b1c;
+      --accent-warn: #d3726b;
+      --accent-warn-dim: #342325;
     }
   }
 
-  /* ---------- NFL theme: "Gridiron" — cold turf under Friday-night lights ----------
-     Deliberately a sibling to Vintage Diamond, not a twin: dark-first (turf night) instead of
-     cream/parchment, Anton + Barlow instead of the condensed-serif pairing, gold (first-down
-     marker) as the favorable accent instead of forest green. Dark is the natural identity here,
-     so — unlike MLB — the unconditional block below IS the dark version, with a light override. */
+  /* ---------- NFL theme: "Gridiron Pressure" — frozen turf under floodlight ----------
+     Replaced "Gridiron" (2026-09-03), same reasoning as MLB above: cold steel/frost instead of
+     turf-night green, chain-gang gold as the signature/AI accent instead of first-down-marker
+     gold-on-green. Dark is still the natural identity (a December night game reads better dark),
+     so the unconditional block stays the dark version with a light override, same structure as
+     before. */
   html[data-sport="nfl"] {
-    --bg: #0d1f14;
-    --bg-elevated: #142b1c;
-    --bg-elevated-2: #1a3423;
-    --bg-glass: rgba(20, 43, 28, 0.85);
-    --text: #f5f7ee;
-    --text-muted: #9db3a0;
-    --text-faint: #6b8073;
-    --line: rgba(245, 247, 238, 0.14);
-    --line-strong: rgba(245, 247, 238, 0.28);
+    --bg: #0e1013;
+    --bg-elevated: #181b20;
+    --bg-elevated-2: #22262d;
+    --bg-glass: rgba(24, 27, 32, 0.85);
+    --text: #f1f3f5;
+    --text-muted: #93989f;
+    --text-faint: #63686f;
+    --line: #282d34;
+    --line-strong: #393f48;
 
-    --accent-atmo: #7fb8d4;
-    --accent-atmo-dim: #1c3440;
-    --accent-live: #f2c14e;
-    --accent-live-dim: #3a3416;
-    --accent-ai: #c67a45;
-    --accent-ai-dim: #3a2716;
-    --accent-warn: #d64545;
-    --accent-warn-dim: #3a1c1c;
+    --accent-atmo: #6e97ac;
+    --accent-atmo-dim: #212b32;
+    --accent-live: #5fa86a;
+    --accent-live-dim: #1e2e24;
+    --accent-ai: #d4a017;
+    --accent-ai-dim: #362d14;
+    --accent-warn: #d3726b;
+    --accent-warn-dim: #352425;
 
     --shadow: 0 20px 60px -22px rgba(0, 0, 0, 0.6);
     --shadow-soft: 0 12px 32px -18px rgba(0, 0, 0, 0.5);
 
     --font-display: "Anton", sans-serif;
-    --font-body: "Barlow", sans-serif;
-    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+    --font-body: "Barlow Semi Condensed", sans-serif;
+    --font-mono: "Space Mono", ui-monospace, "SF Mono", monospace;
 
-    --card-border-width: 2px;
-    --radius-lg: 12px;
-    --radius-md: 8px;
+    --card-border-width: 1px;
+    --radius-lg: 6px;
+    --radius-md: 4px;
     --insight-border-color: var(--accent-live);
   }
   @media (prefers-color-scheme: light) {
     html[data-sport="nfl"] {
-      --bg: #eef2ec;
+      --bg: #edeef0;
       --bg-elevated: #ffffff;
-      --bg-elevated-2: #e4ebe1;
+      --bg-elevated-2: #e3e5e8;
       --bg-glass: rgba(255, 255, 255, 0.85);
-      --text: #10241a;
-      --text-muted: #4d6156;
-      --text-faint: #7c8f83;
-      --line: rgba(16, 36, 26, 0.14);
-      --line-strong: rgba(16, 36, 26, 0.28);
+      --text: #14171b;
+      --text-muted: #585e66;
+      --text-faint: #878d95;
+      --line: #d1d4d9;
+      --line-strong: #b6bac1;
 
-      --accent-atmo: #2f6b85;
-      --accent-atmo-dim: #dcebf0;
-      --accent-live: #a8710f;
-      --accent-live-dim: #f7ecd2;
-      --accent-ai: #96501f;
-      --accent-ai-dim: #f2e2d2;
-      --accent-warn: #b6342f;
-      --accent-warn-dim: #f7dfdd;
+      --accent-atmo: #3e7089;
+      --accent-atmo-dim: #d5dce2;
+      --accent-live: #2e7d4f;
+      --accent-live-dim: #d2ded9;
+      --accent-ai: #96731a;
+      --accent-ai-dim: #e1ddd2;
+      --accent-warn: #a8433d;
+      --accent-warn-dim: #e3d6d7;
 
-      --shadow: 0 20px 50px -26px rgba(16, 36, 26, 0.22);
-      --shadow-soft: 0 10px 26px -18px rgba(16, 36, 26, 0.16);
+      --shadow: 0 20px 50px -26px rgba(20, 23, 27, 0.16), 0 1px 2px rgba(20, 23, 27, 0.05);
+      --shadow-soft: 0 10px 26px -18px rgba(20, 23, 27, 0.12);
     }
   }
 
@@ -241,9 +245,12 @@
     display: inline-flex;
     align-items: center;
     color: var(--text);
+    background: none;
     border: 2px solid currentColor;
     border-radius: 100px;
     padding: 9px 22px;
+    cursor: pointer;
+    font: inherit;
   }
   .brand-logo::before,
   .brand-logo::after {
@@ -302,6 +309,41 @@
   .sport-toggle button[aria-pressed="true"] { background: var(--accent-live-dim); color: var(--accent-live); }
   .sport-toggle button:disabled { color: var(--text-faint); cursor: default; opacity: 0.5; }
   .sport-toggle button:not(:disabled):not([aria-pressed="true"]):hover { color: var(--text); }
+
+  /* ---------- Landing: the suite's front door, shown before a sport is picked ----------
+     Chrome (background/text) still reads from the currently-active html[data-sport] tokens, but
+     each tile carries its OWN sport identity via inline --tile-accent/--tile-accent-2 custom
+     properties -- Golf and Tennis don't have full page themes built (no real backend/data source
+     for either yet, see DECISIONS.md), so this is the lightest way to preview their identity
+     without standing up CSS token blocks for pages that don't exist. */
+  .landing { display: flex; flex-direction: column; gap: 26px; padding: 8px 0 40px; }
+  .landing-intro h1 { font-family: var(--font-display); font-weight: 800; font-size: clamp(1.7rem, 3.6vw, 2.4rem); text-transform: uppercase; letter-spacing: 0.01em; margin: 0 0 8px; text-wrap: balance; }
+  .landing-intro p { color: var(--text-muted); max-width: 62ch; font-size: 0.92rem; line-height: 1.6; margin: 0; }
+  .landing-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
+  .landing-tile {
+    position: relative; overflow: hidden;
+    display: flex; flex-direction: column; gap: 8px; text-align: left;
+    background: var(--bg-elevated); border: var(--card-border-width) solid var(--line);
+    border-radius: var(--radius-lg); padding: 22px 20px 20px;
+    font: inherit; color: inherit; box-shadow: var(--shadow-soft);
+    transition: transform 0.15s ease, border-color 0.15s ease;
+  }
+  .landing-tile::before {
+    content: ""; position: absolute; inset: 0 0 auto 0; height: 3px;
+    background: linear-gradient(90deg, var(--tile-accent), var(--tile-accent-2));
+  }
+  button.landing-tile { cursor: pointer; }
+  button.landing-tile:hover { transform: translateY(-3px); border-color: var(--tile-accent); }
+  .landing-tile.soon { opacity: 0.78; }
+  .lt-name { font-family: var(--font-display); font-size: 1.5rem; font-weight: 800; color: var(--tile-accent); line-height: 1.05; }
+  .lt-sport { font-family: var(--font-mono); font-size: 0.64rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--text-faint); }
+  .lt-desc { font-size: 0.82rem; color: var(--text-muted); line-height: 1.5; margin-top: 2px; }
+  .lt-status {
+    align-self: flex-start; font-family: var(--font-mono); font-size: 0.6rem; font-weight: 700;
+    letter-spacing: 0.08em; text-transform: uppercase; padding: 3px 10px; border-radius: 100px;
+    margin-top: 6px; color: var(--tile-accent-2); background: color-mix(in srgb, var(--tile-accent-2) 16%, transparent);
+  }
+  .landing-tile.soon .lt-status { color: var(--text-faint); background: var(--bg-elevated-2); }
 
   /* ---------- Empty state ---------- */
   .empty-state {
@@ -397,6 +439,63 @@
   #map .leaflet-marker-icon,
   #map .leaflet-marker-shadow { cursor: default !important; }
 
+  /* ---------- Wind-rose: a small analog compass dial over the aerial photo ---------- */
+  .wind-rose {
+    position: absolute; z-index: 450; bottom: 12px; left: 12px;
+    width: 92px; height: 92px; border-radius: 50%;
+    background: var(--bg-glass); backdrop-filter: blur(3px);
+    border: var(--card-border-width) solid var(--line-strong);
+  }
+  .wind-rose svg { width: 100%; height: 100%; }
+  .wind-rose-readout {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; pointer-events: none;
+  }
+  .wind-rose-readout .v { font-family: var(--font-mono); font-weight: 600; font-size: 15px; line-height: 1; color: var(--text); }
+  .wind-rose-readout .u { font-family: var(--font-mono); font-size: 8.5px; color: var(--text-faint); margin-top: 2px; letter-spacing: 0.05em; }
+
+  /* ---------- Detail board: two-column instrument layout on wide screens ---------- */
+  .board { display: grid; grid-template-columns: 1.5fr 1fr; gap: 16px; align-items: start; }
+  .stack { display: flex; flex-direction: column; gap: 16px; }
+  @media (max-width: 900px) { .board { grid-template-columns: 1fr; } }
+
+  /* ---------- Instrument cluster: circular gauges for temp/humidity/wind ---------- */
+  .instrument-cluster {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+    background: var(--bg-elevated); border: var(--card-border-width) solid var(--line);
+    border-radius: var(--radius-md); padding: 14px; box-shadow: var(--shadow-soft);
+  }
+  .gauge { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 4px 10px; border: var(--card-border-width) solid var(--line); border-radius: var(--radius-md); background: var(--bg-elevated-2); }
+  .gauge svg { width: 68px; height: 68px; }
+  .gauge-track { fill: none; stroke: var(--line-strong); stroke-width: 6; }
+  .gauge-fill { fill: none; stroke: var(--accent-atmo); stroke-width: 6; stroke-linecap: round; transition: stroke-dasharray 0.5s ease; }
+  .gauge-readout { margin-top: -46px; display: flex; flex-direction: column; align-items: center; }
+  .gauge-value { font-family: var(--font-mono); font-weight: 600; font-size: 15px; color: var(--text); }
+  .gauge-unit { font-family: var(--font-mono); font-size: 8.5px; color: var(--text-faint); }
+  .gauge-label { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); margin-top: 18px; }
+
+  /* ---------- Compact stat-pair row: whatever doesn't fit a gauge (altitude/carry, roof/tier) ---------- */
+  .stat-pairs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .stat-pair {
+    background: var(--bg-elevated); border: var(--card-border-width) solid var(--line);
+    border-radius: var(--radius-md); padding: 12px 14px; box-shadow: var(--shadow-soft);
+  }
+  .stat-pair .sp-label { font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); }
+  .stat-pair .sp-value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 1.25rem; font-weight: 600; color: var(--text); margin-top: 4px; }
+  .stat-pair .sp-value small { font-size: 0.7rem; color: var(--text-muted); font-weight: 500; margin-left: 2px; }
+  .stat-pair.accent .sp-value { color: var(--accent-atmo); }
+
+  /* ---------- Wind trend sparkline: real hourly forecast leading into game time ---------- */
+  .sparkline-card {
+    background: var(--bg-elevated); border: var(--card-border-width) solid var(--line);
+    border-radius: var(--radius-md); padding: 14px 16px; box-shadow: var(--shadow-soft);
+  }
+  .sparkline-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+  .sparkline-head .sh-label { font-family: var(--font-mono); font-size: 0.6rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-faint); }
+  .sparkline-head .sh-tag { font-family: var(--font-mono); font-size: 0.6rem; color: var(--text-faint); }
+  #sparklineCanvas { width: 100%; height: 92px; display: block; }
+  .sparkline-foot { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 0.66rem; color: var(--text-faint); margin-top: 2px; }
+
   /* ---------- Insight panel: a plain card below the picture, not an overlay on it ---------- */
   .insight-panel {
     background: var(--bg-elevated);
@@ -421,20 +520,29 @@
   .pill-lean.warn { color: var(--accent-ai); background: var(--accent-ai-dim); }
   .pill-lean.bad { color: var(--accent-warn); background: var(--accent-warn-dim); }
 
-  /* ---------- HR-by-field breakdown (MLB only) ---------- */
-  .field-carry { display: flex; gap: 8px; margin-bottom: 14px; }
-  .fc-btn {
-    flex: 1; text-align: center; padding: 8px 6px;
-    background: var(--bg-elevated-2);
-    border: var(--card-border-width) solid var(--line);
-    border-radius: var(--radius-md);
-  }
-  .fc-btn .fc-label { font-family: var(--font-mono); font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); }
-  .fc-btn .fc-value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 1.05rem; font-weight: 700; color: var(--text); margin-top: 2px; }
-  .fc-btn.good { border-color: var(--accent-live); }
-  .fc-btn.good .fc-value { color: var(--accent-live); }
-  .fc-btn.bad { border-color: var(--accent-warn); }
-  .fc-btn.bad .fc-value { color: var(--accent-warn); }
+  /* ---------- Field-direction carry (MLB) / wind-tier (NFL): magnitude bars, not flat boxes ----------
+     Bars over boxes because magnitude is the point -- a -41ft reading and a -13ft reading both used
+     to render as identically-sized "bad" boxes, losing exactly the information (how much) that
+     matters most. MLB is genuinely bidirectional (wind can add or remove carry vs. neutral), so it
+     gets a center-zero bar with the real, backtested +-20ft threshold marked on it (see
+     rules-engine.js CARRY_LEAN_THRESHOLD_FT / DECISIONS.md). NFL's wind effect is a one-directional
+     disruption to an otherwise-precise pass/kick -- there's no real "wind improves this" case to
+     show on the other side of a zero line -- so it renders as a single left-anchored tier bar
+     instead of forcing a bidirectional metaphor onto one-directional data. */
+  .impact-rows { display: flex; flex-direction: column; gap: 9px; margin-bottom: 14px; }
+  .impact-row { display: grid; grid-template-columns: 34px 1fr 62px; align-items: center; gap: 10px; }
+  .impact-row .ir-label { font-family: var(--font-mono); font-size: 0.7rem; font-weight: 600; color: var(--text-muted); }
+  .impact-track { position: relative; height: 18px; background: var(--bg-elevated-2); border: var(--card-border-width) solid var(--line); border-radius: 3px; overflow: hidden; }
+  .impact-zero { position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: var(--line-strong); }
+  .impact-threshold { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--text-faint); opacity: 0.5; }
+  .impact-fill { position: absolute; top: 1px; bottom: 1px; border-radius: 2px; }
+  .impact-fill.bad { background: linear-gradient(90deg, color-mix(in srgb, var(--accent-warn) 55%, transparent), var(--accent-warn)); }
+  .impact-fill.good { background: linear-gradient(90deg, var(--accent-live), color-mix(in srgb, var(--accent-live) 55%, transparent)); }
+  .impact-value { font-family: var(--font-mono); font-size: 0.76rem; font-weight: 700; text-align: right; }
+  .impact-value.bad { color: var(--accent-warn); }
+  .impact-value.good { color: var(--accent-live); }
+  .impact-scale-marks { display: grid; grid-template-columns: 34px 1fr 62px; font-family: var(--font-mono); font-size: 0.6rem; color: var(--text-faint); margin-top: -2px; }
+  .impact-scale-marks span:nth-child(2) { display: flex; justify-content: space-between; }
 
   .handed-note {
     display: flex; align-items: center; gap: 6px;
@@ -446,29 +554,6 @@
   .insight-zone { font-size: 0.78rem; color: var(--text-muted); }
   .insight-text { font-size: 0.94rem; line-height: 1.55; color: var(--text); max-width: 64ch; }
 
-  /* ---------- Stat chips ---------- */
-  .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; min-height: 8px; }
-  @media (max-width: 760px) { .stats { grid-template-columns: repeat(2, 1fr); } }
-
-  .chip {
-    background: var(--bg-elevated);
-    border: var(--card-border-width) solid var(--line);
-    border-radius: var(--radius-md);
-    padding: 14px 16px;
-    display: flex; flex-direction: column; gap: 8px;
-    box-shadow: var(--shadow-soft);
-  }
-  .chip .icon-wrap {
-    width: 30px; height: 30px; border-radius: 9px;
-    display: flex; align-items: center; justify-content: center;
-    background: var(--accent-atmo-dim);
-  }
-  .chip .icon-wrap svg { stroke: var(--accent-atmo); }
-  .chip.live .icon-wrap { background: var(--accent-live-dim); }
-  .chip.live .icon-wrap svg { stroke: var(--accent-live); }
-  .chip .label { font-family: var(--font-mono); font-size: 0.64rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); }
-  .chip .value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 1.4rem; font-weight: 600; color: var(--text); line-height: 1; }
-  .chip .value small { font-size: 0.8rem; color: var(--text-muted); font-weight: 500; margin-left: 2px; }
 
   /* ---------- Historical almanac (MLB only) ---------- */
   .almanac-card {
@@ -514,7 +599,7 @@
 
   <div class="masthead">
     <div class="brand">
-      <div class="brand-logo">
+      <button class="brand-logo" id="brandLogo" type="button" aria-label="All sports">
         <span class="wordmark">
           GiddyUpSp
           <svg class="ball" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
@@ -524,11 +609,11 @@
           </svg>
           rts
         </span>
-      </div>
+      </button>
       <span class="kicker">Weather Intelligence</span>
     </div>
     <div class="sport-toggle" id="sportToggle" role="group" aria-label="Sport">
-      <button data-sport="mlb" aria-pressed="true">MLB</button>
+      <button data-sport="mlb" aria-pressed="false">MLB</button>
       <button data-sport="nfl" aria-pressed="false">NFL</button>
       <button disabled title="Coming soon">NCAAF</button>
       <button disabled title="Coming soon">Tennis</button>
@@ -536,7 +621,40 @@
     </div>
   </div>
 
-  <div id="emptyState" class="empty-state">
+  <div id="landingView" class="landing">
+    <div class="landing-intro">
+      <h1>Weather Intelligence Suite</h1>
+      <p>A deterministic physics model, AI-narrated, backtested against real seasons — pick a sport to see how today's conditions read.</p>
+    </div>
+    <div class="landing-grid">
+      <button class="landing-tile live" data-sport="mlb" style="--tile-accent:#A8681F; --tile-accent-2:#2E6B8F;">
+        <div class="lt-name">Diamond Atmospherics</div>
+        <div class="lt-sport">MLB · Baseball</div>
+        <div class="lt-desc">Stadium lights meeting a storm front — air density, carry distance, and 150 years of parks built to keep the sun out of a hitter's eyes.</div>
+        <div class="lt-status">Live</div>
+      </button>
+      <button class="landing-tile live" data-sport="nfl" style="--tile-accent:#D4A017; --tile-accent-2:#6E97AC;">
+        <div class="lt-name">Gridiron Pressure</div>
+        <div class="lt-sport">NFL · Football</div>
+        <div class="lt-desc">Frozen turf under floodlight — where atmospheric pressure and fourth-quarter pressure read the same on the gauge.</div>
+        <div class="lt-status">Live</div>
+      </button>
+      <div class="landing-tile soon" style="--tile-accent:#A83E30; --tile-accent-2:#5D7268;">
+        <div class="lt-name">Links &amp; Lie</div>
+        <div class="lt-sport">Golf</div>
+        <div class="lt-desc">A windswept coastal links — where club selection has always been a weather reading first, a yardage second.</div>
+        <div class="lt-status">Coming Soon</div>
+      </div>
+      <div class="landing-tile soon" style="--tile-accent:#6B3F82; --tile-accent-2:#3E6B3C;">
+        <div class="lt-name">Advantage Court</div>
+        <div class="lt-sport">Tennis</div>
+        <div class="lt-desc">All white on grass — SW19's own purple and green, where a crosswind is the one opponent neither player can scout.</div>
+        <div class="lt-status">Coming Soon</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="emptyState" class="empty-state" style="display:none;">
     <div class="icon-ring">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
     </div>
@@ -561,20 +679,56 @@
     <div class="hero" id="heroCard">
       <div id="map"></div>
       <canvas id="windFlowCanvas" class="wind-flow-canvas"></canvas>
+      <div class="wind-rose" id="windRose">
+        <svg viewBox="0 0 92 92">
+          <circle cx="46" cy="46" r="41" fill="none" stroke="var(--line)" stroke-width="1"/>
+          <circle cx="46" cy="46" r="29" fill="none" stroke="var(--line)" stroke-width="1" stroke-dasharray="1 4"/>
+          <g stroke="var(--line-strong)" stroke-width="1">
+            <line x1="46" y1="5" x2="46" y2="11"/>
+            <line x1="46" y1="81" x2="46" y2="87"/>
+            <line x1="5" y1="46" x2="11" y2="46"/>
+            <line x1="81" y1="46" x2="87" y2="46"/>
+          </g>
+          <text x="46" y="17" text-anchor="middle" font-family="IBM Plex Mono" font-size="7" fill="var(--text-faint)">N</text>
+          <text x="46" y="79" text-anchor="middle" font-family="IBM Plex Mono" font-size="7" fill="var(--text-faint)">S</text>
+          <text x="15" y="49" text-anchor="middle" font-family="IBM Plex Mono" font-size="7" fill="var(--text-faint)">W</text>
+          <text x="77" y="49" text-anchor="middle" font-family="IBM Plex Mono" font-size="7" fill="var(--text-faint)">E</text>
+          <g id="windNeedle" transform="rotate(0 46 46)">
+            <polygon points="46,14 42,29 50,29" fill="var(--accent-atmo)"/>
+            <line x1="46" y1="29" x2="46" y2="56" stroke="var(--accent-atmo)" stroke-width="2"/>
+          </g>
+          <circle cx="46" cy="46" r="2.5" fill="var(--accent-atmo)"/>
+        </svg>
+        <div class="wind-rose-readout"><span class="v" id="windRoseSpeed">—</span><span class="u" id="windRoseDir">mph</span></div>
+      </div>
     </div>
 
-    <div class="insight-panel">
-      <div class="insight-top" id="insightTop"></div>
-      <div class="field-carry" id="fieldCarry" style="display:none;"></div>
-      <div class="handed-note" id="handedNote" style="display:none;"></div>
-      <div class="insight-text" id="insightText">Loading AI read…</div>
-    </div>
-
-    <div class="stats" id="dataStrip"></div>
-
-    <div class="almanac-card" id="almanacCard" style="display:none;">
-      <div class="almanac-label">Similar Weather Days — Last 15 Years</div>
-      <div class="almanac-body" id="almanacBody">Searching…</div>
+    <div class="board">
+      <div class="stack">
+        <div class="insight-panel">
+          <div class="insight-top" id="insightTop"></div>
+          <div class="impact-rows" id="fieldCarry" style="display:none;"></div>
+          <div class="impact-scale-marks" id="impactScaleMarks" style="display:none;"></div>
+          <div class="handed-note" id="handedNote" style="display:none;"></div>
+          <div class="insight-text" id="insightText">Loading AI read…</div>
+        </div>
+      </div>
+      <div class="stack">
+        <div class="instrument-cluster" id="gaugeCluster"></div>
+        <div class="stat-pairs" id="statPairs"></div>
+        <div class="sparkline-card" id="sparklineCard" style="display:none;">
+          <div class="sparkline-head">
+            <span class="sh-label">Wind Trend &rarr; Game Time</span>
+            <span class="sh-tag">Forecast</span>
+          </div>
+          <canvas id="sparklineCanvas" width="480" height="120"></canvas>
+          <div class="sparkline-foot"><span id="sparkFootStart">—</span><span id="sparkFootEnd">—</span></div>
+        </div>
+        <div class="almanac-card" id="almanacCard" style="display:none;">
+          <div class="almanac-label">Similar Weather Days — Last 15 Years</div>
+          <div class="almanac-body" id="almanacBody">Searching…</div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -603,6 +757,8 @@
 
   const sportToggle = document.getElementById("sportToggle");
   const statusLine = document.getElementById("statusLine");
+  const landingView = document.getElementById("landingView");
+  const brandLogo = document.getElementById("brandLogo");
   const emptyState = document.getElementById("emptyState");
   const emptyStateText = document.getElementById("emptyStateText");
   const gamesGrid = document.getElementById("gamesGrid");
@@ -610,18 +766,27 @@
   const backBtn = document.getElementById("backBtn");
   const gameStrip = document.getElementById("gameStrip");
   const venueTag = document.getElementById("venueTag");
-  const dataStrip = document.getElementById("dataStrip");
+  const gaugeCluster = document.getElementById("gaugeCluster");
+  const statPairs = document.getElementById("statPairs");
   const insightText = document.getElementById("insightText");
   const insightTop = document.getElementById("insightTop");
   const fieldCarryEl = document.getElementById("fieldCarry");
+  const impactScaleMarksEl = document.getElementById("impactScaleMarks");
   const handedNoteEl = document.getElementById("handedNote");
   const almanacCard = document.getElementById("almanacCard");
   const almanacBody = document.getElementById("almanacBody");
   const venueMeta = document.getElementById("venueMeta");
+  const windRoseSpeed = document.getElementById("windRoseSpeed");
+  const windRoseDir = document.getElementById("windRoseDir");
+  const windNeedle = document.getElementById("windNeedle");
+  const sparklineCard = document.getElementById("sparklineCard");
+  const sparklineCanvas = document.getElementById("sparklineCanvas");
+  const sparkFootStart = document.getElementById("sparkFootStart");
+  const sparkFootEnd = document.getElementById("sparkFootEnd");
 
   let map, marker;
   let currentGames = [];
-  let currentSport = "mlb";
+  let currentSport = null; // null until a sport is picked from the landing page
 
   function setStatus(msg) { statusLine.textContent = msg || ""; }
 
@@ -762,21 +927,27 @@
     }
   })();
 
-  const ICONS = {
-    temp: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0Z"/></svg>',
-    humidity: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M12 2.7s6 7.2 6 11.3a6 6 0 0 1-12 0c0-4.1 6-11.3 6-11.3Z"/></svg>',
-    wind: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M3 8h11a3 3 0 1 0-3-3M3 16h15a3 3 0 1 1-3 3M3 12h9"/></svg>',
-    altitude: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="m8 21 4-13 4 13M3 21h18M9 8l3-5 3 5"/></svg>',
-    carry: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M3 17l6-6 4 4 8-8M21 7v6h-6"/></svg>',
-    roof: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M3 11 12 4l9 7M5 10v10h14V10"/></svg>',
-    gauge: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M12 12 16 8M4 12a8 8 0 1 1 16 0"/></svg>',
-  };
+  // Instrument gauge: a 270deg arc (like a real analog dial, not a full circle) whose fill length
+  // is set directly from the value's fraction of [min,max] -- clamped so an out-of-range reading
+  // still renders a sane full/empty dial instead of a broken dasharray.
+  function gaugeMarkup(value, min, max, label, unit, displayOverride) {
+    const frac = Math.max(0, Math.min(1, (value - min) / (max - min)));
+    const trackLen = 75; // 75% of the circle's pathLength = a 270deg sweep
+    const fillLen = (trackLen * frac).toFixed(2);
+    return `<div class="gauge">
+      <svg viewBox="0 0 90 90">
+        <circle class="gauge-track" cx="45" cy="45" r="36" pathLength="100" stroke-dasharray="${trackLen} 100" transform="rotate(135 45 45)"/>
+        <circle class="gauge-fill" cx="45" cy="45" r="36" pathLength="100" stroke-dasharray="${fillLen} 100" transform="rotate(135 45 45)"/>
+      </svg>
+      <div class="gauge-readout"><span class="gauge-value">${displayOverride ?? value}</span><span class="gauge-unit">${unit}</span></div>
+      <div class="gauge-label">${label}</div>
+    </div>`;
+  }
 
-  function chip(icon, label, value, unit, live) {
-    return `<div class="chip${live ? " live" : ""}">
-      <div class="icon-wrap">${ICONS[icon]}</div>
-      <div class="label">${label}</div>
-      <div class="value">${value}${unit ? `<small>${unit}</small>` : ""}</div>
+  function statPair(label, value, unit, accent) {
+    return `<div class="stat-pair${accent ? " accent" : ""}">
+      <div class="sp-label">${label}</div>
+      <div class="sp-value">${value}${unit ? `<small>${unit}</small>` : ""}</div>
     </div>`;
   }
 
@@ -854,6 +1025,8 @@
   async function loadSchedule(sport) {
     currentSport = sport;
     document.documentElement.dataset.sport = sport;
+    landingView.style.display = "none";
+    sportToggle.querySelectorAll("button[data-sport]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.sport === sport)));
     gameView.style.display = "none";
     gamesGrid.style.display = "none";
     emptyState.style.display = "flex";
@@ -933,31 +1106,41 @@
     }, 150);
   }
 
-  function renderDataStrip(sport, weather, venue, score) {
-    // score.roofClosed means wind can't reach the field (fixed dome, or a retractable roof
-    // assumed closed) -- showing the raw outdoor wind reading here would be actively misleading,
-    // since it plays no part in the carry/passing numbers right next to it.
-    // A meaningfully higher gust than sustained speed means conditions are genuinely gusty/
-    // variable, not steady -- worth surfacing directly, since the sustained number alone can
-    // undersell how much the wind is actually shifting moment to moment (confirmed live: this is
-    // exactly the pattern near an active thunderstorm's outflow).
-    const gustNote = weather.windGustMph != null && weather.windGustMph - weather.windSpeedMph >= 5 ? ` · gusts ${Math.round(weather.windGustMph)}` : "";
-    const windChip = score.roofClosed
-      ? chip("wind", "Wind", "Indoors", "no effect")
-      : chip("wind", "Wind", weather.windSpeedMph.toFixed(1), `mph ${score.windCompass || ""}${gustNote}`);
-    const chips = [
-      chip("temp", "Temp", Math.round(weather.tempF), "°F"),
-      chip("humidity", "Humidity", Math.round(weather.humidityPct), "%"),
-      windChip,
+  function renderInstrumentCluster(weather, score) {
+    const gauges = [
+      gaugeMarkup(Math.round(weather.tempF), 20, 105, "Temp", "°F"),
+      gaugeMarkup(Math.round(weather.humidityPct), 0, 100, "Humidity", "%"),
+      // score.roofClosed means wind can't reach the field -- the gauge still renders (empty) so the
+      // 3-up grid doesn't visibly break, but the readout says so plainly instead of showing 0mph.
+      score.roofClosed
+        ? gaugeMarkup(0, 0, 40, "Wind", "indoors", "—")
+        : gaugeMarkup(Number(weather.windSpeedMph.toFixed(1)), 0, 40, "Wind", "mph"),
     ];
-    if (sport === "mlb") {
-      chips.push(chip("altitude", "Altitude", (venue.altitudeFt / 1000).toFixed(1), "k ft"));
-      chips.push(chip("carry", "Est. Carry", `${score.carryFt > 0 ? "+" : ""}${score.carryFt}`, "ft", true));
-    } else {
-      chips.push(chip("roof", "Roof", venue.roofType));
-      chips.push(chip("gauge", "Wind Tier", score.windTier || "—", null, true));
+    gaugeCluster.innerHTML = gauges.join("");
+  }
+
+  function renderStatPairs(sport, venue, score) {
+    const pairs =
+      sport === "mlb"
+        ? [statPair("Altitude", (venue.altitudeFt / 1000).toFixed(1), "k ft"), statPair("Est. Carry", `${score.carryFt > 0 ? "+" : ""}${score.carryFt}`, "ft", true)]
+        : [statPair("Roof", venue.roofType), statPair("Wind Tier", score.windTier || "—", null, true)];
+    statPairs.innerHTML = pairs.join("");
+  }
+
+  // Analog wind-rose: needle rotated to the TOWARD bearing (where the wind is headed, not where
+  // it's coming from -- the site-wide convention, see DECISIONS.md), same conversion the wind-flow
+  // canvas and score.windCompass already use, so all three always agree with each other.
+  function renderWindRose(weather, score) {
+    if (score.roofClosed) {
+      windRoseSpeed.textContent = "—";
+      windRoseDir.textContent = "indoors";
+      return;
     }
-    dataStrip.innerHTML = chips.join("");
+    const towardDeg = ((weather.windFromDeg ?? 0) + 180) % 360;
+    windNeedle.setAttribute("transform", `rotate(${towardDeg} 46 46)`);
+    windRoseSpeed.textContent = weather.windSpeedMph.toFixed(1);
+    const gustNote = weather.windGustMph != null && weather.windGustMph - weather.windSpeedMph >= 5 ? ` ·g${Math.round(weather.windGustMph)}` : "";
+    windRoseDir.textContent = `mph ${score.windCompass || ""}${gustNote}`;
   }
 
   function renderLeanTop(sport, score) {
@@ -978,27 +1161,73 @@
       `<span class="insight-zone">${zone}</span>`;
   }
 
-  // HR-by-field breakdown -- MLB only, since "which field" isn't a football concept.
-  function renderFieldCarry(sport, score) {
-    if (sport !== "mlb" || !score.fieldCarry) {
-      fieldCarryEl.style.display = "none";
-      return;
-    }
-    const fields = [
-      ["LF", score.fieldCarry.left],
-      ["CF", score.fieldCarry.center],
-      ["RF", score.fieldCarry.right],
-    ];
-    fieldCarryEl.innerHTML = fields
-      .map(([label, ft]) => {
-        const cls = ft > 12 ? "good" : ft < -12 ? "bad" : "";
-        const sign = ft > 0 ? "+" : "";
-        return `<div class="fc-btn ${cls}"><div class="fc-label">${label}</div><div class="fc-value">${sign}${ft}ft</div></div>`;
-      })
-      .join("");
-    fieldCarryEl.style.display = "flex";
+  // MLB's carry effect is genuinely bidirectional (wind can add or remove distance vs. a neutral
+  // day), so LF/CF/RF render as a center-zero bar with the real, backtested threshold marked on
+  // it (CARRY_LEAN_THRESHOLD_FT in rules-engine.js -- kept in sync by hand, see DECISIONS.md; the
+  // old per-field coloring here used a stale +-12ft cutoff left over from before that recalibration,
+  // now fixed to match). NFL's wind effect is a one-directional disruption to an otherwise-precise
+  // pass/kick -- there's no real "wind improves this" case -- so it renders as a single
+  // left-anchored magnitude bar off real wind speed against the same 10/15/20mph tiers the backend
+  // already classifies by, rather than inventing per-play numbers the backend doesn't compute.
+  const CARRY_BAR_MAX_FT = 60;
+  const CARRY_BAR_THRESHOLD_FT = 20; // must match rules-engine.js CARRY_LEAN_THRESHOLD_FT
 
-    if (score.handedness && score.handedness.favors !== "neutral") {
+  function renderImpactRows(sport, weather, score) {
+    impactScaleMarksEl.style.display = "none";
+    if (sport === "mlb") {
+      if (!score.fieldCarry) {
+        fieldCarryEl.style.display = "none";
+        return;
+      }
+      const fields = [
+        ["LF", score.fieldCarry.left],
+        ["CF", score.fieldCarry.center],
+        ["RF", score.fieldCarry.right],
+      ];
+      fieldCarryEl.innerHTML = fields
+        .map(([label, ft]) => {
+          const isBad = ft < 0;
+          const p = Math.max(-50, Math.min(50, (ft / CARRY_BAR_MAX_FT) * 50));
+          const left = isBad ? 50 + p : 50;
+          const right = isBad ? 50 : 50 - p;
+          const sign = ft > 0 ? "+" : "";
+          return `<div class="impact-row">
+            <span class="ir-label">${label}</span>
+            <div class="impact-track">
+              <div class="impact-zero"></div>
+              <div class="impact-threshold" style="left:${50 - (CARRY_BAR_THRESHOLD_FT / CARRY_BAR_MAX_FT) * 50}%"></div>
+              <div class="impact-threshold" style="left:${50 + (CARRY_BAR_THRESHOLD_FT / CARRY_BAR_MAX_FT) * 50}%"></div>
+              <div class="impact-fill ${isBad ? "bad" : "good"}" style="left:${left}%; right:${right}%"></div>
+            </div>
+            <span class="impact-value ${isBad ? "bad" : "good"}">${sign}${ft}ft</span>
+          </div>`;
+        })
+        .join("");
+      fieldCarryEl.style.display = "flex";
+      fieldCarryEl.style.flexDirection = "column";
+      impactScaleMarksEl.innerHTML = `<span></span><span><span>&minus;${CARRY_BAR_MAX_FT}</span><span>&minus;${CARRY_BAR_MAX_FT / 2}</span><span>0</span><span>+${CARRY_BAR_MAX_FT / 2}</span><span>+${CARRY_BAR_MAX_FT}</span></span><span></span>`;
+      impactScaleMarksEl.style.display = "grid";
+    } else {
+      if (score.roofClosed) {
+        fieldCarryEl.style.display = "none";
+        return;
+      }
+      const max = 30; // mph -- past this the tier is already "severe," no need for more headroom
+      const frac = Math.min(100, (weather.windSpeedMph / max) * 100);
+      fieldCarryEl.innerHTML = `<div class="impact-row">
+        <span class="ir-label">WIND</span>
+        <div class="impact-track">
+          <div class="impact-fill bad" style="left:0; width:${frac}%"></div>
+        </div>
+        <span class="impact-value bad">${(score.windTier || "").replace(/\b\w/g, (c) => c.toUpperCase())}</span>
+      </div>`;
+      fieldCarryEl.style.display = "flex";
+      fieldCarryEl.style.flexDirection = "column";
+      impactScaleMarksEl.innerHTML = `<span></span><span><span>Light</span><span>Moderate</span><span>Strong</span><span>Severe</span></span><span></span>`;
+      impactScaleMarksEl.style.display = "grid";
+    }
+
+    if (sport === "mlb" && score.handedness && score.handedness.favors !== "neutral") {
       const who = score.handedness.favors === "left" ? "Left-handed" : "Right-handed";
       // "Edge" and "more carry" alone read as an absolute gain -- but the pull field can still be
       // below a neutral day (just less suppressed than the opposite field), which is a relative
@@ -1013,6 +1242,78 @@
     } else {
       handedNoteEl.style.display = "none";
     }
+  }
+
+  // Real hourly-forecast trend into game time (weather.windTrend, only populated on the point-
+  // forecast path -- see fetchWeather in weather-worker.js) -- not decorative, the actual Open-
+  // Meteo hourly points already fetched server-side for the point-forecast feature.
+  function renderSparkline(weather) {
+    const trend = weather.windTrend;
+    if (!trend || trend.length < 2) {
+      sparklineCard.style.display = "none";
+      return;
+    }
+    sparklineCard.style.display = "block";
+    const ctx = sparklineCanvas.getContext("2d");
+    const w = sparklineCanvas.width, h = sparklineCanvas.height, pad = 10;
+    const values = trend.map((p) => p.windSpeedMph);
+    const max = Math.max(...values) * 1.15 || 1;
+    const min = 0;
+    const stepX = (w - pad * 2) / (trend.length - 1);
+    const yFor = (v) => h - pad - ((v - min) / (max - min)) * (h - pad * 2);
+    const cs = getComputedStyle(document.documentElement);
+    const accent = cs.getPropertyValue("--accent-atmo").trim();
+    const line = cs.getPropertyValue("--line").trim();
+    const surface = cs.getPropertyValue("--bg-elevated").trim();
+    const ink = cs.getPropertyValue("--text").trim();
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.strokeStyle = line;
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 3; i++) {
+      const y = pad + ((h - pad * 2) / 3) * i;
+      ctx.beginPath();
+      ctx.moveTo(pad, y);
+      ctx.lineTo(w - pad, y);
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.moveTo(pad, yFor(values[0]));
+    values.forEach((v, i) => ctx.lineTo(pad + i * stepX, yFor(v)));
+    ctx.lineTo(pad + (values.length - 1) * stepX, h - pad);
+    ctx.lineTo(pad, h - pad);
+    ctx.closePath();
+    const grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, accent + "33");
+    grad.addColorStop(1, accent + "02");
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.beginPath();
+    values.forEach((v, i) => {
+      const x = pad + i * stepX, y = yFor(v);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = "round";
+    ctx.stroke();
+    const lastX = pad + (values.length - 1) * stepX, lastY = yFor(values[values.length - 1]);
+    ctx.beginPath();
+    ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
+    ctx.fillStyle = surface;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = accent;
+    ctx.stroke();
+    ctx.font = "600 11px IBM Plex Mono, monospace";
+    ctx.fillStyle = ink;
+    ctx.textAlign = "right";
+    ctx.fillText(values[values.length - 1].toFixed(1), lastX - 8, lastY - 8);
+
+    const fmt = (iso) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    sparkFootStart.textContent = fmt(trend[0].timeIso);
+    sparkFootEnd.textContent = `${fmt(trend[trend.length - 1].timeIso)} · game time`;
   }
 
   // Historical weather-match: loaded independently of the main game fetch, since a cache-miss
@@ -1074,9 +1375,14 @@
     insightText.textContent = "Loading AI read…";
     insightTop.innerHTML = "";
     fieldCarryEl.style.display = "none";
+    impactScaleMarksEl.style.display = "none";
     handedNoteEl.style.display = "none";
     almanacCard.style.display = "none";
-    dataStrip.innerHTML = "";
+    gaugeCluster.innerHTML = "";
+    statPairs.innerHTML = "";
+    sparklineCard.style.display = "none";
+    windRoseSpeed.textContent = "—";
+    windRoseDir.textContent = "mph";
     setStatus("Fetching conditions…");
     loadAlmanac(sport, game); // fire-and-forget, doesn't block the main view
     try {
@@ -1093,9 +1399,12 @@
         ? ` · conditions forecast for ${new Date(data.weather.forecastForIso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} (game time)`
         : "";
       venueMeta.textContent = `${game.away} @ ${game.home} · ${suffix}${forecastNote}`;
-      renderDataStrip(sport, data.weather, data.venue, data.score);
+      renderInstrumentCluster(data.weather, data.score);
+      renderStatPairs(sport, data.venue, data.score);
+      renderWindRose(data.weather, data.score);
+      renderSparkline(data.weather);
       renderLeanTop(sport, data.score);
-      renderFieldCarry(sport, data.score);
+      renderImpactRows(sport, data.weather, data.score);
       insightText.textContent = data.insight || "No insight generated.";
       if (window.setWindFlow) window.setWindFlow(data.weather.windFromDeg || 0, data.weather.windSpeedMph || 0);
       setStatus(`Updated ${new Date().toLocaleTimeString()}`);
@@ -1108,8 +1417,23 @@
   sportToggle.addEventListener("click", (e) => {
     const btn = e.target.closest("button");
     if (!btn || btn.disabled || btn.getAttribute("aria-pressed") === "true") return;
-    sportToggle.querySelectorAll("button[data-sport]").forEach((b) => b.setAttribute("aria-pressed", String(b === btn)));
     loadSchedule(btn.dataset.sport);
+  });
+
+  landingView.addEventListener("click", (e) => {
+    const btn = e.target.closest(".landing-tile.live");
+    if (!btn) return;
+    loadSchedule(btn.dataset.sport);
+  });
+
+  brandLogo.addEventListener("click", () => {
+    currentSport = null;
+    gameView.style.display = "none";
+    gamesGrid.style.display = "none";
+    emptyState.style.display = "none";
+    sportToggle.querySelectorAll("button[data-sport]").forEach((b) => b.setAttribute("aria-pressed", "false"));
+    landingView.style.display = "flex";
+    setStatus("");
   });
 
   gamesGrid.addEventListener("click", (e) => {
@@ -1131,7 +1455,8 @@
     gamesGrid.style.display = "grid";
   });
 
-  loadSchedule(currentSport);
+  // No auto-load on start -- the landing page (shown by default in the HTML) is the front door;
+  // loadSchedule only runs once a sport is picked from a landing tile or the topbar toggle.
 </script>
 </body>
 </html>

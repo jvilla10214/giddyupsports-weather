@@ -6,6 +6,56 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## Redesign shipped: "Diamond Atmospherics" (MLB) / "Gridiron Pressure" (NFL), plus a suite landing page
+**Date:** 2026-09-03
+**Decision:** Replaced the live "Vintage Diamond" (MLB) and "Gridiron" (NFL) themes with a new
+instrument-panel visual identity, approved the prior session as a standalone concept mockup (see
+the two published Artifacts referenced in memory) and pushed live here. Same `html[data-sport]`
+token-swap mechanism as before, values carried over from the approved mockup: MLB gets a warm
+stadium-lights-amber + storm-front-blue two-accent palette on a cool near-white/near-black ground
+(Big Shoulders Display + IBM Plex Sans + IBM Plex Mono); NFL gets cold steel/frost with a
+chain-gang-gold accent (Anton + Barlow Semi Condensed + Space Mono). Golf and Tennis stay exactly
+as they already were — disabled "Coming soon" buttons — since neither has a real backend or data
+source; no functionality was invented for them.
+**Deliberately kept, not replaced:** the real Leaflet aerial satellite photo of the stadium and the
+wind-flow-arrows canvas layered on it. The approved mockup used an abstract line-drawing schematic
+instead, but that was specifically a workaround for the Artifact sandbox's CSP blocking external
+map tiles — not a genuine preference over real imagery, which the live site has no such
+restriction on and which is a real, working, valuable existing feature.
+**New components, not just a reskin:**
+- Circular arc gauges (temp/humidity/wind) replace the old flat stat chips.
+- An analog wind-rose compass dial overlays the aerial photo, needle rotated to the TOWARD bearing
+  (`(windFromDeg + 180) % 360`) — same conversion already used by `score.windCompass` and the
+  wind-flow canvas, so all three now visibly agree with each other by construction.
+- MLB's LF/CF/RF carry re-rendered as a center-zero bidirectional bar with the real, backtested
+  `CARRY_LEAN_THRESHOLD_FT` (20ft, see the recalibration decision below) marked on it, instead of
+  three flat pass/fail boxes. Found and fixed a real staleness bug in the process: the old box
+  coloring used a hardcoded +-12ft cutoff left over from before that recalibration, silently out of
+  sync with the actual +-20ft threshold driving `scoringLean` everywhere else.
+- NFL's wind effect rendered as a single left-anchored magnitude bar off real wind speed against
+  the same 10/15/20mph tiers the backend already classifies by — deliberately NOT a 3-row
+  PASS/KICK/PUNT breakdown like MLB's, since the backend has no real per-play numeric output to
+  drive one and inventing those numbers would mean shipping fiction, not a redesign.
+- A real hourly wind-speed sparkline leading into game time, **not decorative**: the backend
+  already fetches the full Open-Meteo hourly array for the point-forecast feature but only
+  returned the single matched hour; `fetchWeather` now also returns `weather.windTrend` — the 7
+  hours anchored straight into the matched game-time hour (chosen over anchoring to "now" so a
+  game days out still gets a fixed, meaningful 8-point trend rather than an oddly long or
+  subsampled one). Only populated on the forecast path (`windTrend: null` on the current-conditions
+  path) — the sparkline panel hides itself when absent.
+- A new suite landing page (`#landingView`), shown before any sport is picked: one tile per sport
+  (Diamond Atmospherics, Gridiron Pressure, Links & Lie, Advantage Court), each carrying its own
+  accent color via inline `--tile-accent`/`--tile-accent-2` custom properties rather than a full
+  page theme, since Golf/Tennis don't have pages to theme yet. Reachable at any time via the
+  GiddyUpSports wordmark, now a button.
+**Verified live** (not just visually eyeballed) across MLB and NFL, light and dark, desktop and
+mobile widths, with real data from real games — including confirming the wind-rose needle, the AI
+narration's windZone text, and score.windCompass all agree on direction, and that the sparkline's
+real 8-point trend renders correctly end to end from the new backend field.
+**Explicitly deferred** (per the approved plan, not forgotten): Golf/Tennis running on invented
+data, and per-sport front-page grid styling beyond what MLB/NFL already share — both stay on the
+punch list, not built here.
+
 ## Tried and reverted: barometric pressure as a carry-model input
 **Date:** 2026-09-02
 **Tried:** added `pressure_msl` (mean-sea-level pressure, hPa) to `scoreMlbGame`'s `baseCarryFt` —

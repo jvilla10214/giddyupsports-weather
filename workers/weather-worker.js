@@ -209,6 +209,15 @@ async function fetchWeather(env, lat, lon, targetTimeIso) {
       // there's no forecast and falling back to current conditions instead.
       const pickedDiffMs = idx >= 0 ? Math.abs(new Date(hourly.time[idx] + "Z").getTime() - targetMs) : Infinity;
       if (idx >= 0 && pickedDiffMs <= 3 * 60 * 60 * 1000) {
+        // The 7 hours leading straight into the matched game-time hour (not from "now" -- a game
+        // days out would otherwise need an oddly long or subsampled trend; anchoring to the game
+        // hour instead always gives a fixed, meaningful "wind building/easing into game time" read
+        // regardless of how far out the game is).
+        const trendStart = Math.max(0, idx - 7);
+        const windTrend = [];
+        for (let i = trendStart; i <= idx; i++) {
+          windTrend.push({ timeIso: hourly.time[i] + "Z", windSpeedMph: hourly.wind_speed_10m[i] });
+        }
         return {
           tempF: hourly.temperature_2m[idx],
           humidityPct: hourly.relative_humidity_2m[idx],
@@ -221,6 +230,7 @@ async function fetchWeather(env, lat, lon, targetTimeIso) {
           windSource: "Open-Meteo (forecast)",
           isForecast: true,
           forecastForIso: hourly.time[idx] + "Z",
+          windTrend,
         };
       }
     } catch {
@@ -255,6 +265,7 @@ async function fetchWeather(env, lat, lon, targetTimeIso) {
       source: "Open-Meteo",
       isForecast: false,
       forecastForIso: null,
+      windTrend: null,
     };
 
     let nwsWind = null;
