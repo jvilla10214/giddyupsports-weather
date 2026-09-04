@@ -6,6 +6,31 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## Cross-checked cfBearingDeg against MLB's own azimuthAngle field — mostly confirms it, no changes
+**Date:** 2026-09-04
+While researching roof status (below), noticed MLB's own venue API
+(`statsapi.mlb.com/api/v1/venues/{id}?hydrate=location,fieldInfo`) exposes a
+`venue.location.azimuthAngle` per stadium — a second, independent, official number to check
+`cfBearingDeg` against (sourced from Clem's Baseball, see the stadium-orientation-audit entry).
+Pulled it for all 30 venues: **24 of 29 open/non-dome parks agree closely** with `cfBearingDeg` (same
+direction, not opposite — a first draft of this comparison had a sign bug that made it look backwards
+before catching it). Real outliers (>20° gap): HOU (85°), TB (46°, dome, moot regardless), TEX (38°,
+retractable, moot unless confirmed open), MIN (39°), SF (28°).
+
+Chased MIN specifically since it's open-air and the gap is live in the model. Two independent visual
+re-checks (a fresh satellite-photo read, then a user-provided Google Maps screenshot) both landed on
+~310-320° (NW) — confidently wrong, and wrong the same way twice, which is a reminder that two of
+your own readings agreeing with each other isn't real corroboration if they share the same
+underlying mistake (misidentified which end of the field was home plate). The user settled it from
+firsthand knowledge: home plate faces west, i.e. the batter faces east, confirming the already-coded
+`cfBearingDeg: 90` (Clem's value) was correct all along — MLB's own `azimuthAngle` (129° for MIN) was
+the one that was actually wrong here. **Conclusion: `azimuthAngle` is a decent sanity-check signal,
+not reliable enough to override Clem's when they disagree.** Left HOU/TB/TEX/SF as coded; SF already
+has its own independent confirmation (McCovey Cove geography), and none of the other three currently
+affect real output while roof-closed by default.
+
+---
+
 ## Real-time roof status for retractable-roof venues
 **Date:** 2026-09-04
 **The gap**: every retractable-roof MLB venue (7 of 30 teams) was always assumed closed, unconditionally
