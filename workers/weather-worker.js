@@ -168,6 +168,61 @@ async function fetchUmpireStats(env) {
   });
 }
 
+// Real career-long hitter/pitcher lean, requested by the user after the season-only feature above
+// shipped without one (UmpScorecards' season leaderboard has no zone-size/hitter-pitcher metric --
+// see the comment above). Found while digging into the per-umpire page
+// (umpscorecards.com/api/single-umpire?umpire=NAME&startDate=...&endDate=...): each individual game
+// row carries home_batter_impact/away_batter_impact/home_pitcher_impact/away_pitcher_impact, and
+// checked across a full 97-game sample that (home_batter_impact + away_batter_impact) always exactly
+// equals -(home_pitcher_impact + away_pitcher_impact) -- a real zero-sum run-value split between the
+// two sides of every pitch, independent of home/away team. Summed across an umpire's whole career
+// (2015-present, whatever's covered), that gives a genuine, derivable "did this umpire's misses net
+// help batters or pitchers" number -- not a fabrication, and not the same thing as UmpScorecards' own
+// team-based "favor" metric already surfaced as avgFavorRuns above.
+//
+// LEAN_HITTER_THRESHOLD / LEAN_PITCHER_THRESHOLD are the real p75/p25 of perGameBatterImpact across
+// all 91 currently-active umpires' full careers (fetched and analyzed 2026-09-04, see DECISIONS.md)
+// -- not arbitrary. Top quartile of that snapshot = "leans hitter-friendly", bottom quartile =
+// "leans pitcher-friendly", middle 50% = neutral -- same "backtest a real threshold, don't guess"
+// approach as CARRY_LEAN_THRESHOLD_FT in rules-engine.js. MIN_CAREER_GAMES gates small-sample noise
+// (5 of the 91 active umpires had under 20 career games in that snapshot, one of them a 9-game
+// sample sitting at an extreme -0.43 -- not a real signal, just not enough innings yet).
+const LEAN_HITTER_THRESHOLD = 0.02;
+const LEAN_PITCHER_THRESHOLD = -0.2;
+const MIN_CAREER_GAMES = 20;
+
+async function fetchUmpireCareerLean(env, umpireName) {
+  // Cached per-umpire, not per-day -- a career aggregate barely moves game to game, so a week-long
+  // TTL avoids re-fetching an umpire's entire history on every page load without ever going stale
+  // in a way that matters.
+  return cached(env, `umpire-career:${umpireName}`, 7 * 24 * 60 * 60, async () => {
+    const url = `https://umpscorecards.com/api/single-umpire?umpire=${encodeURIComponent(umpireName)}&startDate=2015-01-01&endDate=${todayIso()}`;
+    const res = await fetch(url, { headers: { "User-Agent": "GiddyUpSports-Weather/1.0 (contact: jvilla10214@gmail.com)" } });
+    if (!res.ok) throw new Error(`UmpScorecards single-umpire ${res.status}`);
+    const data = await res.json();
+    const rows = data.rows || [];
+    const games = rows.length;
+    let totalBatterImpact = 0;
+    for (const r of rows) totalBatterImpact += (r.home_batter_impact || 0) + (r.away_batter_impact || 0);
+    const perGame = games ? totalBatterImpact / games : 0;
+    const lean =
+      games < MIN_CAREER_GAMES
+        ? "insufficient data"
+        : perGame >= LEAN_HITTER_THRESHOLD
+          ? "hitter"
+          : perGame <= LEAN_PITCHER_THRESHOLD
+            ? "pitcher"
+            : "neutral";
+    const dates = rows.map((r) => r.date).filter(Boolean).sort();
+    return {
+      games,
+      perGameBatterImpact: Math.round(perGame * 1000) / 1000,
+      lean,
+      sinceYear: dates.length ? Number(dates[0].slice(0, 4)) : null,
+    };
+  });
+}
+
 // NFL schedule is intentionally NOT fetched here. ESPN's scoreboard API (site.api.espn.com) sends
 // Access-Control-Allow-Origin: * (it's fine with real browsers) but returns 403 to every request
 // from a Cloudflare Worker regardless of headers — confirmed by testing identical requests with
@@ -652,35 +707,51 @@ async function narrate(env, sport, score, weather, venue, parkFactor, umpire) {
         ? ` This park's ${parkFactor.year} Statcast park factor is ${parkFactor.totalPct > 0 ? "hitter-friendly" : parkFactor.totalPct < 0 ? "pitcher-friendly" : "neutral"} for fly-ball distance — ${Math.abs(parkFactor.totalPct)}% ${parkFactor.totalPct >= 0 ? "more" : "less"} distance than a league-average park this season, independent of today's specific weather. Mention this once, briefly, as separate season-long context — do not blend it into the wind/carry numbers above as if it were part of today's forecast, and describe it only in these words (more/less distance) — do not restate it as a raw signed percentage.`
         : "";
 
-    // Umpire tendencies (UmpScorecards, real, season-aggregate): deliberately NOT framed as
-    // "hitter-friendly/pitcher-friendly" -- that framing implies a strike-zone-size rating, which
-    // is not what UmpScorecards measures (their own site describes it as accuracy/consistency/favor,
-    // where "favor" is which TEAM an ump's incorrect calls tended to benefit, in run-impact terms).
+    // Umpire tendencies (UmpScorecards): NOT given to the model at all, in either form (season
+    // accuracy/consistency, or the real career hitter/pitcher lean from fetchUmpireCareerLean).
     //
-    // Eighth real failure, caught in this feature's own first live end-to-end test (a real game,
-    // not a synthetic one): even with the "don't claim favors hitters/pitchers or zone size" ban
-    // above, the model dodged those exact banned phrases and still invented "hitters can expect...
-    // a relatively high chance of being called out on strikes" -- an unsupported strikeout-rate
-    // claim accuracy/consistency numbers say nothing about, same class of failure as the sub-3mph
-    // "invented per-field carry" case documented above. Banning specific phrases doesn't work on
-    // this model (proven twice now); the fix is shrinking its job to something with no room to
-    // embellish -- restating the two numbers as a one-clause aside, with an explicit ban on
-    // connecting them to any in-game outcome (strikeouts, walks, pace, scoring) at all.
-    const umpireNote =
-      sport === "mlb" && umpire
-        ? ` Separately, home plate umpire ${umpire.name} has a ${umpire.accuracyPct}% ball/strike accuracy and ${umpire.consistencyPct} consistency rating this season (${umpire.games} games). State only those two numbers, once, as a brief aside — do NOT connect them to any prediction about strikeouts, walks, pitch calls, game pace, or scoring; accuracy and consistency alone don't support any such prediction. Do not use the words "hitter-friendly," "pitcher-friendly," "favors," "zone," "strike zone," or "called out" anywhere in relation to the umpire.`
-        : "";
-
+    // Three straight failures on this one feature, back to back, each closing the exact gap the
+    // last one's instruction opened: (1) told to describe accuracy/consistency, it invented a
+    // strikeout-rate claim those numbers don't support; (2) told to also state a real pre-written
+    // career-lean sentence but not explain it, it appended "batters are likely to see more balls
+    // and fewer strikes" right after; (3) told to insert that sentence "with nothing added before
+    // or after it within the same sentence," it obeyed the letter of that instruction and inserted
+    // the sentence intact -- then added a NEW sentence with the same fabricated zone-size claim
+    // anyway. That's nine total documented failures of this model editorializing beyond what a
+    // number supports, across every different way this file has tried to phrase a restriction. No
+    // further wording fix was worth trying: the umpire fact is now built as a plain string in code
+    // (see below, appended after the AI call) and the model is never told about the umpire at all,
+    // for either accuracy/consistency or career lean -- there is nothing left for it to embellish
+    // because it doesn't see the data in the first place. Same end state as how the LF/CF/RF field
+    // numbers were already handled (shown correctly in the UI, no longer described by the model).
     const prompt =
       sport === "mlb"
-        ? `You are a concise baseball weather analyst. Venue: ${venueLabel}. These are ${conditionsLabel}: ${weather.tempF}F, ${weather.humidityPct}% humidity. ${mlbWindLine} Overall lean: ${score.scoringLean}.${handedNote}${parkFactorNote}${umpireNote} In 2-3 sentences, explain in plain language what this means for hitters and scoring today. Describe these as ${conditionsLabel}, not as something else. No disclaimers, no hedging filler.`
+        ? `You are a concise baseball weather analyst. Venue: ${venueLabel}. These are ${conditionsLabel}: ${weather.tempF}F, ${weather.humidityPct}% humidity. ${mlbWindLine} Overall lean: ${score.scoringLean}.${handedNote}${parkFactorNote} In 2-3 sentences, explain in plain language what this means for hitters and scoring today. Describe these as ${conditionsLabel}, not as something else. No disclaimers, no hedging filler.`
         : `You are a concise NFL weather analyst. Venue: ${venueLabel}. These are ${conditionsLabel}: ${weather.tempF}F, wind at ${weather.windSpeedMph}mph, precip chance ${weather.precipProbPct}%. Rules-engine read: wind tier ${score.windTier}, passing impact "${score.passingImpact}", field-goal range impact "${score.fgRangeImpact}". Do NOT state a compass direction or cardinal letter for the wind — none is reliably known, so only describe speed/tier and its effect. Describe these as ${conditionsLabel}, not as something else. In 2-3 sentences, explain what this means for the passing game and kicking today. No disclaimers, no hedging filler.`;
+    // Deterministic umpire sentence(s), built in code and appended after whatever the model wrote --
+    // see the comment above for why this isn't in the prompt. career.lean is only ever "hitter",
+    // "pitcher", "neutral", or missing/"insufficient data" (see fetchUmpireCareerLean), so this
+    // covers every case without a fallback branch that could silently say nothing wrong but useless.
+    function umpireSentence() {
+      if (sport !== "mlb" || !umpire) return "";
+      let s = ` Home plate umpire ${umpire.name} has a ${umpire.accuracyPct}% ball/strike accuracy and ${umpire.consistencyPct} consistency rating this season (${umpire.games} games).`;
+      const c = umpire.career;
+      if (c && c.lean === "hitter") {
+        s += ` Career games have netted +${c.perGameBatterImpact} runs per game toward batters over ${c.games} games since ${c.sinceYear}.`;
+      } else if (c && c.lean === "pitcher") {
+        s += ` Career games have netted ${c.perGameBatterImpact} runs per game toward batters (i.e. in pitchers' favor) over ${c.games} games since ${c.sinceYear}.`;
+      } else if (c && c.lean === "neutral") {
+        s += ` Career record is close to neutral between hitters and pitchers over ${c.games} games since ${c.sinceYear}.`;
+      }
+      return s;
+    }
     try {
       const result = await env.AI.run("@cf/meta/llama-3.2-3b-instruct", {
         messages: [{ role: "user", content: prompt }],
         max_tokens: 200,
       });
-      return { text: result.response?.trim() || "No insight generated.", cached: false };
+      const aiText = result.response?.trim() || "No insight generated.";
+      return { text: aiText + umpireSentence(), cached: false };
     } catch (err) {
       return { text: `AI narration failed: ${err.message}`, cached: false };
     }
@@ -730,6 +801,17 @@ async function handleGame(env, sport, params) {
         const stats = await fetchUmpireStats(env);
         const umpStats = stats.byName[game.hpUmpire];
         if (umpStats) umpire = { name: game.hpUmpire, ...umpStats };
+        // Separate try/catch: the career-lean fetch hits a different endpoint (and, for an umpire
+        // not yet cached, a much bigger one -- a full career game log) than the season stats above,
+        // so a failure here shouldn't wipe out the season accuracy/consistency that already
+        // succeeded. Only attempted when the umpire is otherwise known (umpire !== null).
+        if (umpire) {
+          try {
+            umpire.career = await fetchUmpireCareerLean(env, game.hpUmpire);
+          } catch (err) {
+            umpire.career = null;
+          }
+        }
       }
     } catch (err) {
       umpire = null;

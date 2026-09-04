@@ -1252,14 +1252,26 @@
   }
 
   // Umpire tendencies (UmpScorecards, MLB only, only shown once MLB publishes the day's crew --
-  // usually a few hours before first pitch, see DECISIONS.md). Deliberately states only accuracy/
-  // consistency, never a "favors hitters/pitchers" claim -- that's not what this data measures.
+  // usually a few hours before first pitch, see DECISIONS.md). Season accuracy/consistency never
+  // gets a "favors hitters/pitchers" claim -- that's not what those two numbers measure. The
+  // career lean tag IS a real, derived hitter/pitcher-friendly signal (see fetchUmpireCareerLean
+  // in weather-worker.js) -- same good/info/neutral color convention as the MLB scoring-lean pill
+  // in renderLeanTop, hitter-leaning=good(green), pitcher-leaning=info(blue), for at-a-glance scan.
   function renderUmpireNote(umpire) {
     if (!umpire) {
       umpireNoteEl.style.display = "none";
       return;
     }
-    umpireNoteEl.innerHTML = `<span class="hn-dot"></span>HP Ump: ${umpire.name} — ${umpire.accuracyPct}% accuracy, ${umpire.consistencyPct} consistency (${umpire.games} G)`;
+    const c = umpire.career;
+    const leanTag =
+      c && c.lean === "hitter"
+        ? `<span class="pill-lean good" style="margin-left:6px;">Hitter Lean</span>`
+        : c && c.lean === "pitcher"
+          ? `<span class="pill-lean info" style="margin-left:6px;">Pitcher Lean</span>`
+          : c && c.lean === "neutral"
+            ? `<span class="pill-lean neutral" style="margin-left:6px;">Neutral Lean</span>`
+            : "";
+    umpireNoteEl.innerHTML = `<span class="hn-dot"></span>HP Ump: ${umpire.name} — ${umpire.accuracyPct}% accuracy, ${umpire.consistencyPct} consistency (${umpire.games} G)${leanTag}`;
     umpireNoteEl.style.display = "flex";
   }
 

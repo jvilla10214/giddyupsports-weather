@@ -6,6 +6,50 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## Real career hitter/pitcher umpire lean, derived from full history (2015-present)
+**Date:** 2026-09-04
+**What shipped:** the entry below this one shipped umpire tendencies without a hitter/pitcher-lean
+claim, because UmpScorecards' season leaderboard has no such metric. The user asked to use the
+site's full historical data (back to 2015) to derive one properly instead of leaving the gap.
+
+**Found a real signal**: UmpScorecards' per-umpire page hits a different, undocumented endpoint --
+`umpscorecards.com/api/single-umpire?umpire=NAME&startDate=...&endDate=...` -- returning one row per
+game with `home_batter_impact`/`away_batter_impact`/`home_pitcher_impact`/`away_pitcher_impact` (run-
+value impact split by which side of the pitch benefited, not by home/away team). Checked across a
+97-game sample: `(home_batter_impact + away_batter_impact)` exactly equals
+`-(home_pitcher_impact + away_pitcher_impact)` in every single row, zero mismatches -- a genuine
+zero-sum split between batters and pitchers. Summed across an umpire's full career, that's a real,
+derivable "did this umpire's misses net help batters or pitchers" number, distinct from
+UmpScorecards' own team-based "favor" metric already shown as `avgFavorRuns`.
+
+**Calibrated the threshold from real data, not a guess**: fetched full 2015-present career history
+for all 91 currently-active umpires, computed each one's career-average batter-impact-per-game. Real
+distribution: min -0.58, p25 -0.198, median -0.094 (skews slightly pitcher-ward league-wide), p75
++0.023, max +0.41 runs/game. `LEAN_HITTER_THRESHOLD` (0.02) / `LEAN_PITCHER_THRESHOLD` (-0.2) in
+`weather-worker.js` are that snapshot's real p75/p25 -- top quartile of active umpires = "hitter"
+lean, bottom quartile = "pitcher" lean, middle 50% = "neutral". `MIN_CAREER_GAMES` (20) gates small-
+sample noise -- 5 of the 91 active umpires had under 20 career games in that snapshot, one of them a
+9-game sample sitting at an extreme -0.43 that's clearly noise, not signal, this early.
+
+**A third and fourth AI-narration failure on this exact feature, in the same session** (see the
+entry below for the first two): even a real, correctly-derived number wasn't safe from this model.
+Told to state a pre-written career-lean sentence "with nothing added before or after it within the
+same sentence," it obeyed literally -- inserted the sentence intact, then appended an entirely new
+sentence with a fabricated zone-size claim ("batters are likely to see more balls and fewer
+strikes") anyway. Nine documented failures of the same shape, across every different wording tried
+this session, was enough: stopped trying to phrase around it. **The umpire is no longer described to
+the model at all** -- neither season accuracy/consistency nor career lean appears in the prompt sent
+to Workers AI. Both are built as a plain string in code and appended directly to the model's response
+after the AI call returns, in `narrate()`. There is nothing left to embellish because the model never
+sees the umpire data in the first place -- same end state this file already reached for the LF/CF/RF
+field-carry numbers (shown correctly in the UI, no longer described by the model at all).
+
+**UI**: the "Hitter Lean"/"Pitcher Lean"/"Neutral Lean" tag next to the umpire badge reuses the exact
+`good`/`info`/`neutral` color convention already used for the MLB scoring-lean pill, so it reads at a
+glance without introducing a new visual language.
+
+---
+
 ## Statcast park factors and umpire tendencies, MLB detail view
 **Date:** 2026-09-04
 **What shipped:** two new real, free data sources joined into `/api/game` (MLB only) and shown in
