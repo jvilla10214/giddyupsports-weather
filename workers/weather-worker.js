@@ -72,7 +72,9 @@ async function cached(env, key, ttlSeconds, fetcher) {
 async function fetchMlbSchedule(env) {
   const date = todayIso();
   return cached(env, `schedule:mlb:${date}`, 15 * 60, async () => {
-    const url = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&startDate=${date}&endDate=${date}&hydrate=venue`;
+    // hydrate=officials adds each game's umpire crew -- used to pull the home-plate umpire's name
+    // for the umpire-tendency feature (see fetchUmpireStats) without a second API call per game.
+    const url = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&startDate=${date}&endDate=${date}&hydrate=venue,officials`;
     const res = await fetch(url, { headers: { "User-Agent": "GiddyUpSports-Weather/1.0" } });
     if (!res.ok) throw new Error(`MLB Stats API ${res.status}`);
     const data = await res.json();
@@ -80,6 +82,7 @@ async function fetchMlbSchedule(env) {
     for (const d of data.dates || []) {
       for (const g of d.games || []) {
         const venueKey = MLB_TEAM_ID_TO_KEY[g.teams?.home?.team?.id] || null;
+        const hpUmpire = (g.officials || []).find((o) => o.officialType === "Home Plate")?.official?.fullName || null;
         games.push({
           gameId: String(g.gamePk),
           startTimeUtc: g.gameDate,
@@ -90,10 +93,78 @@ async function fetchMlbSchedule(env) {
           venue: g.venue?.name,
           venueKey,
           status: g.status?.detailedState,
+          hpUmpire,
         });
       }
     }
     return { sport: "mlb", date, games };
+  });
+}
+
+// ---- Park factors (Statcast, via Baseball Savant) ----
+
+// Baseball Savant's park-factors leaderboard is server-rendered with the full dataset embedded as
+// a plain `var data = [...]` JS array in the page HTML -- no auth, no JS execution needed, and no
+// CSV/JSON API endpoint exists for it (checked; `&csv=true` just re-serves the same HTML). Scraping
+// one `var data = [...]` assignment out of a page is fragile in the abstract, but this is Baseball
+// Savant's own official leaderboard (not a third party), the shape has been stable, and the fetch is
+// wrapped in a try/catch by the caller so a future markup change degrades to "no park factor today"
+// rather than breaking the whole game response.
+async function fetchParkFactors(env) {
+  const year = new Date().getUTCFullYear();
+  return cached(env, `parkfactors:mlb:${year}`, 24 * 60 * 60, async () => {
+    const url = `https://baseballsavant.mlb.com/leaderboard/statcast-park-factors?type=distance&year=${year}&batSide=&stat=index_wOBA&condition=All&rolling=`;
+    const res = await fetch(url, { headers: { "User-Agent": "GiddyUpSports-Weather/1.0 (contact: jvilla10214@gmail.com)" } });
+    if (!res.ok) throw new Error(`Baseball Savant park factors ${res.status}`);
+    const html = await res.text();
+    const match = html.match(/var data = (\[.*?\]);/s);
+    if (!match) throw new Error("Baseball Savant park factors: expected data array not found in page");
+    const rows = JSON.parse(match[1]);
+    const byVenueKey = {};
+    for (const r of rows) {
+      const venueKey = MLB_TEAM_ID_TO_KEY[Number(r.main_team_id)];
+      if (!venueKey) continue;
+      byVenueKey[venueKey] = {
+        year: Number(r.year),
+        // "extra distance" figures are a % of typical fly-ball distance this park adds/removes for
+        // a standardized batted ball (90+mph, 24-32deg launch, pulled 0-24deg off center) vs a
+        // league-average park under the SAME conditions -- see Savant's own methodology text.
+        totalPct: Number(r.extra_distance),
+        tempPct: Number(r.temperature_extra_distance),
+        elevationPct: Number(r.elevation_extra_distance),
+        roofPct: Number(r.roof_extra_distance),
+        environmentPct: Number(r.environment_extra_distance), // humidity/wind/etc -- everything not otherwise broken out
+      };
+    }
+    return { year, byVenueKey, source: "Baseball Savant Statcast Park Factors" };
+  });
+}
+
+// ---- Umpire tendencies (UmpScorecards) ----
+
+// UmpScorecards' own site describes its mission as "measuring the accuracy, consistency, and favor
+// of MLB umpires" -- "favor" here is a run-impact-based measure of which team an umpire's incorrect
+// calls tended to benefit, NOT a strike-zone-size "hitter-friendly/pitcher-friendly" rating (there's
+// no such rating published). Surfaced honestly as accuracy/consistency/favor, matching what the
+// source actually measures, rather than relabeling it into a claim it doesn't support.
+async function fetchUmpireStats(env) {
+  const year = new Date().getUTCFullYear();
+  return cached(env, `umpires:mlb:${year}`, 24 * 60 * 60, async () => {
+    const url = `https://umpscorecards.com/api/umpires?startDate=${year}-01-01&endDate=${year}-12-31&seasonType=R`;
+    const res = await fetch(url, { headers: { "User-Agent": "GiddyUpSports-Weather/1.0 (contact: jvilla10214@gmail.com)" } });
+    if (!res.ok) throw new Error(`UmpScorecards ${res.status}`);
+    const data = await res.json();
+    const byName = {};
+    for (const r of data.rows || []) {
+      if (!r.umpire) continue;
+      byName[r.umpire] = {
+        games: r.n,
+        accuracyPct: Math.round(r.overall_accuracy_wmean * 10) / 10,
+        consistencyPct: Math.round(r.consistency_wmean * 10) / 10,
+        avgFavorRuns: Math.round(r.total_run_impact_mean * 100) / 100,
+      };
+    }
+    return { year, byName, source: "UmpScorecards" };
   });
 }
 
@@ -464,7 +535,7 @@ async function getAlmanacMatch(env, venueKey, venue, todayWeather) {
 
 // ---- AI narration ----
 
-async function narrate(env, sport, score, weather, venue) {
+async function narrate(env, sport, score, weather, venue, parkFactor, umpire) {
   const venueLabel = venue.venue;
 
   // Indoor games (fixed dome, or a retractable roof assumed closed) always land on the same
@@ -495,7 +566,10 @@ async function narrate(env, sport, score, weather, venue) {
   // choice was found while diagnosing) invalidates any already-cached insight immediately instead
   // of leaving a stale, now-provably-wrong one served for up to 6 more hours. windCompass/windTier
   // stay as the fallback for NFL, which has no windZone.
-  const cacheKey = `insight:${sport}:${venueLabel}:${todayIso()}:${Math.round(weather.windSpeedMph)}:${Math.round(weather.tempF)}:${score.windZone || score.windCompass || score.windTier || "na"}:${weather.isForecast ? "f" : "c"}`;
+  // umpire has to be in the key too -- it changes per game (not per venue/day/weather the way the
+  // rest of this key does), so without it every game at the same park on the same day with similar
+  // weather would share one cached insight regardless of which umpire is actually working it.
+  const cacheKey = `insight:${sport}:${venueLabel}:${todayIso()}:${Math.round(weather.windSpeedMph)}:${Math.round(weather.tempF)}:${score.windZone || score.windCompass || score.windTier || "na"}:${weather.isForecast ? "f" : "c"}:${umpire?.name || "noump"}`;
   return cached(env, cacheKey, 6 * 60 * 60, async () => {
     if (!env.AI) return { text: "AI narration unavailable (no AI binding configured).", cached: false };
     // Gave up trying to prompt-engineer the model into correctly pairing handedness with field
@@ -562,9 +636,44 @@ async function narrate(env, sport, score, weather, venue) {
     // 7 hours from now isn't what's happening outside right now. Telling it explicitly which framing
     // to use fixed it in testing; left unprompted it reliably guessed "current."
     const conditionsLabel = weather.isForecast ? "the forecast for game time" : "current conditions";
+
+    // Park factor (Statcast, real, season-aggregate, independent of today's weather): a small,
+    // clearly-scoped addition, same "one number, one clear instruction" shape as mlbWindLine above
+    // rather than something that invites the model to restate or explain the sub-factors.
+    //
+    // Seventh real failure, caught in this feature's own first end-to-end test: handed the model a
+    // signed percentage (e.g. -3.5), it dropped the minus sign and said "3.5% extra... natural
+    // fly-ball advantage" -- exactly backwards, same class of failure as windIsOut above (six
+    // prior, documented failures) of this model mishandling a signed number's direction. Fixed the
+    // same way: resolve the direction in code and hand it a pre-labeled phrase, not a raw signed
+    // number to interpret itself.
+    const parkFactorNote =
+      sport === "mlb" && parkFactor
+        ? ` This park's ${parkFactor.year} Statcast park factor is ${parkFactor.totalPct > 0 ? "hitter-friendly" : parkFactor.totalPct < 0 ? "pitcher-friendly" : "neutral"} for fly-ball distance — ${Math.abs(parkFactor.totalPct)}% ${parkFactor.totalPct >= 0 ? "more" : "less"} distance than a league-average park this season, independent of today's specific weather. Mention this once, briefly, as separate season-long context — do not blend it into the wind/carry numbers above as if it were part of today's forecast, and describe it only in these words (more/less distance) — do not restate it as a raw signed percentage.`
+        : "";
+
+    // Umpire tendencies (UmpScorecards, real, season-aggregate): deliberately NOT framed as
+    // "hitter-friendly/pitcher-friendly" -- that framing implies a strike-zone-size rating, which
+    // is not what UmpScorecards measures (their own site describes it as accuracy/consistency/favor,
+    // where "favor" is which TEAM an ump's incorrect calls tended to benefit, in run-impact terms).
+    //
+    // Eighth real failure, caught in this feature's own first live end-to-end test (a real game,
+    // not a synthetic one): even with the "don't claim favors hitters/pitchers or zone size" ban
+    // above, the model dodged those exact banned phrases and still invented "hitters can expect...
+    // a relatively high chance of being called out on strikes" -- an unsupported strikeout-rate
+    // claim accuracy/consistency numbers say nothing about, same class of failure as the sub-3mph
+    // "invented per-field carry" case documented above. Banning specific phrases doesn't work on
+    // this model (proven twice now); the fix is shrinking its job to something with no room to
+    // embellish -- restating the two numbers as a one-clause aside, with an explicit ban on
+    // connecting them to any in-game outcome (strikeouts, walks, pace, scoring) at all.
+    const umpireNote =
+      sport === "mlb" && umpire
+        ? ` Separately, home plate umpire ${umpire.name} has a ${umpire.accuracyPct}% ball/strike accuracy and ${umpire.consistencyPct} consistency rating this season (${umpire.games} games). State only those two numbers, once, as a brief aside — do NOT connect them to any prediction about strikeouts, walks, pitch calls, game pace, or scoring; accuracy and consistency alone don't support any such prediction. Do not use the words "hitter-friendly," "pitcher-friendly," "favors," "zone," "strike zone," or "called out" anywhere in relation to the umpire.`
+        : "";
+
     const prompt =
       sport === "mlb"
-        ? `You are a concise baseball weather analyst. Venue: ${venueLabel}. These are ${conditionsLabel}: ${weather.tempF}F, ${weather.humidityPct}% humidity. ${mlbWindLine} Overall lean: ${score.scoringLean}.${handedNote} In 2-3 sentences, explain in plain language what this means for hitters and scoring today. Describe these as ${conditionsLabel}, not as something else. No disclaimers, no hedging filler.`
+        ? `You are a concise baseball weather analyst. Venue: ${venueLabel}. These are ${conditionsLabel}: ${weather.tempF}F, ${weather.humidityPct}% humidity. ${mlbWindLine} Overall lean: ${score.scoringLean}.${handedNote}${parkFactorNote}${umpireNote} In 2-3 sentences, explain in plain language what this means for hitters and scoring today. Describe these as ${conditionsLabel}, not as something else. No disclaimers, no hedging filler.`
         : `You are a concise NFL weather analyst. Venue: ${venueLabel}. These are ${conditionsLabel}: ${weather.tempF}F, wind at ${weather.windSpeedMph}mph, precip chance ${weather.precipProbPct}%. Rules-engine read: wind tier ${score.windTier}, passing impact "${score.passingImpact}", field-goal range impact "${score.fgRangeImpact}". Do NOT state a compass direction or cardinal letter for the wind — none is reliably known, so only describe speed/tier and its effect. Describe these as ${conditionsLabel}, not as something else. In 2-3 sentences, explain what this means for the passing game and kicking today. No disclaimers, no hedging filler.`;
     try {
       const result = await env.AI.run("@cf/meta/llama-3.2-3b-instruct", {
@@ -584,6 +693,7 @@ async function handleGame(env, sport, params) {
   const venueKey = params.get("venueKey");
   const preview = params.get("preview") === "1";
   const startTimeUtc = params.get("startTimeUtc");
+  const gameId = params.get("gameId");
   const stadiums = sport === "mlb" ? MLB_STADIUMS : NFL_STADIUMS;
   const venue = stadiums[venueKey];
   if (!venue) return json({ error: `Unknown venueKey "${venueKey}" for sport ${sport}` }, 400);
@@ -593,11 +703,41 @@ async function handleGame(env, sport, params) {
 
   // Preview mode (used by the front-page quick-look grid, one call per game on the slate) skips
   // the AI narration call entirely -- no point spending Workers AI neurons on insights for games
-  // nobody's opened yet. The rules-engine score above is pure JS, so it's free either way.
-  if (preview) return json({ sport, venue, weather, score, insight: null });
+  // nobody's opened yet. The rules-engine score above is pure JS, so it's free either way. Same
+  // reasoning extends to park factors and umpire tendencies here -- both real, but not worth
+  // fetching nine times over for cards nobody's opened.
+  if (preview) return json({ sport, venue, weather, score, insight: null, parkFactor: null, umpire: null });
 
-  const insight = await narrate(env, sport, score, weather, venue);
-  return json({ sport, venue, weather, score, insight: insight.text });
+  // Both of these are wrapped individually so a scrape hiccup on either external site degrades to
+  // "no data today" for that one field, not a broken game page -- neither is load-bearing for the
+  // weather/score the rest of this response already delivers.
+  let parkFactor = null;
+  if (sport === "mlb") {
+    try {
+      const factors = await fetchParkFactors(env);
+      parkFactor = factors.byVenueKey[venueKey] || null;
+    } catch (err) {
+      parkFactor = null;
+    }
+  }
+
+  let umpire = null;
+  if (sport === "mlb" && gameId) {
+    try {
+      const schedule = await fetchMlbSchedule(env);
+      const game = schedule.games.find((g) => g.gameId === gameId);
+      if (game?.hpUmpire) {
+        const stats = await fetchUmpireStats(env);
+        const umpStats = stats.byName[game.hpUmpire];
+        if (umpStats) umpire = { name: game.hpUmpire, ...umpStats };
+      }
+    } catch (err) {
+      umpire = null;
+    }
+  }
+
+  const insight = await narrate(env, sport, score, weather, venue, parkFactor, umpire);
+  return json({ sport, venue, weather, score, insight: insight.text, parkFactor, umpire });
 }
 
 async function handleAlmanac(env, sport, params) {

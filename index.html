@@ -783,6 +783,7 @@
           <div class="impact-rows" id="fieldCarry" style="display:none;"></div>
           <div class="impact-scale-marks" id="impactScaleMarks" style="display:none;"></div>
           <div class="handed-note" id="handedNote" style="display:none;"></div>
+          <div class="handed-note" id="umpireNote" style="display:none;"></div>
           <div class="insight-text" id="insightText">Loading AI read…</div>
         </div>
       </div>
@@ -847,6 +848,7 @@
   const fieldCarryEl = document.getElementById("fieldCarry");
   const impactScaleMarksEl = document.getElementById("impactScaleMarks");
   const handedNoteEl = document.getElementById("handedNote");
+  const umpireNoteEl = document.getElementById("umpireNote");
   const almanacCard = document.getElementById("almanacCard");
   const almanacBody = document.getElementById("almanacBody");
   const venueMeta = document.getElementById("venueMeta");
@@ -1235,12 +1237,30 @@
     gaugeCluster.innerHTML = gauges.join("");
   }
 
-  function renderStatPairs(sport, venue, score) {
+  function renderStatPairs(sport, venue, score, parkFactor) {
     const pairs =
       sport === "mlb"
         ? [statPair("Altitude", (venue.altitudeFt / 1000).toFixed(1), "k ft"), statPair("Est. Carry", `${score.carryFt > 0 ? "+" : ""}${score.carryFt}`, "ft", true)]
         : [statPair("Roof", venue.roofType), statPair("Wind Tier", score.windTier || "—", null, true)];
+    // Statcast park factor: a season-long, weather-independent figure (see DECISIONS.md), shown as
+    // its own stat-pair rather than folded into "Est. Carry" so it's never mistaken for part of
+    // today's forecast-driven number right next to it.
+    if (sport === "mlb" && parkFactor) {
+      pairs.push(statPair("Park Factor", `${parkFactor.totalPct > 0 ? "+" : ""}${parkFactor.totalPct}`, "%"));
+    }
     statPairs.innerHTML = pairs.join("");
+  }
+
+  // Umpire tendencies (UmpScorecards, MLB only, only shown once MLB publishes the day's crew --
+  // usually a few hours before first pitch, see DECISIONS.md). Deliberately states only accuracy/
+  // consistency, never a "favors hitters/pitchers" claim -- that's not what this data measures.
+  function renderUmpireNote(umpire) {
+    if (!umpire) {
+      umpireNoteEl.style.display = "none";
+      return;
+    }
+    umpireNoteEl.innerHTML = `<span class="hn-dot"></span>HP Ump: ${umpire.name} — ${umpire.accuracyPct}% accuracy, ${umpire.consistencyPct} consistency (${umpire.games} G)`;
+    umpireNoteEl.style.display = "flex";
   }
 
   // Analog wind-rose: needle rotated to the TOWARD bearing (where the wind is headed, not where
@@ -1493,6 +1513,7 @@
     fieldCarryEl.style.display = "none";
     impactScaleMarksEl.style.display = "none";
     handedNoteEl.style.display = "none";
+    umpireNoteEl.style.display = "none";
     almanacCard.style.display = "none";
     gaugeCluster.innerHTML = "";
     statPairs.innerHTML = "";
@@ -1502,7 +1523,8 @@
     setStatus("Fetching conditions…");
     loadAlmanac(sport, game); // fire-and-forget, doesn't block the main view
     try {
-      const res = await fetch(`${WORKER_BASE}/api/game?sport=${sport}&venueKey=${game.venueKey}&startTimeUtc=${encodeURIComponent(game.startTimeUtc)}`);
+      const gameIdParam = game.gameId ? `&gameId=${encodeURIComponent(game.gameId)}` : "";
+      const res = await fetch(`${WORKER_BASE}/api/game?sport=${sport}&venueKey=${game.venueKey}&startTimeUtc=${encodeURIComponent(game.startTimeUtc)}${gameIdParam}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       ensureMap(data.venue.lat, data.venue.lon, STADIUM_HALF_EXTENT_M[sport]);
@@ -1517,11 +1539,12 @@
       venueMeta.textContent = `${game.away} @ ${game.home} · ${suffix}${forecastNote}`;
       lastWeather = data.weather;
       renderInstrumentCluster(data.weather, data.score);
-      renderStatPairs(sport, data.venue, data.score);
+      renderStatPairs(sport, data.venue, data.score, data.parkFactor);
       renderWindRose(data.weather, data.score);
       renderSparkline(data.weather);
       renderLeanTop(sport, data.score);
       renderImpactRows(sport, data.weather, data.score);
+      renderUmpireNote(data.umpire);
       insightText.textContent = data.insight || "No insight generated.";
       if (window.setWindFlow) window.setWindFlow(data.weather.windFromDeg || 0, data.weather.windSpeedMph || 0);
       setStatus(`Updated ${new Date().toLocaleTimeString()}`);

@@ -6,6 +6,59 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## Statcast park factors and umpire tendencies, MLB detail view
+**Date:** 2026-09-04
+**What shipped:** two new real, free data sources joined into `/api/game` (MLB only) and shown in
+the UI and AI insight, alongside the existing weather/carry model — not replacing it.
+
+- **Park factor**: Baseball Savant's Statcast park-factors leaderboard
+  (baseballsavant.mlb.com/leaderboard/statcast-park-factors) embeds its full current-season dataset
+  as a plain `var data = [...]` JS array in server-rendered HTML — no auth, no JS execution, no CSV
+  endpoint needed (checked; `&csv=true` just re-serves the same page). `fetchParkFactors` regex-
+  extracts and parses it, joins on `main_team_id` via the existing `MLB_TEAM_ID_TO_KEY` map, caches
+  24h (season-aggregate, changes slowly). Shown as its own "Park Factor" stat-pair (a season-long,
+  weather-independent %) rather than folded into "Est. Carry," so it's never mistaken for part of
+  today's forecast.
+- **Umpire tendencies**: today's home-plate umpire comes from the MLB Stats API schedule endpoint's
+  `hydrate=officials` (added to the existing `fetchMlbSchedule` call, one extra hydrate, no new
+  request), matched by name against UmpScorecards' public API
+  (umpscorecards.com/api/umpires?startDate=...&endDate=...&seasonType=R), cached 24h. MLB doesn't
+  publish crew assignments until a few hours before first pitch — confirmed live, every game showed
+  an empty `officials` array most of the day, one game got its assignment ~2 games before first
+  pitch — so this silently goes from "no umpire shown" to populated as the day progresses; no code
+  path depends on it being available early.
+- **Deliberately NOT labeled "hitter-friendly/pitcher-friendly"**: UmpScorecards' own site describes
+  its mission as measuring "accuracy, consistency, and favor" — "favor" is which TEAM an umpire's
+  incorrect calls tended to benefit (run-impact terms), not a strike-zone-size rating. There is no
+  published zone-size metric to hang a hitter/pitcher framing on, so the UI and prompt show accuracy/
+  consistency honestly instead of forcing a framing the data doesn't support.
+
+**Two real AI-narration bugs found in this feature's own testing** (same model, same documented
+history of mishandling anything beyond "restate this one pre-resolved fact" — six prior failures on
+the wind narration alone, see the entry below):
+1. Handed a signed park-factor percentage (e.g. -3.5), the model dropped the minus sign and said
+   "3.5% extra... natural fly-ball advantage" — backwards. Fixed by resolving hitter-friendly/
+   pitcher-friendly in code and handing the model a pre-labeled phrase, never a raw signed number to
+   interpret (same fix shape as the windIsOut fix below).
+2. Even with an explicit "do not claim favors hitters/pitchers or zone size" ban, the model dodged
+   those exact phrases and invented "hitters can expect... a relatively high chance of being called
+   out on strikes" — an unsupported strikeout-rate claim, live-caught against a real assigned umpire
+   (Tom Hanahan, Progressive Field). Banning specific phrases didn't work; fixed by shrinking the
+   umpire's role to "state these two numbers, once, as a brief aside" with an explicit ban on
+   connecting them to any in-game outcome (strikeouts, walks, pace, scoring) at all, not just the
+   original banned phrases.
+
+Both the insight cache key (already includes `windZone`, see below) now also includes `umpire.name`
+— required, not optional: without it, every game at the same venue/day/weather would share one
+cached insight regardless of which umpire is actually working it.
+
+**Verification gap, noted honestly**: the park-factor fix was verified against a real live AI call.
+The umpire fix's SECOND guard (banning outcome-prediction, not just banned phrases) was also verified
+against a real live AI call once a real umpire assignment appeared mid-session — both fixes are
+confirmed working against the actual deployed model, not just reasoned about.
+
+---
+
 ## Real per-park wind orientation data (Clem's Baseball), and a wrong-field AI-narration bug
 **Date:** 2026-09-03
 **AI narration bug (found first, real root cause of a live user report):** the user flagged that
