@@ -6,6 +6,61 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## Per-park wind sensitivity multiplier, and a wind-coefficient re-check
+**Date:** 2026-09-04
+**What shipped:** a real, per-park `windSensitivity` multiplier (`data/stadiums.js`) applied to the
+wind-carry term in `windCarryAt` (`rules-engine.js`) — 1.0 = league-average, ranges 0.5-1.8 across
+real MLB parks. Before this, every park's wind effect scaled off the same generic coefficient
+regardless of the park's own physical wind exposure, even though this project already knew (from the
+user-shared Statcast wind-effect charts and the WAM/CFD article, see the umpire/park-factor entries
+above) that real parks vary a lot here — PNC Park is one of the least wind-affected parks in MLB
+despite being open-air, Wrigley and Coors are among the most.
+
+**Source and derivation**: Baseball Savant's own park-factors leaderboard (already scraped for the
+`parkFactor` feature) breaks each park's seasonal distance factor into temperature/elevation/roof/
+environment sub-factors — `environment_extra_distance` is the residual after those three are removed
+(humidity, wind, everything else), so using it doesn't double-count the separately-modeled altitude
+bonus. Fetched this for 5 real seasons (2021-2025) per park, took the average of |environment_extra_
+distance| across those years (a season's signed value can partially hide true day-to-day volatility
+if wind blows both directions roughly equally over a season — noted as a real caveat, not swept under
+the rug), then scaled every park relative to the league mean and clamped to [0.5, 1.8] so one noisy
+season can't produce an extreme multiplier.
+
+**Two real data-contamination bugs caught and fixed during derivation**, both from the same root
+cause: Baseball Savant's `main_team_id` is stable across a franchise relocating home parks within the
+window, so a naive multi-year fetch silently blends two different, unrelated stadiums under one key.
+- Athletics: played 2021-2024 at the since-demolished Oakland Coliseum before moving to Sutter Health
+  Park in 2025 (the park this file actually models them at). Only the 2025 datapoint is real for the
+  park in question, and one season is too small a sample to trust — defaulted `ATH` to a neutral 1.0
+  rather than build a multiplier off a single data point (also consistent with `cfBearingDeg`, which
+  already treats ATH as unsourced for the same reason — no historical MLB tenancy to draw on).
+- Rays: Tropicana Field (the dome `TB` is coded as) was hurricane-damaged and the team played their
+  entire 2025 season at the outdoor George M. Steinbrenner Field instead — a real park, just not the
+  one this file models TB as. Excluded 2025 from TB's average, used the remaining 4 real Tropicana
+  Field seasons. (Moot in practice either way, since `windCarryAt` already zeroes wind entirely for
+  any closed-roof venue — but the multiplier is stored correctly regardless, ready for the roof-
+  status work below.)
+
+**Re-ran the real 2025-season backtest after applying this** (`scripts/backtest-carry-model.js`):
+the gap-maximizing threshold got noisier/flatter (peaks bouncing between T=18 and T=32, gaps 1.05-
+1.30, vs. a cleaner single peak near T=20 before) but `CARRY_LEAN_THRESHOLD_FT` (20) still sits in a
+reasonable position with healthy bucket sizes (n=608/242) — kept as-is rather than chase a noisier
+peak with thinner buckets.
+
+**Also added a coefficient sweep to the same backtest script**, at the user's request to "tighten"
+`WIND_CARRY_FT_PER_MPH` (3.5): swept 2.5-4.5 ft/mph, each candidate re-optimizing its own best
+threshold (a fair comparison, since a bigger coefficient should pair with a bigger cutoff) rather than
+just re-scoring the existing 20ft cutoff. Real finding: **the achievable gap barely moves across that
+whole range (1.29-1.36)** — correlation itself can't distinguish coefficients at all (it's scale-
+invariant, a rescaled predictor has identical correlation), and the threshold-based gap metric that
+CAN distinguish them shows no meaningfully-better value than what's already there. 3.5 also still sits
+inside the range independently implied by Dr. Alan Nathan's public Statcast-based estimate (~3.8ft at
+5mph, i.e. 3.8ft/mph) shared by the user earlier. Concluded: **no change** — a legitimate outcome of
+tightening a parameter, not a failure to find one. Left `WIND_CARRY_FT_PER_MPH` at 3.5, documented as
+a named constant (previously an inline number) for future re-checks.
+
+---
+
 ## Real career hitter/pitcher umpire lean, derived from full history (2015-present)
 **Date:** 2026-09-04
 **What shipped:** the entry below this one shipped umpire tendencies without a hitter/pitcher-lean

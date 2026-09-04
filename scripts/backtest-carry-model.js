@@ -221,6 +221,42 @@ async function main() {
       `${String(t).padEnd(7)}${String(hit.length).padEnd(8)}${hitMean.toFixed(2).padEnd(10)}${String(pit.length).padEnd(8)}${pitMean.toFixed(2).padEnd(10)}${gap.toFixed(2).padEnd(8)}${neu.length}`
     );
   }
+
+  // Coefficient sweep: is WIND_CARRY_FT_PER_MPH (3.5) actually the value that best separates real
+  // scoring, or just a reasonable-sounding physics estimate nobody had checked? Pearson correlation
+  // can't answer this -- it's scale-invariant, so rescaling windCarryFt by any positive constant
+  // doesn't move the correlation number at all. What DOES move under rescaling is how well a fixed
+  // +/-Xft threshold separates real outcomes, since the threshold doesn't rescale with it. Rebuilds
+  // carryFt for each candidate coefficient from the samples already fetched above (no re-fetching --
+  // carryFt = baseCarryFt + windCarryFt, and windCarryFt scales linearly with the coefficient, so
+  // baseCarryFt = carryFt - windCarryFt lets every candidate be reconstructed from data already in
+  // hand), then reports each candidate's OWN best-achievable gap (re-optimizing the threshold per
+  // coefficient, since a bigger coefficient should pair with a bigger threshold) so this is a fair
+  // comparison across coefficients, not just re-scoring the existing 20ft cutoff.
+  console.log(`\n=== Coefficient sweep: which ft-per-mph value best separates real scoring? ===`);
+  console.log(`(each row shows that coefficient's OWN best threshold and the gap it achieves)`);
+  const CURRENT_COEF = 3.5;
+  const candidates = [2.5, 2.8, 3.0, 3.2, 3.5, 3.8, 4.0, 4.2, 4.5];
+  const sweepThresholds = [4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40];
+  for (const coef of candidates) {
+    const scale = coef / CURRENT_COEF;
+    const rescored = samples.map((s) => {
+      const baseCarryFt = s.carryFt - s.windCarryFt;
+      return { carryFt: baseCarryFt + s.windCarryFt * scale, combinedRuns: s.combinedRuns };
+    });
+    let best = { t: null, gap: -Infinity, hitN: 0, pitN: 0 };
+    for (const t of sweepThresholds) {
+      const hit = rescored.filter((s) => s.carryFt > t).map((s) => s.combinedRuns);
+      const pit = rescored.filter((s) => s.carryFt < -t).map((s) => s.combinedRuns);
+      if (hit.length < 50 || pit.length < 50) continue; // both buckets need a real sample size
+      const gap = mean(hit) - mean(pit);
+      if (gap > best.gap) best = { t, gap, hitN: hit.length, pitN: pit.length };
+    }
+    const marker = coef === CURRENT_COEF ? "  <- current" : "";
+    console.log(
+      `  ${coef.toFixed(1)} ft/mph: best T=${String(best.t).padEnd(4)} gap=${best.gap.toFixed(2).padEnd(6)} (hit n=${best.hitN}, pit n=${best.pitN})${marker}`
+    );
+  }
 }
 
 main().catch((err) => {

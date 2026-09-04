@@ -24,6 +24,15 @@
 // keeping both flagged buckets a healthy size (750/308 out of 1,786) rather than over-thinning them.
 const CARRY_LEAN_THRESHOLD_FT = 20;
 
+// Feet of fly-ball carry added per mph of pure tailwind (a park's own windSensitivity, see
+// data/stadiums.js, scales this further per venue). Originally an inline "3-4ft per mph" estimate
+// (see the physics-basis comment above); cross-checked against a real external figure -- MLB
+// Statcast physicist Dr. Alan Nathan's public estimate that 5mph of wind adds ~19ft, i.e. 3.8ft/mph
+// -- which fell inside that same range without requiring a change. See DECISIONS.md for the
+// 2026-09-04 backtest sweep that re-confirmed this value directly against real season outcomes
+// (not just the physicist estimate) after windSensitivity was introduced.
+const WIND_CARRY_FT_PER_MPH = 3.5;
+
 function degToCompass16(deg) {
   const dirs = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
   return dirs[Math.round(((deg % 360) + 360) % 360 / 22.5) % 16];
@@ -91,11 +100,18 @@ function scoreMlbGame(weather, venue) {
   // field -- foul lines run roughly +/-45deg off the park's home-plate->CF bearing, so that's used as
   // a stand-in for "toward left field" / "toward right field". windFromDeg is where wind comes FROM;
   // the vector it blows TOWARD is windFromDeg + 180.
+  //
+  // venue.windSensitivity (added 2026-09-04, see data/stadiums.js) scales this per park -- real MLB
+  // parks vary a lot in how much wind actually reaches the field beyond what geometry alone predicts
+  // (PNC Park's enclosed bowl is famously wind-sheltered; Coors and Oracle Park are famously not),
+  // and this term had no way to represent that before. Falls back to 1.0 (league-average, i.e. no
+  // change from before this field existed) if a venue somehow lacks it.
   function windCarryAt(targetBearingDeg) {
     if (roofClosed || weather.windSpeedMph < 3) return 0;
     const blowsToward = (weather.windFromDeg + 180) % 360;
     const diff = angleDiff(blowsToward, targetBearingDeg); // 0 = blowing straight out toward that bearing
-    return Math.cos((diff * Math.PI) / 180) * weather.windSpeedMph * 3.5;
+    const sensitivity = venue.windSensitivity ?? 1.0;
+    return Math.cos((diff * Math.PI) / 180) * weather.windSpeedMph * WIND_CARRY_FT_PER_MPH * sensitivity;
   }
 
   // Facing center field from home plate, right field is to the right (+45deg), left field to the left.
