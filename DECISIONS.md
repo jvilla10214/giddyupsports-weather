@@ -6,6 +6,41 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## Real-time roof status for retractable-roof venues
+**Date:** 2026-09-04
+**The gap**: every retractable-roof MLB venue (7 of 30 teams) was always assumed closed, unconditionally
+— a documented limitation since early in this project, since roof-open/closed wasn't knowable in
+advance from any free source found up to this point. In practice this meant all the orientation and
+wind-sensitivity work elsewhere in this file was silently inert for those 7 parks on any day they
+actually played with the roof open.
+
+**Found a real source**: MLB's own live game feed
+(`statsapi.mlb.com/api/v1.1/game/{gamePk}/feed/live`) carries `gameData.weather.condition` — the
+literal string `"Roof Closed"` when shut, or a normal weather condition (`"Clear"`, `"Sunny"`, etc.,
+paired with a real on-site wind reading already phrased relative to the field, e.g. `"8 mph, Out To
+CF"`) when open. Confirmed live across TOR/SEA/MIL games with the roof open and HOU/TEX/ARI/MIA
+with it closed — a clean, reliable, free, official signal, no scraping.
+
+**The catch, same shape as the umpire-crew lag already documented**: this only populates once MLB
+actually knows it. Confirmed empty (`weather: {}`) for a game still hours out in "Scheduled" status.
+So this can upgrade the (non-preview) detail view once a specific `gameId` is known and the game is
+close to/at first pitch, but can't fix the pregame preview grid shown hours in advance — a real
+limitation of the data itself, not something more engineering solves. `handleGame` only calls
+`fetchGameRoofStatus` for the detail view, same reasoning already applied to the umpire lookup.
+
+**Implementation**: `scoreMlbGame(weather, venue, roofStatus)` gained an optional third parameter.
+`roofStatus` only ever overrides the default for a `retractable` venue — a fixed `dome` has no open
+state to confirm (defensively enforced in the rules engine itself, not just by the caller only ever
+fetching status for retractable venues), and an `open` venue doesn't need confirming. When omitted,
+or `{known: false}` (not yet published), falls back to the exact same conservative "assume closed"
+default this function always used. The returned score object now carries `roofStatusConfirmed` so
+callers (the AI narration text, and a new "Roof" stat-pair in the UI for retractable venues) can be
+honest about confirmed vs. assumed rather than presenting both with equal confidence. Four new tests
+cover confirmed-open (real weather now applies), confirmed-closed (identical to the assumed default),
+the missing-argument default, and a defensive dome-can't-be-overridden case.
+
+---
+
 ## Per-park wind sensitivity multiplier, and a wind-coefficient re-check
 **Date:** 2026-09-04
 **What shipped:** a real, per-park `windSensitivity` multiplier (`data/stadiums.js`) applied to the

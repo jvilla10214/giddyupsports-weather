@@ -1248,6 +1248,19 @@
     if (sport === "mlb" && parkFactor) {
       pairs.push(statPair("Park Factor", `${parkFactor.totalPct > 0 ? "+" : ""}${parkFactor.totalPct}`, "%"));
     }
+    // Roof status for retractable-roof MLB venues (see fetchGameRoofStatus in weather-worker.js) --
+    // only shown for venues where it's actually a question; a fixed dome or an always-open park has
+    // nothing to report here. Distinguishes confirmed from assumed since MLB doesn't publish this
+    // until close to game time -- an "assumed closed" reading is a real caveat worth surfacing, not
+    // something to present with the same confidence as a confirmed one.
+    if (sport === "mlb" && venue.roofType === "retractable") {
+      const label = score.roofClosed
+        ? score.roofStatusConfirmed
+          ? "Closed"
+          : "Closed (assumed)"
+        : "Open (confirmed)";
+      pairs.push(statPair("Roof", label));
+    }
     statPairs.innerHTML = pairs.join("");
   }
 

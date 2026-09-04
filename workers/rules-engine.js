@@ -69,9 +69,16 @@ function angleDiff(a, b) {
  * @param {object} weather - { tempF, humidityPct, windSpeedMph, windFromDeg, precipProbPct }
  *   windFromDeg is the meteorological convention: the direction the wind is blowing FROM.
  * @param {object} venue - MLB_STADIUMS[x] entry: { roofType, altitudeFt, cfBearingDeg }
+ * @param {object} [roofStatus] - optional, from fetchGameRoofStatus in weather-worker.js:
+ *   { known: boolean, roofOpen?: boolean }. Only ever overrides the default for a `retractable`
+ *   venue -- a `dome` has no open state to confirm, and `open` venues don't need confirming. When
+ *   omitted, or `known` is false (MLB hasn't published it yet for this game -- see
+ *   fetchGameRoofStatus for why that's routine, not an error), falls back to the same conservative
+ *   "assume closed" default this function always used before this parameter existed.
  */
-function scoreMlbGame(weather, venue) {
-  const roofClosed = venue.roofType !== "open"; // retractable/dome: assume closed unless told otherwise
+function scoreMlbGame(weather, venue, roofStatus) {
+  const roofStatusConfirmed = venue.roofType === "retractable" && roofStatus?.known === true;
+  const roofClosed = roofStatusConfirmed ? !roofStatus.roofOpen : venue.roofType !== "open";
   const notes = [];
 
   // Air density / carry index, in estimated feet of extra fly-ball distance vs. a 70F/50%RH/sea-level
@@ -161,8 +168,10 @@ function scoreMlbGame(weather, venue) {
         : `blowing ${strongest.ft > 0 ? "out toward" : "in from"} ${strongest.name}`;
   } else if (venue.roofType === "dome") {
     notes.push(`${venue.venue} is a fixed dome — always closed, so wind has no effect here.`);
+  } else if (roofClosed && roofStatusConfirmed) {
+    notes.push(`${venue.venue}'s roof is confirmed closed for this game — wind has no effect.`);
   } else if (roofClosed) {
-    notes.push(`${venue.venue}'s retractable roof status isn't known in advance for free — if closed, wind has no effect. Verify before relying on this.`);
+    notes.push(`${venue.venue}'s retractable roof status isn't known yet — MLB usually doesn't publish it until close to game time (see DECISIONS.md). Assuming closed until confirmed; verify before relying on this.`);
   }
 
   const scoringLean =
@@ -171,6 +180,7 @@ function scoreMlbGame(weather, venue) {
   return {
     sport: "MLB",
     roofClosed,
+    roofStatusConfirmed, // true only when a retractable venue's status came from fetchGameRoofStatus, not the default assumption
     carryFt: Math.round(carryFt * 10) / 10,
     fieldCarry,
     handedness,

@@ -223,6 +223,36 @@ async function fetchUmpireCareerLean(env, umpireName) {
   });
 }
 
+// ---- Real-time roof status (retractable-roof venues only) ----
+
+// scoreMlbGame always assumed a retractable-roof venue was closed, since roof-open/closed isn't
+// knowable in advance from any free source -- documented as a real limitation since early in this
+// project. MLB's own live game feed turns out to carry it after all: `gameData.weather.condition`
+// reads the literal string "Roof Closed" when shut, or a normal weather condition ("Clear", "Sunny",
+// etc., with a real on-site wind reading already phrased relative to the field, e.g. "8 mph, Out To
+// CF") when open -- confirmed live across TOR/SEA/MIL (open) and HOU/TEX/ARI/MIA (closed) games.
+// Like the umpire-crew hydrate, this is only populated once MLB actually knows it -- confirmed empty
+// (`weather: {}`) for a game still hours out in "Scheduled" status, populated by "Pre-Game". So this
+// can upgrade the near-game-time detail view once a specific gameId is known, but can't fix the
+// pregame preview grid shown hours in advance -- a real limitation of the data itself, not something
+// more engineering solves, so handleGame below only calls this for the (non-preview) detail view,
+// same reasoning already applied to the umpire lookup.
+async function fetchGameRoofStatus(env, gameId) {
+  // Short TTL, unlike the day-plus caches above -- this is genuinely time-sensitive (starts unknown,
+  // becomes known as game time approaches) rather than slowly-changing season data, so a page
+  // reloaded an hour later should have a real chance of picking up a status that just became known.
+  return cached(env, `roofstatus:${gameId}`, 10 * 60, async () => {
+    const url = `https://statsapi.mlb.com/api/v1.1/game/${gameId}/feed/live`;
+    const res = await fetch(url, { headers: { "User-Agent": "GiddyUpSports-Weather/1.0 (contact: jvilla10214@gmail.com)" } });
+    if (!res.ok) throw new Error(`MLB live feed ${res.status}`);
+    const data = await res.json();
+    const weather = data.gameData?.weather;
+    if (!weather || !weather.condition) return { known: false };
+    const roofOpen = weather.condition !== "Roof Closed";
+    return { known: true, roofOpen, condition: weather.condition };
+  });
+}
+
 // NFL schedule is intentionally NOT fetched here. ESPN's scoreboard API (site.api.espn.com) sends
 // Access-Control-Allow-Origin: * (it's fine with real browsers) but returns 403 to every request
 // from a Cloudflare Worker regardless of headers — confirmed by testing identical requests with
@@ -600,7 +630,12 @@ async function narrate(env, sport, score, weather, venue, parkFactor, umpire) {
   // this also means no more "gentle breeze inside a fixed dome" hallucinations (confirmed live
   // on Tropicana Field before this fix), since there's no generation step left to hallucinate in.
   if (score.roofClosed) {
-    const certainty = venue.roofType === "dome" ? "a fixed dome" : "a retractable roof (assumed closed today)";
+    const certainty =
+      venue.roofType === "dome"
+        ? "a fixed dome"
+        : score.roofStatusConfirmed
+          ? "a retractable roof (confirmed closed today)"
+          : "a retractable roof (assumed closed today, not yet confirmed)";
     return {
       text: `${venueLabel} is played under ${certainty}. Conditions are climate-controlled, so wind, temperature, and precipitation have no bearing on today's game.`,
       cached: false,
@@ -770,7 +805,22 @@ async function handleGame(env, sport, params) {
   if (!venue) return json({ error: `Unknown venueKey "${venueKey}" for sport ${sport}` }, 400);
 
   const weather = await fetchWeather(env, venue.lat, venue.lon, startTimeUtc);
-  const score = sport === "mlb" ? scoreMlbGame(weather, venue) : scoreNflGame(weather, venue);
+
+  // Real roof status (see fetchGameRoofStatus): only fetched for the non-preview detail view of a
+  // retractable-roof MLB venue with a known gameId -- same "not worth it for cards nobody's opened"
+  // reasoning already applied to the AI call and the umpire lookup below. scoreMlbGame falls back to
+  // its long-standing "assume closed" default when this is null, so preview mode (and NFL, and
+  // fixed-dome/always-open venues) is completely unaffected by this addition.
+  let roofStatus = null;
+  if (sport === "mlb" && !preview && gameId && venue.roofType === "retractable") {
+    try {
+      roofStatus = await fetchGameRoofStatus(env, gameId);
+    } catch (err) {
+      roofStatus = null;
+    }
+  }
+
+  const score = sport === "mlb" ? scoreMlbGame(weather, venue, roofStatus) : scoreNflGame(weather, venue);
 
   // Preview mode (used by the front-page quick-look grid, one call per game on the slate) skips
   // the AI narration call entirely -- no point spending Workers AI neurons on insights for games
