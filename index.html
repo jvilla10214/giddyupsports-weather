@@ -785,6 +785,7 @@
           <div class="handed-note" id="handedNote" style="display:none;"></div>
           <div class="handed-note" id="umpireNote" style="display:none;"></div>
           <div class="handed-note" id="runEnvNote" style="display:none;"></div>
+          <div class="handed-note" id="totalCallNote" style="display:none;"></div>
           <div class="insight-text" id="insightText">Loading AI read…</div>
         </div>
       </div>
@@ -851,6 +852,7 @@
   const handedNoteEl = document.getElementById("handedNote");
   const umpireNoteEl = document.getElementById("umpireNote");
   const runEnvNoteEl = document.getElementById("runEnvNote");
+  const totalCallNoteEl = document.getElementById("totalCallNote");
   const almanacCard = document.getElementById("almanacCard");
   const almanacBody = document.getElementById("almanacBody");
   const venueMeta = document.getElementById("venueMeta");
@@ -1312,6 +1314,28 @@
     runEnvNoteEl.style.display = "flex";
   }
 
+  // Total Runs Call (see computeTotalRunsCall in rules-engine.js): compares the Run Environment
+  // Score's implied total against the real market O/U line (RotoGrinders). Same good/info/neutral
+  // color convention as everything else in this view -- Likely Over reads green (more offense),
+  // Likely Under reads blue (more pitching), Toss-up reads neutral gray, deliberately NOT red/bad --
+  // a close call isn't a worse outcome, just a less certain one. The implied-total number is shown
+  // alongside the market line rather than just the call itself, since the underlying regression is
+  // real but modest (documented in rules-engine.js: R-squared 0.032, residual std dev 4.52 runs) --
+  // showing both numbers lets the caveat about weak confidence be genuinely checkable, not just
+  // asserted.
+  function renderTotalCallNote(totalCall) {
+    if (!totalCall) {
+      totalCallNoteEl.style.display = "none";
+      return;
+    }
+    const cls = totalCall.call === "Likely Over" ? "good" : totalCall.call === "Likely Under" ? "info" : "neutral";
+    totalCallNoteEl.innerHTML =
+      `<span class="hn-dot"></span>Total (${totalCall.marketLine} O/U):` +
+      `<span class="pill-lean ${cls}" style="margin-left:6px;">${totalCall.call}</span>` +
+      `<span style="margin-left:8px; color: var(--text-muted); font-size: 0.85em;">model implies ${totalCall.impliedTotal}</span>`;
+    totalCallNoteEl.style.display = "flex";
+  }
+
   // Analog wind-rose: needle rotated to the TOWARD bearing (where the wind is headed, not where
   // it's coming from -- the site-wide convention, see DECISIONS.md), same conversion the wind-flow
   // canvas and score.windCompass already use, so all three always agree with each other.
@@ -1564,6 +1588,7 @@
     handedNoteEl.style.display = "none";
     umpireNoteEl.style.display = "none";
     runEnvNoteEl.style.display = "none";
+    totalCallNoteEl.style.display = "none";
     almanacCard.style.display = "none";
     gaugeCluster.innerHTML = "";
     statPairs.innerHTML = "";
@@ -1596,6 +1621,7 @@
       renderImpactRows(sport, data.weather, data.score);
       renderUmpireNote(data.umpire);
       renderRunEnvironmentNote(data.runEnvironmentScore);
+      renderTotalCallNote(data.totalRunsCall);
       insightText.textContent = data.insight || "No insight generated.";
       if (window.setWindFlow) window.setWindFlow(data.weather.windFromDeg || 0, data.weather.windSpeedMph || 0);
       setStatus(`Updated ${new Date().toLocaleTimeString()}`);

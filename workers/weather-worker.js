@@ -40,7 +40,7 @@
  */
 
 import { MLB_STADIUMS, NFL_STADIUMS, MLB_TEAM_ID_TO_KEY, MLB_KEY_TO_TEAM_ID } from "../data/stadiums.js";
-import { scoreMlbGame, scoreNflGame, windCompassOrVariable, computeRunEnvironmentScore, MIN_PITCHER_IP } from "./rules-engine.js";
+import { scoreMlbGame, scoreNflGame, windCompassOrVariable, computeRunEnvironmentScore, MIN_PITCHER_IP, computeTotalRunsCall } from "./rules-engine.js";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -147,6 +147,46 @@ async function fetchParkFactors(env) {
       };
     }
     return { year, byVenueKey, source: "Baseball Savant Statcast Park Factors" };
+  });
+}
+
+// ---- Total Runs O/U line (RotoGrinders) ----
+//
+// rotogrinders.com/weather/mlb server-renders the day's full slate (confirmed live: all 15 games on
+// a real day) with each game's real market O/U total embedded directly in the HTML -- no auth, no
+// JS execution needed, and (unlike ESPN's NFL scoreboard, see the comment further down) confirmed
+// NOT blocked for Cloudflare Worker IPs specifically (tested live via a temporary debug route before
+// building this for real: identical response, same HTML length, from the deployed Worker vs. a
+// browser). Each game's two team codes and O/U line sit together in one `module` block:
+// `data-abbr="XXX"` (away) ... `data-abbr="YYY"` (home) ... `game-weather-vegas">N.N <span
+// class="gray">O/U`, extracted with one non-greedy regex per game -- confirmed to correctly pair
+// every one of a real day's 15 games without crossing module boundaries.
+//
+// RotoGrinders' team codes mostly match this app's own MLB_STADIUMS keys, but not always -- these
+// six use a different convention (Baseball-Reference-style 3-letter vs. this app's shorter codes)
+// and need translating before they can be used as a venueKey.
+const ROTOGRINDERS_ABBR_TO_KEY = { SFG: "SF", TBR: "TB", KCR: "KC", CHW: "CWS", SDP: "SD", WAS: "WSH" };
+
+async function fetchTotalLines(env) {
+  const date = todayIso();
+  // Short TTL, unlike park factors' 24h -- a market total can move during the day (weather updates,
+  // lineup news, line movement), and a stale-all-day cache would silently keep showing a line the
+  // book already moved away from.
+  return cached(env, `total-lines:mlb:${date}`, 15 * 60, async () => {
+    const url = "https://rotogrinders.com/weather/mlb";
+    const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36" } });
+    if (!res.ok) throw new Error(`RotoGrinders weather/mlb ${res.status}`);
+    const html = await res.text();
+    const re = /data-abbr="([A-Z]+)"[\s\S]*?data-abbr="([A-Z]+)"[\s\S]*?game-weather-vegas">([\d.]+)\s*<span class="gray">O\/U/g;
+    const byVenueKey = {};
+    for (const m of html.matchAll(re)) {
+      const awayAbbr = ROTOGRINDERS_ABBR_TO_KEY[m[1]] || m[1];
+      const homeAbbr = ROTOGRINDERS_ABBR_TO_KEY[m[2]] || m[2];
+      const ou = Number(m[3]);
+      if (!Number.isFinite(ou)) continue;
+      byVenueKey[homeAbbr] = { awayAbbr, homeAbbr, marketLine: ou };
+    }
+    return { date, byVenueKey, source: "RotoGrinders MLB Weather" };
   });
 }
 
@@ -724,7 +764,7 @@ async function getAlmanacMatch(env, venueKey, venue, todayWeather) {
 
 // ---- AI narration ----
 
-async function narrate(env, sport, score, weather, venue, parkFactor, umpire, runEnvironmentScore) {
+async function narrate(env, sport, score, weather, venue, parkFactor, umpire, runEnvironmentScore, totalRunsCall) {
   const venueLabel = venue.venue;
 
   // Indoor games (fixed dome, or a retractable roof assumed closed) always land on the same
@@ -767,7 +807,10 @@ async function narrate(env, sport, score, weather, venue, parkFactor, umpire, ru
   // become known/change during the day (starters get announced, a fetch that failed earlier now
   // succeeds) independent of everything else in this key, so a stale "2/5 signals, Neutral" insight
   // shouldn't keep being served for 6hrs once a fuller "4/5 signals, Pitcher Leaning" read is available.
-  const cacheKey = `insight:${sport}:${venueLabel}:${todayIso()}:${Math.round(weather.windSpeedMph)}:${Math.round(weather.tempF)}:${score.windZone || score.windCompass || score.windTier || "na"}:${weather.isForecast ? "f" : "c"}:${umpire?.name || "noump"}:${runEnvironmentScore?.tier || "noenv"}`;
+  // totalRunsCall's call/marketLine are in the cache key too, same reasoning as runEnvironmentScore's
+  // tier just above -- a line can move (or become known for the first time) independent of everything
+  // else in this key.
+  const cacheKey = `insight:${sport}:${venueLabel}:${todayIso()}:${Math.round(weather.windSpeedMph)}:${Math.round(weather.tempF)}:${score.windZone || score.windCompass || score.windTier || "na"}:${weather.isForecast ? "f" : "c"}:${umpire?.name || "noump"}:${runEnvironmentScore?.tier || "noenv"}:${totalRunsCall ? `${totalRunsCall.call}-${totalRunsCall.marketLine}` : "nototal"}`;
   return cached(env, cacheKey, 6 * 60 * 60, async () => {
     if (!env.AI) return { text: "AI narration unavailable (no AI binding configured).", cached: false };
     // Gave up trying to prompt-engineer the model into correctly pairing handedness with field
@@ -895,6 +938,16 @@ async function narrate(env, sport, score, weather, venue, parkFactor, umpire, ru
       if (sport !== "mlb" || !runEnvironmentScore) return "";
       return ` Run environment: ${runEnvironmentScore.tier} (${runEnvironmentScore.inputsUsed.length}/5 signals).`;
     }
+    // Total Runs Call (see computeTotalRunsCall in rules-engine.js): same treatment again -- the
+    // call itself is a plain deterministic comparison in code (see that function's own comment for
+    // why it's never handed to the model to decide), appended as a terse clause. "Toss-up" is stated
+    // plainly rather than omitted, so the AI text doesn't go silent on totals for the (most common,
+    // given the regression's real 4.52-run residual std dev) case where the line and our implied
+    // total are close -- silence there would read as "nothing to say" rather than "genuinely close".
+    function totalRunsSentence() {
+      if (sport !== "mlb" || !totalRunsCall) return "";
+      return ` Total: ${totalRunsCall.call} ${totalRunsCall.marketLine} (our model implies ${totalRunsCall.impliedTotal}).`;
+    }
     try {
       // 200 -> 60: a hard length backstop, not just a prompt request -- this model has a documented
       // history of not reliably following wording-only instructions (see the failures above), so a
@@ -904,7 +957,7 @@ async function narrate(env, sport, score, weather, venue, parkFactor, umpire, ru
         max_tokens: 60,
       });
       const aiText = result.response?.trim() || "No insight generated.";
-      return { text: aiText + umpireSentence() + runEnvironmentSentence(), cached: false };
+      return { text: aiText + umpireSentence() + runEnvironmentSentence() + totalRunsSentence(), cached: false };
     } catch (err) {
       return { text: `AI narration failed: ${err.message}`, cached: false };
     }
@@ -945,7 +998,7 @@ async function handleGame(env, sport, params) {
   // nobody's opened yet. The rules-engine score above is pure JS, so it's free either way. Same
   // reasoning extends to park factors and umpire tendencies here -- both real, but not worth
   // fetching nine times over for cards nobody's opened.
-  if (preview) return json({ sport, venue, weather, score, insight: null, parkFactor: null, umpire: null, runEnvironmentScore: null });
+  if (preview) return json({ sport, venue, weather, score, insight: null, parkFactor: null, umpire: null, runEnvironmentScore: null, totalRunsCall: null });
 
   // Both of these are wrapped individually so a scrape hiccup on either external site degrades to
   // "no data today" for that one field, not a broken game page -- neither is load-bearing for the
@@ -1051,8 +1104,25 @@ async function handleGame(env, sport, params) {
     }
   }
 
-  const insight = await narrate(env, sport, score, weather, venue, parkFactor, umpire, runEnvironmentScore);
-  return json({ sport, venue, weather, score, insight: insight.text, parkFactor, umpire, runEnvironmentScore });
+  // Total Runs Call (see computeTotalRunsCall in rules-engine.js): needs both a real market O/U
+  // line (RotoGrinders) and a computed Run Environment Score -- wrapped separately from the block
+  // above so a RotoGrinders scrape hiccup degrades to "no total call today" without touching the
+  // Run Environment Score that's already independently useful.
+  let totalRunsCall = null;
+  if (sport === "mlb" && runEnvironmentScore) {
+    try {
+      const lines = await fetchTotalLines(env);
+      const line = lines.byVenueKey[venueKey];
+      if (line) {
+        totalRunsCall = { ...computeTotalRunsCall(runEnvironmentScore.score, line.marketLine), awayAbbr: line.awayAbbr, homeAbbr: line.homeAbbr };
+      }
+    } catch (err) {
+      totalRunsCall = null;
+    }
+  }
+
+  const insight = await narrate(env, sport, score, weather, venue, parkFactor, umpire, runEnvironmentScore, totalRunsCall);
+  return json({ sport, venue, weather, score, insight: insight.text, parkFactor, umpire, runEnvironmentScore, totalRunsCall });
 }
 
 async function handleAlmanac(env, sport, params) {

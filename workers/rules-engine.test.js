@@ -1,6 +1,6 @@
 // Quick sanity checks for rules-engine.js against known real-world cases.
 // Run with: node workers/rules-engine.test.js
-import { scoreMlbGame, scoreNflGame, computeRunEnvironmentScore } from "./rules-engine.js";
+import { scoreMlbGame, scoreNflGame, computeRunEnvironmentScore, computeTotalRunsCall } from "./rules-engine.js";
 import { MLB_STADIUMS, NFL_STADIUMS } from "../data/stadiums.js";
 
 function assert(cond, msg) {
@@ -171,5 +171,30 @@ assert(computeRunEnvironmentScore({ carryFt: null, parkFactorPct: null, umpireLe
 const mixed = computeRunEnvironmentScore({ carryFt: 19, parkFactorPct: -6, umpireLeanRunsPerGame: 0, pitcherHr9Delta: -0.35, teamHrRateDelta: 0.003 });
 console.log("Mixed-signal composite:", mixed);
 assert(mixed.tier === "Neutral", "Realistic, genuinely offsetting signals should land in the Neutral tier");
+
+// ---- Total Runs Call ----
+
+// A Neutral-ish score (near the regression's own mean) against a very low market line -> our
+// implied total should sit well above it -> Likely Over.
+const overCall = computeTotalRunsCall(0, 6.5);
+console.log("Total call vs a low market line:", overCall);
+assert(overCall.call === "Likely Over", "A market line well below our implied total should call Likely Over");
+assert(overCall.impliedTotal > 8, "Score 0 should imply a total near the regression's intercept (~8.77)");
+
+// Same score against a very high market line -> Likely Under.
+const underCall = computeTotalRunsCall(0, 11);
+console.log("Total call vs a high market line:", underCall);
+assert(underCall.call === "Likely Under", "A market line well above our implied total should call Likely Under");
+
+// Market line very close to our implied total -> Toss-up, not a false-confidence lean either way.
+// This is the common case given the regression's real residual std dev (4.52 runs) -- most real
+// market lines should land inside the margin, not outside it.
+const tossUp = computeTotalRunsCall(0, 8.5);
+console.log("Total call vs a close market line:", tossUp);
+assert(tossUp.call === "Toss-up", "A market line within TOTAL_CALL_MARGIN of our implied total should be a Toss-up, not a confident lean");
+
+// delta should be signed correctly: impliedTotal - marketLine, positive means we lean Over.
+assert(overCall.delta > 0, "A Likely Over call should have a positive delta (implied above market)");
+assert(underCall.delta < 0, "A Likely Under call should have a negative delta (implied below market)");
 
 console.log("\nAll rules-engine sanity checks passed.");

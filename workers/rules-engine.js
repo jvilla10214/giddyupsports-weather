@@ -343,6 +343,47 @@ function computeRunEnvironmentScore(inputs) {
   return { score, tier: runEnvironmentTier(score), inputsUsed: contributions.map((c) => c.key) };
 }
 
+// ---- Total Runs Call (Run Environment Score vs. the real market O/U line) ----
+//
+// User requested 2026-09-05: pull a real Vegas O/U line (RotoGrinders) per game and have something
+// call "Likely Over"/"Likely Under". Deliberately NOT delegated to the AI model -- this file has
+// nine documented cases of that model mishandling numbers it's handed (flipped signs, scrambled
+// values, fabricated claims), so the call itself is a plain deterministic comparison in code, same
+// as every other signal in this app; the model's only job, if used at all, is narrating an
+// already-resolved fact.
+//
+// TOTAL_RUNS_REGRESSION fits real actualCombinedRuns to resScore via ordinary least squares across
+// the full 2,430-game 2025 backtest (scripts/backtest-run-environment-score.js, dataset at
+// scripts/data/run-environment-score-samples.json): impliedTotal = INTERCEPT + SLOPE * resScore.
+//
+// HONEST CAVEAT, worth reading before changing anything below: R-squared for this fit is only
+// 0.032 -- resScore explains roughly 3% of game-to-game variance in actual total runs -- and the
+// residual standard deviation is 4.52 runs, which DWARFS the ~5-run swing the score produces across
+// its entire range (Strong Pitcher's implied ~6.2 to Strong Hitter's implied ~11.4). This is a real,
+// modest, correctly-signed signal (same conclusion as the Run Environment Score's own backtest
+// writeup), not a strong predictor of any single game. TOTAL_CALL_MARGIN below is deliberately
+// wide (not tuned against real historical odds, which this project doesn't have -- RotoGrinders only
+// exposes today's live line, not a historical archive) specifically so the call only fires "Likely
+// Over/Under" on a genuinely large gap between our implied total and the market line, and reads
+// "Toss-up" otherwise -- consistent with the honest, unconfident framing that residual std dev
+// demands. Revisit both the regression and the margin once real historical market-line outcomes can
+// be collected to actually backtest this call's hit rate, the same way every other constant in this
+// file has been.
+const TOTAL_RUNS_REGRESSION = { intercept: 8.765, slope: 1.729 };
+const TOTAL_CALL_MARGIN = 1.0; // runs of gap between implied total and market line before calling a lean at all
+
+/**
+ * @param {number} resScore - Run Environment Score's `score` (not the tier label)
+ * @param {number} marketLine - the real O/U line for this game (e.g. from RotoGrinders)
+ * @returns {{impliedTotal: number, marketLine: number, delta: number, call: string}}
+ */
+function computeTotalRunsCall(resScore, marketLine) {
+  const impliedTotal = Math.round((TOTAL_RUNS_REGRESSION.intercept + TOTAL_RUNS_REGRESSION.slope * resScore) * 100) / 100;
+  const delta = Math.round((impliedTotal - marketLine) * 100) / 100;
+  const call = delta >= TOTAL_CALL_MARGIN ? "Likely Over" : delta <= -TOTAL_CALL_MARGIN ? "Likely Under" : "Toss-up";
+  return { impliedTotal, marketLine, delta, call };
+}
+
 export {
   scoreMlbGame,
   scoreNflGame,
@@ -351,4 +392,5 @@ export {
   windCompassOrVariable,
   computeRunEnvironmentScore,
   MIN_PITCHER_IP,
+  computeTotalRunsCall,
 };
