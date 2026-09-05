@@ -1067,6 +1067,27 @@ async function handleAlmanac(env, sport, params) {
   return json({ aggregate });
 }
 
+// Clears every cached AI insight (KV keys prefixed "insight:") on demand. Added after a prompt-
+// wording-only deploy kept serving a stale 6h-cached insight -- the cache key is built from the
+// underlying weather/tier data, not the prompt text, so changing the wording alone doesn't bust the
+// cache, and there was no way to force a refresh short of waiting out the TTL. Scoped to only the
+// "insight:" prefix rather than a generic "wipe everything" route -- narrower blast radius, and
+// every other cached value here (park factors, schedules, umpire stats) is either short-lived
+// already or unaffected by a prompt-wording change like this one.
+async function handleClearInsightCache(env) {
+  let cursor;
+  let deleted = 0;
+  do {
+    const page = await env.WEATHER_KV.list({ prefix: "insight:", cursor });
+    for (const key of page.keys) {
+      await env.WEATHER_KV.delete(key.name);
+      deleted++;
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  return json({ cleared: deleted });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -1090,6 +1111,10 @@ export default {
 
       if (url.pathname === "/api/almanac") {
         return await handleAlmanac(env, url.searchParams.get("sport"), url.searchParams);
+      }
+
+      if (url.pathname === "/debug/clear-insight-cache") {
+        return await handleClearInsightCache(env);
       }
 
       return json({ error: "Not found. Try /api/schedule?sport=mlb or /api/game?sport=mlb&venueKey=COL" }, 404);
