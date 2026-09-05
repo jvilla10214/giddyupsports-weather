@@ -867,49 +867,41 @@ async function narrate(env, sport, score, weather, venue, parkFactor, umpire, ru
     // for either accuracy/consistency or career lean -- there is nothing left for it to embellish
     // because it doesn't see the data in the first place. Same end state as how the LF/CF/RF field
     // numbers were already handled (shown correctly in the UI, no longer described by the model).
+    // Kept to ONE short sentence, not 2-3 -- umpire/park-factor/run-environment facts are already
+    // shown as their own dedicated badges elsewhere in the view (umpireNoteEl, runEnvNoteEl, the
+    // Park Factor stat-pair), so this text's only job is the weather/carry read itself, as briefly
+    // as possible, not a full recap of everything already visible on screen.
     const prompt =
       sport === "mlb"
-        ? `You are a concise baseball weather analyst. Venue: ${venueLabel}. These are ${conditionsLabel}: ${weather.tempF}F, ${weather.humidityPct}% humidity. ${mlbWindLine} Overall lean: ${score.scoringLean}.${handedNote}${parkFactorNote} In 2-3 sentences, explain in plain language what this means for hitters and scoring today. Describe these as ${conditionsLabel}, not as something else. No disclaimers, no hedging filler.`
-        : `You are a concise NFL weather analyst. Venue: ${venueLabel}. These are ${conditionsLabel}: ${weather.tempF}F, wind at ${weather.windSpeedMph}mph, precip chance ${weather.precipProbPct}%. Rules-engine read: wind tier ${score.windTier}, passing impact "${score.passingImpact}", field-goal range impact "${score.fgRangeImpact}". Do NOT state a compass direction or cardinal letter for the wind — none is reliably known, so only describe speed/tier and its effect. Describe these as ${conditionsLabel}, not as something else. In 2-3 sentences, explain what this means for the passing game and kicking today. No disclaimers, no hedging filler.`;
-    // Deterministic umpire sentence(s), built in code and appended after whatever the model wrote --
-    // see the comment above for why this isn't in the prompt. career.lean is only ever "hitter",
-    // "pitcher", "neutral", or missing/"insufficient data" (see fetchUmpireCareerLean), so this
-    // covers every case without a fallback branch that could silently say nothing wrong but useless.
+        ? `You are a concise baseball weather analyst. Venue: ${venueLabel}. These are ${conditionsLabel}: ${weather.tempF}F, ${weather.humidityPct}% humidity. ${mlbWindLine} Overall lean: ${score.scoringLean}.${handedNote}${parkFactorNote} In ONE short sentence (max 25 words), state what this means for hitters and scoring today. Describe these as ${conditionsLabel}, not as something else. No disclaimers, no hedging filler, no restating the numbers above.`
+        : `You are a concise NFL weather analyst. Venue: ${venueLabel}. These are ${conditionsLabel}: ${weather.tempF}F, wind at ${weather.windSpeedMph}mph, precip chance ${weather.precipProbPct}%. Rules-engine read: wind tier ${score.windTier}, passing impact "${score.passingImpact}", field-goal range impact "${score.fgRangeImpact}". Do NOT state a compass direction or cardinal letter for the wind — none is reliably known, so only describe speed/tier and its effect. Describe these as ${conditionsLabel}, not as something else. In ONE short sentence (max 25 words), state what this means for the passing game and kicking today. No disclaimers, no hedging filler.`;
+    // Deterministic umpire fact, appended after whatever the model wrote -- see the comment above
+    // for why this isn't in the prompt. Kept to a single terse clause, not a full sentence or two:
+    // umpireNoteEl already shows this umpire's full accuracy/consistency/lean as its own badge, so
+    // this is just enough text for the AI paragraph to acknowledge the umpire without re-explaining
+    // numbers already on screen right above it.
     function umpireSentence() {
       if (sport !== "mlb" || !umpire) return "";
-      let s = ` Home plate umpire ${umpire.name} has a ${umpire.accuracyPct}% ball/strike accuracy and ${umpire.consistencyPct} consistency rating this season (${umpire.games} games).`;
       const c = umpire.career;
-      if (c && c.lean === "hitter") {
-        s += ` Career games have netted +${c.perGameBatterImpact} runs per game toward batters over ${c.games} games since ${c.sinceYear}.`;
-      } else if (c && c.lean === "pitcher") {
-        s += ` Career games have netted ${c.perGameBatterImpact} runs per game toward batters (i.e. in pitchers' favor) over ${c.games} games since ${c.sinceYear}.`;
-      } else if (c && c.lean === "neutral") {
-        s += ` Career record is close to neutral between hitters and pitchers over ${c.games} games since ${c.sinceYear}.`;
-      }
-      return s;
+      const leanTag = c && c.lean !== "insufficient data" ? `, career ${c.lean}-lean` : "";
+      return ` HP ump ${umpire.name}: ${umpire.accuracyPct}% accuracy${leanTag}.`;
     }
     // Run Environment Score (see computeRunEnvironmentScore in rules-engine.js): same treatment as
     // umpireSentence above, for the same reason -- not given to the model at all, appended as a
-    // plain string after the AI call returns. This composite is explicitly a COMBINATION of
-    // several already-hidden-from-the-model facts (umpire lean, park factor's raw sign) that this
-    // file has nine documented failures embellishing individually; there's no reason to expect
-    // handing the model a sixth, MORE abstract number ("composite score -1.05") would go better.
+    // plain string after the AI call returns. Kept to a single terse clause -- runEnvNoteEl already
+    // shows the tier and signal count as its own badge, so this is just enough for the AI paragraph
+    // to reference it without a full restatement of what's already visible.
     function runEnvironmentSentence() {
       if (sport !== "mlb" || !runEnvironmentScore) return "";
-      const tierPhrase = {
-        "Strong Hitter Environment": "a strong hitter-friendly environment overall",
-        "Hitter Leaning": "a hitter-leaning environment overall",
-        Neutral: "a roughly neutral environment overall",
-        "Pitcher Leaning": "a pitcher-leaning environment overall",
-        "Strong Pitcher Environment": "a strong pitcher-friendly environment overall",
-      }[runEnvironmentScore.tier];
-      if (!tierPhrase) return "";
-      return ` Combining today's weather, this park's season factor, umpire tendency, and starter/lineup HR rates (${runEnvironmentScore.inputsUsed.length}/5 signals available today), this profiles as ${tierPhrase}.`;
+      return ` Run environment: ${runEnvironmentScore.tier} (${runEnvironmentScore.inputsUsed.length}/5 signals).`;
     }
     try {
+      // 200 -> 60: a hard length backstop, not just a prompt request -- this model has a documented
+      // history of not reliably following wording-only instructions (see the failures above), so a
+      // one-sentence/25-word ask gets a matching hard cap rather than trusting compliance alone.
       const result = await env.AI.run("@cf/meta/llama-3.2-3b-instruct", {
         messages: [{ role: "user", content: prompt }],
-        max_tokens: 200,
+        max_tokens: 60,
       });
       const aiText = result.response?.trim() || "No insight generated.";
       return { text: aiText + umpireSentence() + runEnvironmentSentence(), cached: false };
