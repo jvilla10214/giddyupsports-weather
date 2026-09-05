@@ -40,7 +40,7 @@
  */
 
 import { MLB_STADIUMS, NFL_STADIUMS, MLB_TEAM_ID_TO_KEY, MLB_KEY_TO_TEAM_ID } from "../data/stadiums.js";
-import { scoreMlbGame, scoreNflGame, windCompassOrVariable } from "./rules-engine.js";
+import { scoreMlbGame, scoreNflGame, windCompassOrVariable, computeRunEnvironmentScore, MIN_PITCHER_IP } from "./rules-engine.js";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -74,7 +74,11 @@ async function fetchMlbSchedule(env) {
   return cached(env, `schedule:mlb:${date}`, 15 * 60, async () => {
     // hydrate=officials adds each game's umpire crew -- used to pull the home-plate umpire's name
     // for the umpire-tendency feature (see fetchUmpireStats) without a second API call per game.
-    const url = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&startDate=${date}&endDate=${date}&hydrate=venue,officials`;
+    // hydrate=probablePitcher adds each side's starter (id/name only -- no handedness or stats;
+    // those come from a separate per-pitcher fetch, see fetchPitcherHrTendency) for the Run
+    // Environment Score's pitcher-HR-tendency input. Like hpUmpire, this isn't known/published for
+    // every game this far out -- probablePitcher is simply absent until MLB has announced it.
+    const url = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&startDate=${date}&endDate=${date}&hydrate=venue,officials,probablePitcher`;
     const res = await fetch(url, { headers: { "User-Agent": "GiddyUpSports-Weather/1.0" } });
     if (!res.ok) throw new Error(`MLB Stats API ${res.status}`);
     const data = await res.json();
@@ -83,6 +87,8 @@ async function fetchMlbSchedule(env) {
       for (const g of d.games || []) {
         const venueKey = MLB_TEAM_ID_TO_KEY[g.teams?.home?.team?.id] || null;
         const hpUmpire = (g.officials || []).find((o) => o.officialType === "Home Plate")?.official?.fullName || null;
+        const homeProbablePitcher = g.teams?.home?.probablePitcher ? { id: g.teams.home.probablePitcher.id, name: g.teams.home.probablePitcher.fullName } : null;
+        const awayProbablePitcher = g.teams?.away?.probablePitcher ? { id: g.teams.away.probablePitcher.id, name: g.teams.away.probablePitcher.fullName } : null;
         games.push({
           gameId: String(g.gamePk),
           startTimeUtc: g.gameDate,
@@ -90,10 +96,14 @@ async function fetchMlbSchedule(env) {
           home: g.teams?.home?.team?.name,
           awayAbbr: MLB_TEAM_ID_TO_KEY[g.teams?.away?.team?.id] || null,
           homeAbbr: venueKey,
+          homeTeamId: g.teams?.home?.team?.id || null,
+          awayTeamId: g.teams?.away?.team?.id || null,
           venue: g.venue?.name,
           venueKey,
           status: g.status?.detailedState,
           hpUmpire,
+          homeProbablePitcher,
+          awayProbablePitcher,
         });
       }
     }
@@ -250,6 +260,100 @@ async function fetchGameRoofStatus(env, gameId) {
     if (!weather || !weather.condition) return { known: false };
     const roofOpen = weather.condition !== "Roof Closed";
     return { known: true, roofOpen, condition: weather.condition };
+  });
+}
+
+// ---- Pitcher/team HR tendency (Run Environment Score input) ----
+//
+// MLB Stats API's own `homeRunsPer9` field is already a correctly-computed rate stat -- no need to
+// hand-parse a single pitcher's `inningsPitched` (which uses baseball notation, e.g. "154.1" means
+// 154+1/3 innings, NOT 154.1 decimal -- a real gotcha, just not one that hits this specific field
+// since the API pre-computes the rate itself). That parsing IS still needed below for the
+// league-wide aggregate, which sums raw inningsPitched strings across 30 teams rather than reading
+// a single pre-computed rate.
+function parseInningsPitched(ip) {
+  const n = Number(ip);
+  if (!Number.isFinite(n)) return 0;
+  const whole = Math.trunc(n);
+  const remainder = Math.round((n - whole) * 10); // 0, 1, or 2 -- thirds of an inning, not tenths
+  return whole + remainder / 3;
+}
+
+// One call each for team-level season pitching and both batting-vs-hand splits (all 30 teams at
+// once, confirmed live) gives everything needed for both this game's specific inputs AND the
+// league-average baseline each is compared against, without a 30x per-team fetch loop. Cached a
+// full day, same as park factors -- these are slow-moving season aggregates.
+async function fetchLeagueHrRate(env) {
+  const year = new Date().getUTCFullYear();
+  return cached(env, `league-hr-rate:${year}`, 24 * 60 * 60, async () => {
+    const headers = { "User-Agent": "GiddyUpSports-Weather/1.0" };
+    const [pitchingRes, vsLeftRes, vsRightRes] = await Promise.all([
+      fetch(`https://statsapi.mlb.com/api/v1/teams/stats?stats=season&group=pitching&season=${year}&sportIds=1`, { headers }),
+      fetch(`https://statsapi.mlb.com/api/v1/teams/stats?stats=statSplits&group=hitting&season=${year}&sportIds=1&sitCodes=vl`, { headers }),
+      fetch(`https://statsapi.mlb.com/api/v1/teams/stats?stats=statSplits&group=hitting&season=${year}&sportIds=1&sitCodes=vr`, { headers }),
+    ]);
+    if (!pitchingRes.ok || !vsLeftRes.ok || !vsRightRes.ok) throw new Error("MLB Stats API team-stats fetch failed");
+    const [pitching, vsLeft, vsRight] = await Promise.all([pitchingRes.json(), vsLeftRes.json(), vsRightRes.json()]);
+
+    let leagueHr = 0;
+    let leagueIp = 0;
+    for (const s of pitching.stats?.[0]?.splits || []) {
+      leagueHr += s.stat?.homeRuns || 0;
+      leagueIp += parseInningsPitched(s.stat?.inningsPitched);
+    }
+    const pitcherHr9League = leagueIp ? (leagueHr / leagueIp) * 9 : null;
+
+    function splitsByTeam(splitData) {
+      const byTeamId = {};
+      let hrSum = 0;
+      let paSum = 0;
+      for (const s of splitData.stats?.[0]?.splits || []) {
+        const teamId = s.team?.id;
+        const hr = s.stat?.homeRuns || 0;
+        const pa = s.stat?.plateAppearances || 0;
+        if (teamId) byTeamId[teamId] = { hr, pa, hrRate: pa ? hr / pa : null };
+        hrSum += hr;
+        paSum += pa;
+      }
+      return { byTeamId, leagueHrRate: paSum ? hrSum / paSum : null };
+    }
+    const vl = splitsByTeam(vsLeft);
+    const vr = splitsByTeam(vsRight);
+    const teamIds = new Set([...Object.keys(vl.byTeamId), ...Object.keys(vr.byTeamId)]);
+    const hittingByTeamId = {};
+    for (const teamId of teamIds) {
+      hittingByTeamId[teamId] = { vsL: vl.byTeamId[teamId] || null, vsR: vr.byTeamId[teamId] || null };
+    }
+
+    return {
+      year,
+      pitcherHr9League,
+      hittingLeagueByHand: { L: vl.leagueHrRate, R: vr.leagueHrRate },
+      hittingByTeamId,
+    };
+  });
+}
+
+// A starter's own season HR/9 + throwing hand, one clean official-API call (no Statcast scraping
+// needed for this input -- see comment above). Cached per pitcher, same TTL/reasoning as park
+// factors: a season rate barely moves start to start.
+async function fetchPitcherHrTendency(env, pitcherId) {
+  const year = new Date().getUTCFullYear();
+  return cached(env, `pitcher-hr9:${pitcherId}:${year}`, 24 * 60 * 60, async () => {
+    const url = `https://statsapi.mlb.com/api/v1/people/${pitcherId}?hydrate=stats(group=[pitching],type=[season],season=${year})`;
+    const res = await fetch(url, { headers: { "User-Agent": "GiddyUpSports-Weather/1.0" } });
+    if (!res.ok) throw new Error(`MLB Stats API person ${res.status}`);
+    const data = await res.json();
+    const person = data.people?.[0];
+    const stat = person?.stats?.find((s) => s.group?.displayName === "pitching" && s.type?.displayName === "season")?.splits?.[0]?.stat;
+    const ip = parseInningsPitched(stat?.inningsPitched);
+    return {
+      pitcherId: Number(pitcherId),
+      throwsHand: person?.pitchHand?.code || null,
+      hr9: stat?.homeRunsPer9 != null ? Number(stat.homeRunsPer9) : null,
+      inningsPitched: ip,
+      qualifies: ip >= MIN_PITCHER_IP,
+    };
   });
 }
 
@@ -620,7 +724,7 @@ async function getAlmanacMatch(env, venueKey, venue, todayWeather) {
 
 // ---- AI narration ----
 
-async function narrate(env, sport, score, weather, venue, parkFactor, umpire) {
+async function narrate(env, sport, score, weather, venue, parkFactor, umpire, runEnvironmentScore) {
   const venueLabel = venue.venue;
 
   // Indoor games (fixed dome, or a retractable roof assumed closed) always land on the same
@@ -659,7 +763,11 @@ async function narrate(env, sport, score, weather, venue, parkFactor, umpire) {
   // umpire has to be in the key too -- it changes per game (not per venue/day/weather the way the
   // rest of this key does), so without it every game at the same park on the same day with similar
   // weather would share one cached insight regardless of which umpire is actually working it.
-  const cacheKey = `insight:${sport}:${venueLabel}:${todayIso()}:${Math.round(weather.windSpeedMph)}:${Math.round(weather.tempF)}:${score.windZone || score.windCompass || score.windTier || "na"}:${weather.isForecast ? "f" : "c"}:${umpire?.name || "noump"}`;
+  // runEnvironmentScore's tier is in the cache key for the same reason umpire's name is: it can
+  // become known/change during the day (starters get announced, a fetch that failed earlier now
+  // succeeds) independent of everything else in this key, so a stale "2/5 signals, Neutral" insight
+  // shouldn't keep being served for 6hrs once a fuller "4/5 signals, Pitcher Leaning" read is available.
+  const cacheKey = `insight:${sport}:${venueLabel}:${todayIso()}:${Math.round(weather.windSpeedMph)}:${Math.round(weather.tempF)}:${score.windZone || score.windCompass || score.windTier || "na"}:${weather.isForecast ? "f" : "c"}:${umpire?.name || "noump"}:${runEnvironmentScore?.tier || "noenv"}`;
   return cached(env, cacheKey, 6 * 60 * 60, async () => {
     if (!env.AI) return { text: "AI narration unavailable (no AI binding configured).", cached: false };
     // Gave up trying to prompt-engineer the model into correctly pairing handedness with field
@@ -780,13 +888,31 @@ async function narrate(env, sport, score, weather, venue, parkFactor, umpire) {
       }
       return s;
     }
+    // Run Environment Score (see computeRunEnvironmentScore in rules-engine.js): same treatment as
+    // umpireSentence above, for the same reason -- not given to the model at all, appended as a
+    // plain string after the AI call returns. This composite is explicitly a COMBINATION of
+    // several already-hidden-from-the-model facts (umpire lean, park factor's raw sign) that this
+    // file has nine documented failures embellishing individually; there's no reason to expect
+    // handing the model a sixth, MORE abstract number ("composite score -1.05") would go better.
+    function runEnvironmentSentence() {
+      if (sport !== "mlb" || !runEnvironmentScore) return "";
+      const tierPhrase = {
+        "Strong Hitter Environment": "a strong hitter-friendly environment overall",
+        "Hitter Leaning": "a hitter-leaning environment overall",
+        Neutral: "a roughly neutral environment overall",
+        "Pitcher Leaning": "a pitcher-leaning environment overall",
+        "Strong Pitcher Environment": "a strong pitcher-friendly environment overall",
+      }[runEnvironmentScore.tier];
+      if (!tierPhrase) return "";
+      return ` Combining today's weather, this park's season factor, umpire tendency, and starter/lineup HR rates (${runEnvironmentScore.inputsUsed.length}/5 signals available today), this profiles as ${tierPhrase}.`;
+    }
     try {
       const result = await env.AI.run("@cf/meta/llama-3.2-3b-instruct", {
         messages: [{ role: "user", content: prompt }],
         max_tokens: 200,
       });
       const aiText = result.response?.trim() || "No insight generated.";
-      return { text: aiText + umpireSentence(), cached: false };
+      return { text: aiText + umpireSentence() + runEnvironmentSentence(), cached: false };
     } catch (err) {
       return { text: `AI narration failed: ${err.message}`, cached: false };
     }
@@ -827,7 +953,7 @@ async function handleGame(env, sport, params) {
   // nobody's opened yet. The rules-engine score above is pure JS, so it's free either way. Same
   // reasoning extends to park factors and umpire tendencies here -- both real, but not worth
   // fetching nine times over for cards nobody's opened.
-  if (preview) return json({ sport, venue, weather, score, insight: null, parkFactor: null, umpire: null });
+  if (preview) return json({ sport, venue, weather, score, insight: null, parkFactor: null, umpire: null, runEnvironmentScore: null });
 
   // Both of these are wrapped individually so a scrape hiccup on either external site degrades to
   // "no data today" for that one field, not a broken game page -- neither is load-bearing for the
@@ -868,8 +994,73 @@ async function handleGame(env, sport, params) {
     }
   }
 
-  const insight = await narrate(env, sport, score, weather, venue, parkFactor, umpire);
-  return json({ sport, venue, weather, score, insight: insight.text, parkFactor, umpire });
+  // Run Environment Score (see rules-engine.js): wrapped the same way as park factor/umpire above
+  // -- a failure anywhere in this chain (either starter's stats, either team's split, the league
+  // aggregate) degrades to "no score today" rather than breaking the rest of the response, since
+  // carryFt/parkFactor/umpire already delivered above are each independently useful without it.
+  //
+  // NOT YET surfaced in the UI or handed to the AI narration -- this stage only computes and
+  // returns the raw score/tier so it can be checked against real games before either of those.
+  let runEnvironmentScore = null;
+  if (sport === "mlb" && gameId) {
+    try {
+      const schedule = await fetchMlbSchedule(env);
+      const game = schedule.games.find((g) => g.gameId === gameId);
+      if (game) {
+        const leagueRates = await fetchLeagueHrRate(env);
+
+        const [homePitcher, awayPitcher] = await Promise.all(
+          [game.homeProbablePitcher, game.awayProbablePitcher].map(async (p) => {
+            if (!p) return null;
+            try {
+              return await fetchPitcherHrTendency(env, p.id);
+            } catch (err) {
+              return null;
+            }
+          })
+        );
+
+        const qualifyingHr9Deltas = [homePitcher, awayPitcher]
+          .filter((p) => p && p.qualifies && p.hr9 != null && leagueRates.pitcherHr9League != null)
+          .map((p) => p.hr9 - leagueRates.pitcherHr9League);
+        const pitcherHr9Delta = qualifyingHr9Deltas.length
+          ? qualifyingHr9Deltas.reduce((a, b) => a + b, 0) / qualifyingHr9Deltas.length
+          : null;
+
+        // Each lineup's HR rate vs the OPPOSING starter's throwing hand (home lineup faces the away
+        // starter, and vice versa), compared to the league-average rate for that same hand.
+        const teamHrDeltas = [];
+        if (awayPitcher?.throwsHand && game.homeTeamId) {
+          const split = leagueRates.hittingByTeamId[game.homeTeamId]?.[awayPitcher.throwsHand === "L" ? "vsL" : "vsR"];
+          const leagueAvg = leagueRates.hittingLeagueByHand[awayPitcher.throwsHand];
+          if (split?.hrRate != null && leagueAvg != null) teamHrDeltas.push(split.hrRate - leagueAvg);
+        }
+        if (homePitcher?.throwsHand && game.awayTeamId) {
+          const split = leagueRates.hittingByTeamId[game.awayTeamId]?.[homePitcher.throwsHand === "L" ? "vsL" : "vsR"];
+          const leagueAvg = leagueRates.hittingLeagueByHand[homePitcher.throwsHand];
+          if (split?.hrRate != null && leagueAvg != null) teamHrDeltas.push(split.hrRate - leagueAvg);
+        }
+        const teamHrRateDelta = teamHrDeltas.length ? teamHrDeltas.reduce((a, b) => a + b, 0) / teamHrDeltas.length : null;
+
+        // Only a real, large-enough career sample counts as a signal here -- "insufficient data"
+        // (see fetchUmpireCareerLean/MIN_CAREER_GAMES) means perGameBatterImpact is noise, not a lean.
+        const umpireLeanRunsPerGame = umpire?.career && umpire.career.lean !== "insufficient data" ? umpire.career.perGameBatterImpact : null;
+
+        runEnvironmentScore = computeRunEnvironmentScore({
+          carryFt: score.carryFt,
+          parkFactorPct: parkFactor?.totalPct ?? null,
+          umpireLeanRunsPerGame,
+          pitcherHr9Delta,
+          teamHrRateDelta,
+        });
+      }
+    } catch (err) {
+      runEnvironmentScore = null;
+    }
+  }
+
+  const insight = await narrate(env, sport, score, weather, venue, parkFactor, umpire, runEnvironmentScore);
+  return json({ sport, venue, weather, score, insight: insight.text, parkFactor, umpire, runEnvironmentScore });
 }
 
 async function handleAlmanac(env, sport, params) {

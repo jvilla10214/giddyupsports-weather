@@ -245,4 +245,95 @@ function scoreNflGame(weather, venue) {
   };
 }
 
-export { scoreMlbGame, scoreNflGame, degToCompass16, angleDiff, windCompassOrVariable };
+// ---- Run Environment Score (composite "unique algorithm") ----
+//
+// Combines today's weather-driven carry, this park's season-long Statcast park factor, the
+// home-plate umpire's career hitter/pitcher lean, and both starters'/lineups' HR tendencies into
+// one composite rating -- this product's version of the racing app's Weather Bias Predictor
+// Score, requested 2026-09-03 and scoped out 2026-09-04 (see DECISIONS.md). Each raw input is
+// normalized onto a comparable scale before being weighted, rather than combined in mismatched
+// raw units (feet vs. percent vs. runs/game vs. HR/9) which would let whichever signal happens to
+// have the biggest raw numbers dominate by accident.
+//
+// Weighted AVERAGE, not weighted sum: dividing by the total weight of only the inputs actually
+// present means a game missing a signal (umpire not yet assigned, a pitcher/team fetch failing)
+// doesn't quietly read as less extreme just because fewer inputs contributed -- the score stays
+// on the same scale regardless of how many of the 5 signals are available that day.
+//
+// Weights and normalization scales below are a documented starting point, NOT a backtested
+// constant yet (unlike CARRY_LEAN_THRESHOLD_FT/WIND_CARRY_FT_PER_MPH above) -- revisit once
+// enough real games have logged a score to check against actual outcomes, same process already
+// used for those two. carryFt's scale reuses CARRY_LEAN_THRESHOLD_FT itself (this app's own
+// already-backtested "meaningful carry" cutoff); pitcherHr9Delta/teamHrRateDelta use a typical
+// spread around recent-season league averages (~1.2 HR/9, ~2.8% HR/PA).
+const RES_WEIGHTS = {
+  carry: 1.0,
+  parkFactor: 0.8,
+  umpireLean: 0.4, // weakest, most granular signal of the five
+  pitcherHr9: 0.8,
+  teamHrRate: 0.8,
+};
+
+const RES_SCALE = {
+  carryFt: CARRY_LEAN_THRESHOLD_FT, // 20ft
+  parkFactorPct: 5, // % extra-distance swing
+  umpireLeanRunsPerGame: 0.1,
+  pitcherHr9Delta: 0.5, // HR/9 above/below league average
+  teamHrRateDelta: 0.015, // percentage points of HR/PA above/below league average
+};
+
+// Gates a starter's HR/9 out of the score entirely below this many innings pitched this season --
+// same small-sample reasoning as MIN_CAREER_GAMES for umpires above; a rookie's first start or two
+// isn't a real rate yet.
+const MIN_PITCHER_IP = 10;
+
+function runEnvironmentTier(score) {
+  if (score >= 1.5) return "Strong Hitter Environment";
+  if (score >= 0.5) return "Hitter Leaning";
+  if (score > -0.5) return "Neutral";
+  if (score > -1.5) return "Pitcher Leaning";
+  return "Strong Pitcher Environment";
+}
+
+/**
+ * @param {object} inputs
+ *   carryFt: number - today's weather-driven carry estimate (scoreMlbGame's carryFt; already 0
+ *     when the roof is closed, so a dome game naturally drops this contribution's magnitude)
+ *   parkFactorPct: number|null - season Statcast park factor (extra_distance %)
+ *   umpireLeanRunsPerGame: number|null - career hitter/pitcher lean (perGameBatterImpact)
+ *   pitcherHr9Delta: number|null - avg of both starters' HR/9 minus league-average HR/9
+ *   teamHrRateDelta: number|null - avg of both lineups' HR-rate-vs-opposing-starter's-hand minus
+ *     league average for that same split
+ * @returns {{score: number, tier: string, inputsUsed: string[]}|null} null only if every input is
+ *   missing (nothing to score)
+ */
+function computeRunEnvironmentScore(inputs) {
+  const contributions = [];
+  const add = (key, raw, scaleKey) => {
+    if (raw == null || !Number.isFinite(raw)) return;
+    contributions.push({ key, weight: RES_WEIGHTS[key], normalized: raw / RES_SCALE[scaleKey] });
+  };
+  add("carry", inputs.carryFt, "carryFt");
+  add("parkFactor", inputs.parkFactorPct, "parkFactorPct");
+  add("umpireLean", inputs.umpireLeanRunsPerGame, "umpireLeanRunsPerGame");
+  add("pitcherHr9", inputs.pitcherHr9Delta, "pitcherHr9Delta");
+  add("teamHrRate", inputs.teamHrRateDelta, "teamHrRateDelta");
+
+  if (!contributions.length) return null;
+
+  const weightedSum = contributions.reduce((sum, c) => sum + c.weight * c.normalized, 0);
+  const weightTotal = contributions.reduce((sum, c) => sum + c.weight, 0);
+  const score = Math.round((weightedSum / weightTotal) * 100) / 100;
+
+  return { score, tier: runEnvironmentTier(score), inputsUsed: contributions.map((c) => c.key) };
+}
+
+export {
+  scoreMlbGame,
+  scoreNflGame,
+  degToCompass16,
+  angleDiff,
+  windCompassOrVariable,
+  computeRunEnvironmentScore,
+  MIN_PITCHER_IP,
+};

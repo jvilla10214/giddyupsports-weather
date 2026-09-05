@@ -784,6 +784,7 @@
           <div class="impact-scale-marks" id="impactScaleMarks" style="display:none;"></div>
           <div class="handed-note" id="handedNote" style="display:none;"></div>
           <div class="handed-note" id="umpireNote" style="display:none;"></div>
+          <div class="handed-note" id="runEnvNote" style="display:none;"></div>
           <div class="insight-text" id="insightText">Loading AI read…</div>
         </div>
       </div>
@@ -849,6 +850,7 @@
   const impactScaleMarksEl = document.getElementById("impactScaleMarks");
   const handedNoteEl = document.getElementById("handedNote");
   const umpireNoteEl = document.getElementById("umpireNote");
+  const runEnvNoteEl = document.getElementById("runEnvNote");
   const almanacCard = document.getElementById("almanacCard");
   const almanacBody = document.getElementById("almanacBody");
   const venueMeta = document.getElementById("venueMeta");
@@ -1288,6 +1290,28 @@
     umpireNoteEl.style.display = "flex";
   }
 
+  // Run Environment Score (see computeRunEnvironmentScore in rules-engine.js): a composite of
+  // today's carry, this park's Statcast park factor, the HP umpire's career lean, and both
+  // starters'/lineups' HR tendencies into one at-a-glance rating -- same good/info/neutral color
+  // convention as the top scoring-lean pill and the umpire lean tag above, so all three
+  // hitter-vs-pitcher signals in this view read consistently rather than each inventing its own
+  // color language. The "N/5 signals" note is shown alongside the tier since this score is only
+  // as complete as whichever inputs were actually available for this specific game (e.g. before
+  // MLB names the day's umpire, or a rookie starter without enough innings to qualify yet) --
+  // same "be honest about what's actually known" approach as the roof-status caveats above.
+  function renderRunEnvironmentNote(runEnv) {
+    if (!runEnv) {
+      runEnvNoteEl.style.display = "none";
+      return;
+    }
+    const cls = runEnv.tier.includes("Hitter") ? "good" : runEnv.tier.includes("Pitcher") ? "info" : "neutral";
+    runEnvNoteEl.innerHTML =
+      `<span class="hn-dot"></span>Run Environment:` +
+      `<span class="pill-lean ${cls}" style="margin-left:6px;">${runEnv.tier}</span>` +
+      `<span style="margin-left:8px; color: var(--text-muted); font-size: 0.85em;">${runEnv.inputsUsed.length}/5 signals</span>`;
+    runEnvNoteEl.style.display = "flex";
+  }
+
   // Analog wind-rose: needle rotated to the TOWARD bearing (where the wind is headed, not where
   // it's coming from -- the site-wide convention, see DECISIONS.md), same conversion the wind-flow
   // canvas and score.windCompass already use, so all three always agree with each other.
@@ -1539,6 +1563,7 @@
     impactScaleMarksEl.style.display = "none";
     handedNoteEl.style.display = "none";
     umpireNoteEl.style.display = "none";
+    runEnvNoteEl.style.display = "none";
     almanacCard.style.display = "none";
     gaugeCluster.innerHTML = "";
     statPairs.innerHTML = "";
@@ -1570,6 +1595,7 @@
       renderLeanTop(sport, data.score);
       renderImpactRows(sport, data.weather, data.score);
       renderUmpireNote(data.umpire);
+      renderRunEnvironmentNote(data.runEnvironmentScore);
       insightText.textContent = data.insight || "No insight generated.";
       if (window.setWindFlow) window.setWindFlow(data.weather.windFromDeg || 0, data.weather.windSpeedMph || 0);
       setStatus(`Updated ${new Date().toLocaleTimeString()}`);
