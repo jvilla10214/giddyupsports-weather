@@ -260,12 +260,19 @@ function scoreNflGame(weather, venue) {
 // doesn't quietly read as less extreme just because fewer inputs contributed -- the score stays
 // on the same scale regardless of how many of the 5 signals are available that day.
 //
-// Weights and normalization scales below are a documented starting point, NOT a backtested
-// constant yet (unlike CARRY_LEAN_THRESHOLD_FT/WIND_CARRY_FT_PER_MPH above) -- revisit once
-// enough real games have logged a score to check against actual outcomes, same process already
-// used for those two. carryFt's scale reuses CARRY_LEAN_THRESHOLD_FT itself (this app's own
-// already-backtested "meaningful carry" cutoff); pitcherHr9Delta/teamHrRateDelta use a typical
-// spread around recent-season league averages (~1.2 HR/9, ~2.8% HR/PA).
+// Weights and normalization scales below were BACKTESTED 2026-09-05 against 450 real 2025 games
+// (15 home games/team, all 30 parks -- scripts/backtest-run-environment-score.js, cached dataset
+// at scripts/data/run-environment-score-samples.json), the same process already used for
+// CARRY_LEAN_THRESHOLD_FT/WIND_CARRY_FT_PER_MPH above. Each RES_SCALE value is that signal's real
+// p75-of-|value| across the sample -- so a "typical extreme" real game normalizes to roughly 1.0,
+// not a round guessed number. Weights were left unchanged: all 5 signals showed the same
+// weak-to-modest, correctly-signed correlation with real outcomes (r ~ 0.04-0.20), so nothing in
+// the sample clearly justified re-weighting any one signal over another. The worst miscalibration
+// found: teamHrRateDelta's old scale (0.015) meant even the single most extreme game in the entire
+// 450-game sample (raw 0.013) normalized to only 0.87 -- that signal could essentially never
+// register at full strength, silencing one of five inputs almost all the time. Correlations overall
+// are real but weak in absolute terms -- this recalibration makes the tier labels honestly match
+// what the score actually produces, not a claim of strong predictive power.
 const RES_WEIGHTS = {
   carry: 1.0,
   parkFactor: 0.8,
@@ -275,11 +282,11 @@ const RES_WEIGHTS = {
 };
 
 const RES_SCALE = {
-  carryFt: CARRY_LEAN_THRESHOLD_FT, // 20ft
-  parkFactorPct: 5, // % extra-distance swing
-  umpireLeanRunsPerGame: 0.1,
-  pitcherHr9Delta: 0.5, // HR/9 above/below league average
-  teamHrRateDelta: 0.015, // percentage points of HR/PA above/below league average
+  carryFt: 25, // real p75-of-|value| was 25.5ft across the 450-game sample
+  parkFactorPct: 6, // real p75 was 5.9%
+  umpireLeanRunsPerGame: 0.2, // real p75 was 0.207 -- old value of 0.1 over-amplified this signal
+  pitcherHr9Delta: 0.35, // real p75 was 0.36
+  teamHrRateDelta: 0.0045, // real p75 was 0.0044 -- old value of 0.015 was ~3x too generous, see above
 };
 
 // Gates a starter's HR/9 out of the score entirely below this many innings pitched this season --
@@ -287,11 +294,19 @@ const RES_SCALE = {
 // isn't a real rate yet.
 const MIN_PITCHER_IP = 10;
 
+// Thresholds recalibrated 2026-09-05 from the real p10/p25/p75/p90 of the RECALIBRATED score
+// across the same 450-game backtest (median 0.02, p25 -0.27, p75 0.34, p10 -0.49, p90 0.61) -- same
+// top/bottom-quartile logic already used for LEAN_HITTER_THRESHOLD/LEAN_PITCHER_THRESHOLD above,
+// extended with a p10/p90 pair for "Strong". Old ±0.5/±1.5 thresholds sat far out in the tail of
+// what the score ever actually produced -- "Strong Pitcher Environment" fired on 1 of 450 real
+// games under the old thresholds; the recalibrated ±0.3/±0.6 gives a real, checkable ~16% of games
+// in a "Strong" tier and a roughly halved Neutral share (73% -> 49%), with a clean, monotonic-in-
+// real-runs gradient across all 5 tiers.
 function runEnvironmentTier(score) {
-  if (score >= 1.5) return "Strong Hitter Environment";
-  if (score >= 0.5) return "Hitter Leaning";
-  if (score > -0.5) return "Neutral";
-  if (score > -1.5) return "Pitcher Leaning";
+  if (score >= 0.6) return "Strong Hitter Environment";
+  if (score >= 0.3) return "Hitter Leaning";
+  if (score > -0.3) return "Neutral";
+  if (score > -0.6) return "Pitcher Leaning";
   return "Strong Pitcher Environment";
 }
 

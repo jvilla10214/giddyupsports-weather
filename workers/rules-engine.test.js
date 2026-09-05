@@ -120,47 +120,56 @@ const domeIgnoresOverride = scoreMlbGame(
 assert(domeIgnoresOverride.roofClosed === true, "A fixed dome must stay closed even if a roofStatus override incorrectly claims it's open");
 
 // ---- Run Environment Score ----
+//
+// Test input magnitudes below are grounded in the real 450-game 2025 backtest distribution
+// (scripts/backtest-run-environment-score.js, see rules-engine.js's RES_SCALE comment for the
+// real p75-of-|value| each constant is based on) rather than round guessed numbers -- e.g.
+// teamHrRateDelta's real observed max across the whole sample was only 0.013, so a test value
+// like the old 0.015 would exceed anything the live system could ever actually produce.
 
-// All five signals pointing hitter-friendly -> should land in a positive tier, using every input.
+// All five signals near their real p90 magnitude, all pointing hitter-friendly -> a genuinely
+// extreme real game (like Coors Field) should actually reach the top tier now, not narrowly miss
+// it the way the pre-recalibration thresholds did.
 const allHitterFriendly = computeRunEnvironmentScore({
-  carryFt: 25, // above CARRY_LEAN_THRESHOLD_FT (20)
-  parkFactorPct: 6,
-  umpireLeanRunsPerGame: 0.03,
-  pitcherHr9Delta: 0.6, // starters give up MORE HR than league average -> hitter-friendly
-  teamHrRateDelta: 0.02, // lineups hit MORE HR vs this hand than league average -> hitter-friendly
+  carryFt: 35, // real p90 was 35.4
+  parkFactorPct: 7, // real p90 was 7.2
+  umpireLeanRunsPerGame: 0.09, // real p90 was 0.093
+  pitcherHr9Delta: 0.48, // real p90 was 0.48
+  teamHrRateDelta: 0.005, // real p90 was 0.005
 });
 console.log("All-hitter-friendly composite:", allHitterFriendly);
-assert(allHitterFriendly.score > 0.5, "Every signal pointing hitter-friendly should score well above 0");
-assert(allHitterFriendly.tier === "Strong Hitter Environment" || allHitterFriendly.tier === "Hitter Leaning", "Should land in a hitter-leaning tier");
+assert(allHitterFriendly.score > 0.6, "Real p90-magnitude signals, all hitter-friendly, should clear the Strong tier");
+assert(allHitterFriendly.tier === "Strong Hitter Environment", "Should land in the Strong Hitter tier");
 assert(allHitterFriendly.inputsUsed.length === 5, "All five inputs should be counted when all five are provided");
 
-// Mirror-image pitcher-friendly case.
+// Mirror-image pitcher-friendly case, same real-magnitude reasoning.
 const allPitcherFriendly = computeRunEnvironmentScore({
-  carryFt: -25,
-  parkFactorPct: -6,
-  umpireLeanRunsPerGame: -0.25,
-  pitcherHr9Delta: -0.6,
-  teamHrRateDelta: -0.02,
+  carryFt: -35,
+  parkFactorPct: -7,
+  umpireLeanRunsPerGame: -0.4, // within the real observed min of -0.584
+  pitcherHr9Delta: -0.48,
+  teamHrRateDelta: -0.005,
 });
 console.log("All-pitcher-friendly composite:", allPitcherFriendly);
-assert(allPitcherFriendly.score < -0.5, "Every signal pointing pitcher-friendly should score well below 0");
-assert(allPitcherFriendly.tier === "Strong Pitcher Environment" || allPitcherFriendly.tier === "Pitcher Leaning", "Should land in a pitcher-leaning tier");
+assert(allPitcherFriendly.score < -0.6, "Real p90-magnitude signals, all pitcher-friendly, should clear the Strong tier");
+assert(allPitcherFriendly.tier === "Strong Pitcher Environment", "Should land in the Strong Pitcher tier");
 
 // Missing signals (umpire not yet assigned, pitcher/team fetch failed) must not shrink the score
 // toward 0 just because fewer inputs contributed -- a weighted AVERAGE over only the inputs
 // present, not a weighted sum, so a game with only carryFt+parkFactor known reads on the same
 // scale as one with all five.
-const partialInputs = computeRunEnvironmentScore({ carryFt: 25, parkFactorPct: 6, umpireLeanRunsPerGame: null, pitcherHr9Delta: null, teamHrRateDelta: null });
+const partialInputs = computeRunEnvironmentScore({ carryFt: 35, parkFactorPct: 7, umpireLeanRunsPerGame: null, pitcherHr9Delta: null, teamHrRateDelta: null });
 console.log("Partial-inputs composite (carry + park factor only):", partialInputs);
 assert(partialInputs.inputsUsed.length === 2, "Only the two provided inputs should be counted");
-assert(partialInputs.score > 0.8, "Two strongly hitter-friendly inputs alone should still score high, not diluted toward 0 by the three missing ones");
+assert(partialInputs.score > 0.6, "Two strongly hitter-friendly inputs alone should still score high, not diluted toward 0 by the three missing ones");
 
 // Every input missing -> nothing to score, not a fabricated 0/neutral.
 assert(computeRunEnvironmentScore({ carryFt: null, parkFactorPct: null, umpireLeanRunsPerGame: null, pitcherHr9Delta: null, teamHrRateDelta: null }) === null, "All inputs missing should return null, not a fake neutral score");
 
-// Genuinely mixed signals should land near the neutral band, not get pulled hard either direction.
-const mixed = computeRunEnvironmentScore({ carryFt: 20, parkFactorPct: -5, umpireLeanRunsPerGame: 0, pitcherHr9Delta: -0.4, teamHrRateDelta: 0.015 });
+// Genuinely mixed signals, each at a real p75-ish magnitude but pointing in different directions,
+// should land in the Neutral band, not get pulled hard either direction.
+const mixed = computeRunEnvironmentScore({ carryFt: 19, parkFactorPct: -6, umpireLeanRunsPerGame: 0, pitcherHr9Delta: -0.35, teamHrRateDelta: 0.003 });
 console.log("Mixed-signal composite:", mixed);
-assert(Math.abs(mixed.score) < 1.5, "Genuinely offsetting signals should not land in an extreme tier");
+assert(mixed.tier === "Neutral", "Realistic, genuinely offsetting signals should land in the Neutral tier");
 
 console.log("\nAll rules-engine sanity checks passed.");
