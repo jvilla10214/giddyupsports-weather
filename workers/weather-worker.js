@@ -171,7 +171,9 @@ async function fetchTotalLines(env) {
   const date = todayIso();
   // Short TTL, unlike park factors' 24h -- a market total can move during the day (weather updates,
   // lineup news, line movement), and a stale-all-day cache would silently keep showing a line the
-  // book already moved away from.
+  // book already moved away from. This function's body only actually runs on a cache miss (up to
+  // once per 15min), which is also exactly when line-movement tracking below does its KV read/write
+  // -- so tracking piggybacks on the same refresh cadence for free, no extra fetch cycle needed.
   return cached(env, `total-lines:mlb:${date}`, 15 * 60, async () => {
     const url = "https://rotogrinders.com/weather/mlb";
     const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36" } });
@@ -184,7 +186,23 @@ async function fetchTotalLines(env) {
       const homeAbbr = ROTOGRINDERS_ABBR_TO_KEY[m[2]] || m[2];
       const ou = Number(m[3]);
       if (!Number.isFinite(ou)) continue;
-      byVenueKey[homeAbbr] = { awayAbbr, homeAbbr, marketLine: ou };
+
+      // Line-movement tracking: compares this refresh's line against the last one seen for this
+      // same game+date, stored under its own KV key (separate from the 15min response cache above,
+      // which expires and gets rebuilt from scratch -- this one persists across those refreshes so
+      // "up"/"down" means real movement since it was last checked, not since this cache entry was
+      // built). Only writes KV when the line actually changed (or is being seen for the first time
+      // today), not on every 15min refresh, to keep write volume low -- this project has hit real
+      // KV write-quota problems before (see the racing app's KV-efficiency fixes) and most refresh
+      // cycles won't see any movement at all.
+      const historyKey = `total-line-last:mlb:${date}:${homeAbbr}`;
+      const prev = await env.WEATHER_KV.get(historyKey, "json");
+      const direction = !prev ? "new" : ou > prev.line ? "up" : ou < prev.line ? "down" : "same";
+      if (direction !== "same") {
+        await env.WEATHER_KV.put(historyKey, JSON.stringify({ line: ou }), { expirationTtl: 24 * 60 * 60 });
+      }
+
+      byVenueKey[homeAbbr] = { awayAbbr, homeAbbr, marketLine: ou, direction, previousLine: prev?.line ?? null };
     }
     return { date, byVenueKey, source: "RotoGrinders MLB Weather" };
   });
@@ -1114,7 +1132,13 @@ async function handleGame(env, sport, params) {
       const lines = await fetchTotalLines(env);
       const line = lines.byVenueKey[venueKey];
       if (line) {
-        totalRunsCall = { ...computeTotalRunsCall(runEnvironmentScore.score, line.marketLine), awayAbbr: line.awayAbbr, homeAbbr: line.homeAbbr };
+        totalRunsCall = {
+          ...computeTotalRunsCall(runEnvironmentScore.score, line.marketLine),
+          awayAbbr: line.awayAbbr,
+          homeAbbr: line.homeAbbr,
+          lineDirection: line.direction,
+          previousLine: line.previousLine,
+        };
       }
     } catch (err) {
       totalRunsCall = null;

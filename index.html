@@ -1329,8 +1329,20 @@
       return;
     }
     const cls = totalCall.call === "Likely Over" ? "good" : totalCall.call === "Likely Under" ? "info" : "neutral";
+    // Line-movement arrow (see fetchTotalLines' line-movement tracking in weather-worker.js):
+    // green up / red down reads as a market-odds convention (a rising total is "up", independent of
+    // whether that happens to favor our own Over/Under call), not this app's usual hitter/pitcher
+    // color language -- deliberately reuses --accent-live/--accent-warn rather than the good/info
+    // pill classes above so the two color systems don't collide on the same line. "new" (first time
+    // seen today) and "same" (no movement since last check) show no arrow at all.
+    const arrow =
+      totalCall.lineDirection === "up"
+        ? `<span style="color: var(--accent-live); margin-left:4px;" title="Up from ${totalCall.previousLine}">&#9650;</span>`
+        : totalCall.lineDirection === "down"
+          ? `<span style="color: var(--accent-warn); margin-left:4px;" title="Down from ${totalCall.previousLine}">&#9660;</span>`
+          : "";
     totalCallNoteEl.innerHTML =
-      `<span class="hn-dot"></span>Total (${totalCall.marketLine} O/U):` +
+      `<span class="hn-dot"></span>Total (${totalCall.marketLine}${arrow} O/U):` +
       `<span class="pill-lean ${cls}" style="margin-left:6px;">${totalCall.call}</span>` +
       `<span style="margin-left:8px; color: var(--text-muted); font-size: 0.85em;">model implies ${totalCall.impliedTotal}</span>`;
     totalCallNoteEl.style.display = "flex";
