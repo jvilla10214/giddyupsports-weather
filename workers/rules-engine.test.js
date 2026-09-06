@@ -33,6 +33,16 @@ const domeWindy = scoreNflGame(
 console.log("US Bank Stadium (dome) w/ 30mph forecast wind:", domeWindy);
 assert(domeWindy.roofClosed === true, "A dome venue must report roofClosed=true");
 assert(domeWindy.passingImpact === "none", "Wind should have zero passing impact inside a dome");
+assert(domeWindy.roofStatusConfirmed === true, "A fixed dome has no real ambiguity -- always confirmed-closed");
+
+// Retractable-roof NFL venue -> roofClosed is still the default assumption (no live NFL roof-status
+// source exists, unlike MLB), but roofStatusConfirmed must be false since real data shows these
+// venues actually play open 6-22% of the time depending on the team -- this is a real unconfirmed
+// assumption, not a fact, and must be labeled as such.
+const retractableNfl = scoreNflGame({ tempF: 70, humidityPct: 40, windSpeedMph: 5, windFromDeg: 90, precipProbPct: 0 }, NFL_STADIUMS.ARI);
+console.log("State Farm Stadium (retractable):", retractableNfl);
+assert(retractableNfl.roofClosed === true, "A retractable-roof venue must still default to assumed-closed");
+assert(retractableNfl.roofStatusConfirmed === false, "A retractable roof's closed status must be flagged as unconfirmed, not stated as fact");
 
 // Open-air NFL venue, severe wind -> should flag severe passing/kicking impact.
 const openWindy = scoreNflGame(

@@ -1241,11 +1241,23 @@
     gaugeCluster.innerHTML = gauges.join("");
   }
 
+  // NFL retractable-roof label (see scoreNflGame's roofStatusConfirmed in rules-engine.js, audited
+  // 2026-09-06): unlike MLB, there's no live per-game NFL roof-status source, so "closed" here is
+  // always an unconfirmed assumption for a retractable venue -- real data shows these venues
+  // actually play open 6-22% of the time depending on the team. Labeled the same "(assumed)" way
+  // MLB already does for its own (confirmable) retractable-roof case, so the same honesty
+  // convention applies even though NFL can never actually confirm it either way today.
+  function nflRoofLabel(venue, score) {
+    if (venue.roofType === "dome") return "Dome (closed)";
+    if (venue.roofType === "retractable") return score.roofStatusConfirmed ? "Closed" : "Closed (assumed)";
+    return "Open";
+  }
+
   function renderStatPairs(sport, venue, score, parkFactor) {
     const pairs =
       sport === "mlb"
         ? [statPair("Altitude", (venue.altitudeFt / 1000).toFixed(1), "k ft"), statPair("Est. Carry", `${score.carryFt > 0 ? "+" : ""}${score.carryFt}`, "ft", true)]
-        : [statPair("Roof", venue.roofType), statPair("Wind Tier", score.windTier || "—", null, true)];
+        : [statPair("Roof", nflRoofLabel(venue, score)), statPair("Wind Tier", score.windTier || "—", null, true)];
     // Statcast park factor: a season-long, weather-independent figure (see DECISIONS.md), shown as
     // its own stat-pair rather than folded into "Est. Carry" so it's never mistaken for part of
     // today's forecast-driven number right next to it.

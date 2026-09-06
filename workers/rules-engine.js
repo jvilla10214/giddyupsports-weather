@@ -192,6 +192,27 @@ function scoreMlbGame(weather, venue, roofStatus) {
   };
 }
 
+// Wind/passing and wind/FG-range claims below were AUDITED 2026-09-06 against real 2020-2025 data
+// (nflverse's games.csv + stats_team_week, joined by game_id -- see scripts/nfl-accuracy-audit
+// findings recorded in project memory). Two very different outcomes:
+//
+// PASSING: real, confirmed, monotonic. Using CPOE (completion % over expected -- isolates real
+// accuracy from play-calling changes, unlike raw completion% which can be inflated by teams
+// shifting to safer short throws in wind) across the SAME <10/10-15/15-20/20+ mph tiers already
+// used here: light +1.87, moderate +0.40, strong +0.13, severe -2.57. A real step-change sits right
+// around 20mph, validating the "severe" cutoff specifically.
+//
+// FIELD GOALS: the OLD "~77% FG% in severe wind" claim had NO real support and has been removed.
+// Checked three ways against real data: raw FG% by wind tier (no decline -- if anything a slight
+// increase at higher wind, likely because kickers/coaches favor shorter/safer attempts in tough
+// wind); average attempted distance by wind tier (barely changes, 39.0yd calm vs 36.3yd severe --
+// not a large shift); and, most tellingly, 40+-yard attempts ONLY (like-for-like distance, isolates
+// wind's real effect): 74.6% made at 0-10mph vs 81.3% at 20+mph -- no decline even distance-adjusted.
+// Caveat: this only measures wind SPEED, not direction relative to the kick (a kick WITH the wind
+// vs INTO it isn't distinguishable in this box-score-level data), which could be masking a real
+// directional effect this analysis can't see -- and the 20+mph sample is small (n=93 team-weeks,
+// 32 individual 40+yd kicks). Genuinely inconclusive, not "proven no effect" -- so the language
+// below says exactly that, rather than either the old fabricated number or an overcorrected claim.
 /**
  * @param {object} weather - { tempF, humidityPct, windSpeedMph, windFromDeg, precipProbPct }
  * @param {object} venue - NFL_STADIUMS[x] entry: { roofType }
@@ -201,13 +222,26 @@ function scoreNflGame(weather, venue) {
   const notes = [];
 
   if (roofClosed) {
+    // A dome has no real ambiguity -- always closed, always confirmed. A retractable roof does:
+    // real 2020-2025 data shows these 5 venues actually play with the roof OPEN somewhere between
+    // 6% (DAL, HOU) and 22% (ATL) of games (ARI 16%, IND 16%) -- this app has no live per-game
+    // roof-status source for NFL (unlike MLB's fetchGameRoofStatus, which uses MLB's own live game
+    // feed), so "closed" here is a real, unconfirmed ASSUMPTION, not a fact. roofStatusConfirmed
+    // mirrors the same field/meaning MLB's roof-status feature already uses, so this can get the
+    // same honest "assumed, not confirmed" UI treatment rather than being stated as certain.
+    const isRetractable = venue.roofType === "retractable";
     return {
       sport: "NFL",
       roofClosed: true,
+      roofStatusConfirmed: !isRetractable,
       windTier: "none (closed roof)",
       passingImpact: "none",
       fgRangeImpact: "none",
-      notes: [`${venue.venue} is a ${venue.roofType} venue — wind/precip effects don't apply indoors.`],
+      notes: isRetractable
+        ? [
+            `${venue.venue}'s retractable roof status isn't confirmed for this game — assumed closed. Real data shows these venues actually play open somewhere between 6-22% of the time depending on the team, so today's wind/precip readings could be wrong if the roof is actually open.`,
+          ]
+        : [`${venue.venue} is a fixed dome — always closed, so wind/precip effects don't apply.`],
     };
   }
 
@@ -215,20 +249,20 @@ function scoreNflGame(weather, venue) {
   let windTier, passingImpact, fgRangeImpact;
   if (w < 10) {
     windTier = "light";
-    passingImpact = "negligible";
-    fgRangeImpact = "full range";
+    passingImpact = "negligible — real data shows passers at or above expected accuracy in this range";
+    fgRangeImpact = "full range — no real accuracy penalty at this wind speed";
   } else if (w < 15) {
     windTier = "moderate";
-    passingImpact = "noticeable dip in deep-ball accuracy";
-    fgRangeImpact = "full range, slight lean toward shorter tries in that wind direction";
+    passingImpact = "a modest real dip in accuracy vs. expected begins here";
+    fgRangeImpact = "full range — real data shows no clear FG accuracy drop at this wind speed, even for long attempts";
   } else if (w < 20) {
     windTier = "strong";
-    passingImpact = "significant accuracy drop, expect a run-leaning game plan";
-    fgRangeImpact = "effective range shortened, ~3% FG success drop";
+    passingImpact = "a clearer real accuracy drop, expect a more run-leaning game plan";
+    fgRangeImpact = "full range — real data still shows no clear FG accuracy drop here, though kickers may favor shorter attempts when they have the choice";
   } else {
     windTier = "severe";
-    passingImpact = "severe — deep passing and long field goals both unreliable";
-    fgRangeImpact = "effective range shortened well inside normal attempts, FG% drops toward ~77%";
+    passingImpact = "the clearest real accuracy drop of any tier — deep passing least reliable";
+    fgRangeImpact = "inconclusive at this wind speed — real data shows no consistent FG accuracy drop, but the sample of real 20mph+ games is small; treat either way with caution";
   }
 
   if (weather.precipProbPct >= 50) notes.push("High precipitation chance — expect more ball-security caution and a run-heavier script.");
@@ -237,6 +271,7 @@ function scoreNflGame(weather, venue) {
   return {
     sport: "NFL",
     roofClosed: false,
+    roofStatusConfirmed: true, // no roof at all in play -- an open-air "open" venue has nothing to confirm
     windTier,
     windCompass: windCompassOrVariable(weather),
     passingImpact,
