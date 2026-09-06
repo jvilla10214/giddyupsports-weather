@@ -1,6 +1,6 @@
 // Quick sanity checks for rules-engine.js against known real-world cases.
 // Run with: node workers/rules-engine.test.js
-import { scoreMlbGame, scoreNflGame, computeRunEnvironmentScore, computeTotalRunsCall } from "./rules-engine.js";
+import { scoreMlbGame, scoreNflGame, computeRunEnvironmentScore, computeTotalRunsCall, computeGameEnvironmentScore } from "./rules-engine.js";
 import { MLB_STADIUMS, NFL_STADIUMS } from "../data/stadiums.js";
 
 function assert(cond, msg) {
@@ -196,5 +196,37 @@ assert(tossUp.call === "Toss-up", "A market line within TOTAL_CALL_MARGIN of our
 // delta should be signed correctly: impliedTotal - marketLine, positive means we lean Over.
 assert(overCall.delta > 0, "A Likely Over call should have a positive delta (implied above market)");
 assert(underCall.delta < 0, "A Likely Under call should have a negative delta (implied below market)");
+
+// ---- Game Environment Score (NFL) ----
+// Test magnitudes grounded in the real 2020-2025 nflverse backtest (scripts/backtest-nfl-environment-score.js):
+// windMph real p90 ~15mph, tempF real p10 ~cold winter game, teamScoringDelta real p90 ~3.8.
+
+// Calm + warm + high-scoring teams, all pointing the same way -> should clear the Strong High tier.
+const highScoringNfl = computeGameEnvironmentScore({ windMph: 0, tempF: 85, roofClosed: false, teamScoringDelta: 6 });
+console.log("High-scoring NFL environment:", highScoringNfl);
+assert(highScoringNfl.score >= 0.72, "Calm + warm + high-scoring teams should clear the Strong High-Scoring threshold");
+assert(highScoringNfl.tier === "Strong High-Scoring Environment", "Should land in the Strong High-Scoring tier");
+assert(highScoringNfl.inputsUsed.length === 3, "All three inputs should be counted when all three are provided");
+
+// High wind + freezing + low-scoring teams -> should clear the Strong Low tier.
+const lowScoringNfl = computeGameEnvironmentScore({ windMph: 20, tempF: 15, roofClosed: false, teamScoringDelta: -3.8 });
+console.log("Low-scoring NFL environment:", lowScoringNfl);
+assert(lowScoringNfl.score <= -0.91, "High wind + freezing + low-scoring teams should clear the Strong Low-Scoring threshold");
+assert(lowScoringNfl.tier === "Strong Low-Scoring Environment", "Should land in the Strong Low-Scoring tier");
+
+// A closed roof must gate wind/temp out entirely, same as scoreNflGame's own roofClosed handling --
+// only teamScoringDelta should contribute regardless of how extreme the (irrelevant) weather is.
+const domeGame = computeGameEnvironmentScore({ windMph: 30, tempF: 5, roofClosed: true, teamScoringDelta: 2 });
+console.log("Dome game (extreme outdoor weather must be ignored):", domeGame);
+assert(domeGame.inputsUsed.length === 1 && domeGame.inputsUsed[0] === "team", "A closed roof must gate out both wind and temp, leaving only team scoring tendency");
+
+// Missing team data (early season, under MIN_TEAM_GAMES_FOR_TENDENCY) must not shrink the score --
+// weather-only should still read clearly on its own scale.
+const weatherOnly = computeGameEnvironmentScore({ windMph: 3, tempF: 70, roofClosed: false, teamScoringDelta: null });
+console.log("Weather-only NFL environment (no team data yet):", weatherOnly);
+assert(weatherOnly.inputsUsed.length === 2, "Only wind and temp should be counted when team data is unavailable");
+
+// Every input missing -> null, not a fabricated neutral score.
+assert(computeGameEnvironmentScore({ windMph: null, tempF: null, roofClosed: false, teamScoringDelta: null }) === null, "All inputs missing should return null, not a fake neutral score");
 
 console.log("\nAll rules-engine sanity checks passed.");

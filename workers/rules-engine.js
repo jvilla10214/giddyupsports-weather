@@ -384,6 +384,77 @@ function computeTotalRunsCall(resScore, marketLine) {
   return { impliedTotal, marketLine, delta, call };
 }
 
+// ---- Game Environment Score (NFL) ----
+//
+// DESCRIPTIVE ONLY -- deliberately NOT a betting call, unlike MLB's Run Environment Score/Total
+// Runs Call. A rigorous backtest (scripts/backtest-nfl-environment-score.js, 1,615 real games
+// 2020-2025, joined against real historical Vegas total lines from nflverse) found NO real edge
+// against the market from free public signals: neither simple points-per-game nor real EPA/play +
+// pace (the actual metric professional analysts use, computed strictly from each team's PRIOR
+// weeks only -- true point-in-time, zero data leakage) beat a coin flip once look-ahead bias was
+// properly removed. Best composite achieved r2=0.042 against actual totals; the market's own
+// total_line alone correlates with actual outcomes at r=0.32 -- far stronger than anything built
+// here. NFL totals are a famously efficiently-priced market (concentrated weekly volume on one
+// number per game, books using proprietary info like injury/practice reports this app has no
+// access to), genuinely different from MLB where a real, if weak, signal existed. So this score
+// combines weather + team scoring tendency into one at-a-glance rating shown ALONGSIDE the real
+// market line as context -- never "our model says Over/Under", which would be an unsupported claim.
+//
+// Weights/scales below are the real ones backtested (not placeholders needing a later revisit,
+// unlike MLB's initial pass) -- each scale is that signal's real p75-of-|value| across the sample.
+const NFL_GES_WEIGHTS = { wind: 1.0, temp: 0.6, team: 1.0 };
+const NFL_GES_SCALE = {
+  windMph: 11, // real p75 across 2020-2025 outdoor/open-roof games
+  tempFDeltaFrom60: 25, // real p75 of |tempF - 60|, outdoor/open-roof games only
+  teamScoringDelta: 3.29, // real p75 of |value|, leave-one-out corrected (excludes each game's own score from that team's season average)
+};
+
+// Gates team scoring tendency out entirely below this many games of season-to-date data -- same
+// small-sample reasoning as MIN_PITCHER_IP above; early in a season a team's average is mostly noise.
+const MIN_TEAM_GAMES_FOR_TENDENCY = 3;
+
+// Tier boundaries are the real p10/p25/p75/p90 of this composite score across the 1,615-game
+// backtest (median -0.25, not 0 -- the wind term can only ever subtract, never add, since wind
+// speed can't be negative, so the whole distribution skews low). Percentile-based, same
+// methodology as MLB's LEAN_HITTER_THRESHOLD/CARRY_LEAN_THRESHOLD_FT, not a symmetric guess.
+function nflGameEnvironmentTier(score) {
+  if (score >= 0.72) return "Strong High-Scoring Environment";
+  if (score >= 0.19) return "High-Scoring Leaning";
+  if (score > -0.6) return "Neutral";
+  if (score > -0.91) return "Low-Scoring Leaning";
+  return "Strong Low-Scoring Environment";
+}
+
+/**
+ * @param {object} inputs
+ *   windMph: number|null - ignored when roofClosed (matches scoreNflGame's own wind/precip gate)
+ *   tempF: number|null - ignored when roofClosed
+ *   roofClosed: boolean
+ *   teamScoringDelta: number|null - combined home+away scoring "involvement" (own points scored +
+ *     allowed, averaged) minus league average, from real season-to-date data (see
+ *     fetchNflTeamScoringTendency in weather-worker.js), null if either team has fewer than
+ *     MIN_TEAM_GAMES_FOR_TENDENCY games played yet this season
+ * @returns {{score: number, tier: string, inputsUsed: string[]}|null} null only if every input is missing
+ */
+function computeGameEnvironmentScore(inputs) {
+  const contributions = [];
+  const add = (key, raw, scaleKey) => {
+    if (raw == null || !Number.isFinite(raw)) return;
+    contributions.push({ key, weight: NFL_GES_WEIGHTS[key], normalized: raw / NFL_GES_SCALE[scaleKey] });
+  };
+  add("wind", inputs.roofClosed ? null : inputs.windMph != null ? -inputs.windMph : null, "windMph");
+  add("temp", inputs.roofClosed || inputs.tempF == null ? null : inputs.tempF - 60, "tempFDeltaFrom60");
+  add("team", inputs.teamScoringDelta, "teamScoringDelta");
+
+  if (!contributions.length) return null;
+
+  const weightedSum = contributions.reduce((sum, c) => sum + c.weight * c.normalized, 0);
+  const weightTotal = contributions.reduce((sum, c) => sum + c.weight, 0);
+  const score = Math.round((weightedSum / weightTotal) * 100) / 100;
+
+  return { score, tier: nflGameEnvironmentTier(score), inputsUsed: contributions.map((c) => c.key) };
+}
+
 export {
   scoreMlbGame,
   scoreNflGame,
@@ -393,4 +464,6 @@ export {
   computeRunEnvironmentScore,
   MIN_PITCHER_IP,
   computeTotalRunsCall,
+  computeGameEnvironmentScore,
+  MIN_TEAM_GAMES_FOR_TENDENCY,
 };

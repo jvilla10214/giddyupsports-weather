@@ -40,7 +40,7 @@
  */
 
 import { MLB_STADIUMS, NFL_STADIUMS, MLB_TEAM_ID_TO_KEY, MLB_KEY_TO_TEAM_ID } from "../data/stadiums.js";
-import { scoreMlbGame, scoreNflGame, windCompassOrVariable, computeRunEnvironmentScore, MIN_PITCHER_IP, computeTotalRunsCall } from "./rules-engine.js";
+import { scoreMlbGame, scoreNflGame, windCompassOrVariable, computeRunEnvironmentScore, MIN_PITCHER_IP, computeTotalRunsCall, computeGameEnvironmentScore, MIN_TEAM_GAMES_FOR_TENDENCY } from "./rules-engine.js";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -423,6 +423,89 @@ async function fetchPitcherHrTendency(env, pitcherId) {
 // header tweak fixes it from here. The frontend (index.html) fetches ESPN directly from the
 // user's own browser instead, which ESPN's CORS policy explicitly allows. See DECISIONS.md.
 
+// ---- NFL team scoring tendency (Game Environment Score input) ----
+//
+// nflverse's games.csv (github.com/nflverse/nfldata, the same free public dataset this app's NFL
+// backtest is built on -- see scripts/backtest-nfl-environment-score.js) is confirmed NOT blocked
+// for Cloudflare Worker IPs (tested live via a temporary debug route, same as the RotoGrinders
+// check), unlike ESPN's scoreboard above. The whole season's schedule (including future weeks, just
+// with blank scores) is published in advance, so this file alone can also answer "how many games
+// has this team played so far, and what's their scoring average" without a separate schedule fetch.
+const NFL_GAMES_CSV_URL = "https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv";
+
+// NFL seasons span Sept-Feb; a game in Jan/Feb still belongs to the PRIOR calendar year's season
+// (e.g. a Super Bowl in Feb 2027 is still "season 2026" in nflverse's own data).
+function currentNflSeason() {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth() + 1;
+  return month <= 2 ? year - 1 : year;
+}
+
+function parseCsvLine(line) {
+  const out = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (c === "," && !inQuotes) {
+      out.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += c;
+  }
+  out.push(cur);
+  return out;
+}
+
+async function fetchNflTeamScoringTendency(env) {
+  const season = currentNflSeason();
+  // Cached a few hours, not a full day like MLB's season-long data -- team scoring averages shift
+  // meaningfully week to week early in a season (each game is a bigger fraction of the sample),
+  // and nflverse updates this file within hours of games finishing.
+  return cached(env, `nfl-team-scoring:${season}`, 6 * 60 * 60, async () => {
+    const res = await fetch(NFL_GAMES_CSV_URL);
+    if (!res.ok) throw new Error(`nflverse games.csv ${res.status}`);
+    const text = await res.text();
+    const lines = text.split("\n").filter(Boolean);
+    const header = parseCsvLine(lines[0]);
+    const idx = Object.fromEntries(header.map((h, i) => [h, i]));
+
+    const byTeam = {};
+    let leagueSum = 0;
+    let leagueGames = 0;
+    for (let i = 1; i < lines.length; i++) {
+      const cols = parseCsvLine(lines[i]);
+      if (Number(cols[idx.season]) !== season) continue;
+      if (cols[idx.game_type] !== "REG") continue;
+      const homeScoreStr = cols[idx.home_score];
+      if (homeScoreStr === "") continue; // not played yet
+      const homeScore = Number(homeScoreStr);
+      const awayScore = Number(cols[idx.away_score]);
+      const homeTeam = cols[idx.home_team];
+      const awayTeam = cols[idx.away_team];
+
+      byTeam[homeTeam] = byTeam[homeTeam] || { scoredSum: 0, allowedSum: 0, games: 0 };
+      byTeam[homeTeam].scoredSum += homeScore;
+      byTeam[homeTeam].allowedSum += awayScore;
+      byTeam[homeTeam].games += 1;
+      byTeam[awayTeam] = byTeam[awayTeam] || { scoredSum: 0, allowedSum: 0, games: 0 };
+      byTeam[awayTeam].scoredSum += awayScore;
+      byTeam[awayTeam].allowedSum += homeScore;
+      byTeam[awayTeam].games += 1;
+
+      leagueSum += homeScore + awayScore;
+      leagueGames += 1;
+    }
+    return { season, byTeam, leagueAvgTotal: leagueGames ? leagueSum / leagueGames : null };
+  });
+}
+
 // ---- Weather ----
 
 const NWS_HEADERS = { "User-Agent": "GiddyUpSports-Weather/1.0 (weather.giddyupsports contact: jvilla10214@gmail.com)" };
@@ -782,7 +865,7 @@ async function getAlmanacMatch(env, venueKey, venue, todayWeather) {
 
 // ---- AI narration ----
 
-async function narrate(env, sport, score, weather, venue, parkFactor, umpire, runEnvironmentScore, totalRunsCall) {
+async function narrate(env, sport, score, weather, venue, parkFactor, umpire, runEnvironmentScore, totalRunsCall, gameEnvironmentScore) {
   const venueLabel = venue.venue;
 
   // Indoor games (fixed dome, or a retractable roof assumed closed) always land on the same
@@ -828,7 +911,7 @@ async function narrate(env, sport, score, weather, venue, parkFactor, umpire, ru
   // totalRunsCall's call/marketLine are in the cache key too, same reasoning as runEnvironmentScore's
   // tier just above -- a line can move (or become known for the first time) independent of everything
   // else in this key.
-  const cacheKey = `insight:${sport}:${venueLabel}:${todayIso()}:${Math.round(weather.windSpeedMph)}:${Math.round(weather.tempF)}:${score.windZone || score.windCompass || score.windTier || "na"}:${weather.isForecast ? "f" : "c"}:${umpire?.name || "noump"}:${runEnvironmentScore?.tier || "noenv"}:${totalRunsCall ? `${totalRunsCall.call}-${totalRunsCall.marketLine}` : "nototal"}`;
+  const cacheKey = `insight:${sport}:${venueLabel}:${todayIso()}:${Math.round(weather.windSpeedMph)}:${Math.round(weather.tempF)}:${score.windZone || score.windCompass || score.windTier || "na"}:${weather.isForecast ? "f" : "c"}:${umpire?.name || "noump"}:${runEnvironmentScore?.tier || "noenv"}:${totalRunsCall ? `${totalRunsCall.call}-${totalRunsCall.marketLine}` : "nototal"}:${gameEnvironmentScore?.tier || "nogameenv"}`;
   return cached(env, cacheKey, 6 * 60 * 60, async () => {
     if (!env.AI) return { text: "AI narration unavailable (no AI binding configured).", cached: false };
     // Gave up trying to prompt-engineer the model into correctly pairing handedness with field
@@ -865,7 +948,13 @@ async function narrate(env, sport, score, weather, venue, parkFactor, umpire, ru
     // per-field numbers are already shown correctly in the UI's LF/CF/RF chips (deterministic,
     // never wrong), so the model's only job is the single windZone phrase (one string, not three
     // numbers to pair up) and the overall carry/lean -- much smaller surface area to get wrong.
-    const isCalm = score.windZone === "calm";
+    // sport-guarded with && short-circuiting: score.windZone doesn't exist on NFL's score object
+    // (scoreNflGame has no windZone field), so evaluating .startsWith on it below would throw for
+    // every NFL request -- a real pre-existing bug, only now surfaced by testing NFL narration with
+    // an AI binding present (every earlier test of this path happened to hit the `!env.AI` early
+    // return above first). Both values are only ever read from the mlb branch of the prompt ternary
+    // below, so a safe non-MLB fallback (false) is correct, not just non-crashing.
+    const isCalm = sport === "mlb" && score.windZone === "calm";
     // Fifth real failure, live-caught during this audit at Nationals Park: even with an explicit
     // "blowing TOWARD the SSW, not where it's coming from" instruction in the prompt, the model's
     // own free-text sentence still said "...from the southwest" -- flatly backwards (SSW is where
@@ -885,7 +974,7 @@ async function narrate(env, sport, score, weather, venue, parkFactor, umpire, ru
     // field" -- backwards, since fieldCarry.left was actually negative. windZone's own wording
     // ("out toward" vs. "in from") already unambiguously encodes the correct sign for whichever
     // field it names, so derive the framing from that phrase instead of a different field's number.
-    const windIsOut = score.windZone.startsWith("blowing out toward");
+    const windIsOut = sport === "mlb" && score.windZone.startsWith("blowing out toward");
     const mlbWindLine = isCalm
       ? `Wind is negligible today — under 3mph, or not meaningfully directional — so carry is the same in every direction: ${score.carryFt}ft vs. a neutral day, from temperature/humidity alone. Do NOT say balls carry farther to any particular field or mention a wind direction advantage — there isn't one today.`
       : `Wind is ${score.windZone} at ${weather.windSpeedMph}mph — this is a ${windIsOut ? "an INCREASE in carry (wind is adding distance, 'adding' or 'boosting' carry toward that field is accurate)" : "REDUCTION in carry (wind is suppressing distance, use words like 'reducing' or 'cutting down' carry toward that field, not just 'carry to' that field, which reads as a gain)"}. Overall estimated carry vs. a neutral day, at the park's center-field bearing: ${score.carryFt}ft -- this may have a different sign than the wind effect on the field named above, since it's a different location in the park; do not treat them as the same number. Use the exact phrase "${score.windZone}" verbatim when describing wind direction — do NOT invent your own compass direction, cardinal letters, or a "from the [direction]" phrasing; the phrase given already states direction correctly. Also do NOT state specific distance numbers for individual fields (left/center/right) — those are already shown separately in the UI and you have gotten them scrambled before. Talk about the wind direction and overall carry only.`;
@@ -966,6 +1055,15 @@ async function narrate(env, sport, score, weather, venue, parkFactor, umpire, ru
       if (sport !== "mlb" || !totalRunsCall) return "";
       return ` Total: ${totalRunsCall.call} ${totalRunsCall.marketLine} (our model implies ${totalRunsCall.impliedTotal}).`;
     }
+    // Game Environment Score (NFL, see computeGameEnvironmentScore in rules-engine.js): same terse
+    // appended-clause treatment, since gameEnvNoteEl already shows this as its own badge. Worded as
+    // plain description ("environment"), NEVER as a betting call ("Over/Under") -- see that
+    // function's own comment for why an NFL total-points call isn't shippable (no real edge found
+    // against real historical odds in backtesting).
+    function gameEnvironmentSentence() {
+      if (sport !== "nfl" || !gameEnvironmentScore) return "";
+      return ` Scoring environment: ${gameEnvironmentScore.tier} (${gameEnvironmentScore.inputsUsed.length}/3 signals).`;
+    }
     try {
       // 200 -> 60: a hard length backstop, not just a prompt request -- this model has a documented
       // history of not reliably following wording-only instructions (see the failures above), so a
@@ -975,7 +1073,7 @@ async function narrate(env, sport, score, weather, venue, parkFactor, umpire, ru
         max_tokens: 60,
       });
       const aiText = result.response?.trim() || "No insight generated.";
-      return { text: aiText + umpireSentence() + runEnvironmentSentence() + totalRunsSentence(), cached: false };
+      return { text: aiText + umpireSentence() + runEnvironmentSentence() + totalRunsSentence() + gameEnvironmentSentence(), cached: false };
     } catch (err) {
       return { text: `AI narration failed: ${err.message}`, cached: false };
     }
@@ -1016,7 +1114,7 @@ async function handleGame(env, sport, params) {
   // nobody's opened yet. The rules-engine score above is pure JS, so it's free either way. Same
   // reasoning extends to park factors and umpire tendencies here -- both real, but not worth
   // fetching nine times over for cards nobody's opened.
-  if (preview) return json({ sport, venue, weather, score, insight: null, parkFactor: null, umpire: null, runEnvironmentScore: null, totalRunsCall: null });
+  if (preview) return json({ sport, venue, weather, score, insight: null, parkFactor: null, umpire: null, runEnvironmentScore: null, totalRunsCall: null, gameEnvironmentScore: null });
 
   // Both of these are wrapped individually so a scrape hiccup on either external site degrades to
   // "no data today" for that one field, not a broken game page -- neither is load-bearing for the
@@ -1145,8 +1243,38 @@ async function handleGame(env, sport, params) {
     }
   }
 
-  const insight = await narrate(env, sport, score, weather, venue, parkFactor, umpire, runEnvironmentScore, totalRunsCall);
-  return json({ sport, venue, weather, score, insight: insight.text, parkFactor, umpire, runEnvironmentScore, totalRunsCall });
+  // Game Environment Score (NFL only, see computeGameEnvironmentScore in rules-engine.js):
+  // DESCRIPTIVE context, not a betting call -- deliberately no Total Points equivalent to MLB's
+  // Total Runs Call, see that function's own comment for why (a rigorous backtest against real
+  // historical odds found no exploitable edge for NFL with free public signals). awayAbbr comes
+  // from the frontend's own ESPN-sourced schedule (see index.html) since NFL's schedule can't be
+  // fetched server-side here.
+  let gameEnvironmentScore = null;
+  if (sport === "nfl") {
+    try {
+      const awayAbbr = params.get("awayAbbr");
+      const tendency = await fetchNflTeamScoringTendency(env);
+      const homeStats = tendency.byTeam[venueKey];
+      const awayStats = awayAbbr ? tendency.byTeam[awayAbbr] : null;
+      let teamScoringDelta = null;
+      if (homeStats && awayStats && homeStats.games >= MIN_TEAM_GAMES_FOR_TENDENCY && awayStats.games >= MIN_TEAM_GAMES_FOR_TENDENCY && tendency.leagueAvgTotal != null) {
+        const homeInvolvement = (homeStats.scoredSum + homeStats.allowedSum) / homeStats.games;
+        const awayInvolvement = (awayStats.scoredSum + awayStats.allowedSum) / awayStats.games;
+        teamScoringDelta = (homeInvolvement + awayInvolvement) / 2 - tendency.leagueAvgTotal;
+      }
+      gameEnvironmentScore = computeGameEnvironmentScore({
+        windMph: weather.windSpeedMph,
+        tempF: weather.tempF,
+        roofClosed: score.roofClosed,
+        teamScoringDelta,
+      });
+    } catch (err) {
+      gameEnvironmentScore = null;
+    }
+  }
+
+  const insight = await narrate(env, sport, score, weather, venue, parkFactor, umpire, runEnvironmentScore, totalRunsCall, gameEnvironmentScore);
+  return json({ sport, venue, weather, score, insight: insight.text, parkFactor, umpire, runEnvironmentScore, totalRunsCall, gameEnvironmentScore });
 }
 
 async function handleAlmanac(env, sport, params) {
