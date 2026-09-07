@@ -17,16 +17,19 @@
 //
 // ---- Scope and known limitations (documented up front, not discovered after the fact) ----
 //
-// 1. Look-ahead bias on pitcher/team rates: this script uses each pitcher's FULL 2025 season
-//    homeRunsPer9 and each team's FULL 2025 season hitting-vs-hand split, not a rolling "stats as of
-//    that game date" snapshot. For a game in April, that rate already includes September games that
-//    hadn't happened yet. MLB Stats API's `stats=byDateRange` could fix this per-game, but at one
-//    extra fetch per starter per game across hundreds of games it wasn't worth the time budget for a
-//    first calibration pass -- documented here explicitly, same as the task asked, rather than
-//    silently accepted. Directionally this likely makes early-season pitcherHr9Delta/teamHrRateDelta
-//    slightly less accurate (reflecting a full-season rate that a pitcher hadn't "earned" yet) but
-//    doesn't bias the SIGN of the signal, since a pitcher who allows more/fewer homers all year
-//    tends to do so consistently across the season, not in one concentrated stretch.
+// 1. Look-ahead bias on team rates: teamHrRateDelta uses each team's FULL 2025 season hitting-vs-
+//    hand split, not a rolling "stats as of that game date" snapshot -- for a game in April, that
+//    rate already includes September games that hadn't happened yet. UPDATE 2026-09-06: pitcherHr9
+//    had this same bug and it was NOT a minor effect as originally guessed below -- fixed by
+//    switching to real point-in-time data (fetchPitcherGameLog + pointInTimeHr9, MLB Stats API's
+//    gameLog endpoint, cumulative HR/9 through strictly-prior starts only). Real result: pitcherHr9's
+//    correlation with actual outcomes collapsed from r=0.13/0.19 (runs/HR, inflated) to r=0.04/0.02
+//    (real) once corrected -- see rules-engine.js's RES_WEIGHTS comment, which lowered its weight
+//    accordingly. teamHrRateDelta almost certainly has the same bug but couldn't be fixed or even
+//    verified the same way -- MLB Stats API's team-splits endpoint (stats=statSplits) does NOT
+//    respect startDate/endDate (confirmed: identical output with and without them), so there's no
+//    clean per-date-window query available for it. Its own r=0.09/0.19 may still be somewhat
+//    inflated in ways this script can't currently measure.
 // 2. Daily-vs-hourly weather granularity: same limitation the historical almanac feature already
 //    accepts (see fetchHistoricalWeatherWindow in weather-worker.js) -- Open-Meteo's archive API only
 //    gives a day's mean temp / max wind speed / dominant wind direction, not a reading at actual
@@ -151,20 +154,47 @@ async function fetchParkFactors(season) {
   });
 }
 
-async function fetchPitcherHr9(pitcherId, season) {
-  return cached(`pitcher-hr9-${pitcherId}-${season}`, async () => {
-    const url = `https://statsapi.mlb.com/api/v1/people/${pitcherId}?hydrate=stats(group=[pitching],type=[season],season=${season})`;
-    const data = await fetchJson(url);
-    const person = data.people?.[0];
-    const stat = person?.stats?.find((s) => s.group?.displayName === "pitching" && s.type?.displayName === "season")?.splits?.[0]?.stat;
-    const ip = parseInningsPitched(stat?.inningsPitched);
-    return {
-      throwsHand: person?.pitchHand?.code || null,
-      hr9: stat?.homeRunsPer9 != null ? Number(stat.homeRunsPer9) : null,
-      inningsPitched: ip,
-      qualifies: ip >= MIN_PITCHER_IP,
-    };
+// Throwing hand never changes -- cached indefinitely, one call per unique pitcher regardless of
+// how many games/seasons they appear in across this backtest.
+async function fetchPitcherHand(pitcherId) {
+  return cached(`pitcher-hand-${pitcherId}`, async () => {
+    const data = await fetchJson(`https://statsapi.mlb.com/api/v1/people/${pitcherId}`);
+    return { throwsHand: data.people?.[0]?.pitchHand?.code || null };
   });
+}
+
+// Full season game-by-game log (one call, cached, reused across every one of this pitcher's starts
+// in the sample) -- lets pointInTimeHr9 below compute a REAL "as of this date" rate instead of the
+// look-ahead-biased full-season aggregate this script originally used (see limitation #1 above).
+async function fetchPitcherGameLog(pitcherId, season) {
+  return cached(`pitcher-gamelog-${pitcherId}-${season}`, async () => {
+    const data = await fetchJson(`https://statsapi.mlb.com/api/v1/people/${pitcherId}/stats?stats=gameLog&group=pitching&season=${season}`);
+    const splits = data.stats?.[0]?.splits || [];
+    return splits.map((s) => ({ date: s.date, hr: s.stat?.homeRuns || 0, ip: parseInningsPitched(s.stat?.inningsPitched) })).sort((a, b) => (a.date < b.date ? -1 : 1));
+  });
+}
+
+function pointInTimeHr9(gameLog, beforeDate) {
+  let hrSum = 0;
+  let ipSum = 0;
+  for (const g of gameLog) {
+    if (g.date >= beforeDate) continue; // strictly prior starts only -- never this game or later ones
+    hrSum += g.hr;
+    ipSum += g.ip;
+  }
+  if (ipSum < MIN_PITCHER_IP) return null;
+  return { hr9: (hrSum / ipSum) * 9, inningsPitched: ipSum };
+}
+
+async function fetchPitcherHr9(pitcherId, season, gameDate) {
+  const [hand, gameLog] = await Promise.all([fetchPitcherHand(pitcherId), fetchPitcherGameLog(pitcherId, season)]);
+  const pit = pointInTimeHr9(gameLog, gameDate);
+  return {
+    throwsHand: hand.throwsHand,
+    hr9: pit?.hr9 ?? null,
+    inningsPitched: pit?.inningsPitched ?? 0,
+    qualifies: pit != null,
+  };
 }
 
 const LEAN_MIN_CAREER_GAMES = 20; // same gate as fetchUmpireCareerLean in weather-worker.js
@@ -323,8 +353,8 @@ async function main() {
       let homePitcher = null;
       try {
         [awayPitcher, homePitcher] = await Promise.all([
-          box.awayStarterId ? fetchPitcherHr9(box.awayStarterId, SEASON) : null,
-          box.homeStarterId ? fetchPitcherHr9(box.homeStarterId, SEASON) : null,
+          box.awayStarterId ? fetchPitcherHr9(box.awayStarterId, SEASON, g.date) : null,
+          box.homeStarterId ? fetchPitcherHr9(box.homeStarterId, SEASON, g.date) : null,
         ]);
       } catch {
         // leave null

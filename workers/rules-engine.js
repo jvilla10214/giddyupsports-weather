@@ -300,19 +300,30 @@ function scoreNflGame(weather, venue) {
 // at scripts/data/run-environment-score-samples.json), the same process already used for
 // CARRY_LEAN_THRESHOLD_FT/WIND_CARRY_FT_PER_MPH above. Each RES_SCALE value is that signal's real
 // p75-of-|value| across the sample -- so a "typical extreme" real game normalizes to roughly 1.0,
-// not a round guessed number. Weights were left unchanged: all 5 signals showed the same
-// weak-to-modest, correctly-signed correlation with real outcomes (r ~ 0.04-0.20), so nothing in
-// the sample clearly justified re-weighting any one signal over another. The worst miscalibration
-// found: teamHrRateDelta's old scale (0.015) meant even the single most extreme game in the entire
-// 450-game sample (raw 0.013) normalized to only 0.87 -- that signal could essentially never
-// register at full strength, silencing one of five inputs almost all the time. Correlations overall
-// are real but weak in absolute terms -- this recalibration makes the tier labels honestly match
-// what the score actually produces, not a claim of strong predictive power.
+// not a round guessed number. Correlations overall are real but weak in absolute terms -- this
+// recalibration makes the tier labels honestly match what the score actually produces, not a claim
+// of strong predictive power.
+//
+// pitcherHr9's weight was corrected 2026-09-06, after auditing the football side surfaced the same
+// class of look-ahead bug here: the ORIGINAL backtest evaluated pitcherHr9Delta using each starter's
+// FULL completed 2025 season HR/9, including starts that hadn't happened yet at the time of an
+// earlier-season game being backtested -- inflating its apparent strength (originally the 2nd-
+// strongest signal, r=0.13/0.19 vs runs/HR). Rebuilt with REAL point-in-time data (MLB Stats API's
+// gameLog endpoint, 367 unique starters, cumulative HR/9 through strictly-prior starts only): real
+// correlation collapses to r=0.04/0.02 -- now one of the WEAKEST signals, roughly on par with
+// umpireLean, not teamHrRate/parkFactor. Weight lowered from 0.8 to 0.4 to match. IMPORTANT: this
+// bug was only in the BACKTEST's methodology, not live production -- fetchPitcherHrTendency in
+// weather-worker.js queries "this season so far" at request time, which is already correctly
+// point-in-time for a real game happening today (nothing to fix there). teamHrRateDelta almost
+// certainly has the same category of bias (it's also built from full-season stats) but couldn't be
+// corrected or even verified -- MLB Stats API's team-splits endpoint doesn't support date-range
+// filtering (confirmed: identical output with/without startDate/endDate), so its own r=0.09/0.19
+// may also be somewhat inflated in ways this app can't currently measure or fix.
 const RES_WEIGHTS = {
   carry: 1.0,
   parkFactor: 0.8,
-  umpireLean: 0.4, // weakest, most granular signal of the five
-  pitcherHr9: 0.8,
+  umpireLean: 0.4,
+  pitcherHr9: 0.4, // lowered from 0.8 -- see comment above
   teamHrRate: 0.8,
 };
 
@@ -337,6 +348,11 @@ const MIN_PITCHER_IP = 10;
 // games under the old thresholds; the recalibrated ±0.3/±0.6 gives a real, checkable ~16% of games
 // in a "Strong" tier and a roughly halved Neutral share (73% -> 49%), with a clean, monotonic-in-
 // real-runs gradient across all 5 tiers.
+//
+// Re-checked 2026-09-06 against the corrected point-in-time pitcherHr9Delta + lowered weight (see
+// RES_WEIGHTS comment above): real p10/p25/p75/p90 of the corrected composite across the full
+// 2,430-game backtest are -0.53/-0.30/+0.31/+0.63 -- essentially unchanged from the thresholds
+// below (within 0.03), so left as-is rather than introduce false precision over a shift this small.
 function runEnvironmentTier(score) {
   if (score >= 0.6) return "Strong Hitter Environment";
   if (score >= 0.3) return "Hitter Leaning";
