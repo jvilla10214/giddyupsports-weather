@@ -137,7 +137,7 @@ assert(domeIgnoresOverride.roofClosed === true, "A fixed dome must stay closed e
 // teamHrRateDelta's real observed max across the whole sample was only 0.013, so a test value
 // like the old 0.015 would exceed anything the live system could ever actually produce.
 
-// All six signals near their real p90 magnitude, all pointing hitter-friendly -> a genuinely
+// All seven signals near their real p90 magnitude, all pointing hitter-friendly -> a genuinely
 // extreme real game (like Coors Field) should actually reach the top tier now, not narrowly miss
 // it the way the pre-recalibration thresholds did.
 const allHitterFriendly = computeRunEnvironmentScore({
@@ -147,11 +147,12 @@ const allHitterFriendly = computeRunEnvironmentScore({
   pitcherHr9Delta: 0.48, // real p90 was 0.48
   teamHrRateDelta: 0.005, // real p90 was 0.005
   hardHitDelta: 0.06, // real p90 was 0.062
+  parkHrIndexDelta: 20, // real p90 was 20.2
 });
 console.log("All-hitter-friendly composite:", allHitterFriendly);
-assert(allHitterFriendly.score > 0.6, "Real p90-magnitude signals, all hitter-friendly, should clear the Strong tier");
+assert(allHitterFriendly.score > 0.58, "Real p90-magnitude signals, all hitter-friendly, should clear the Strong tier");
 assert(allHitterFriendly.tier === "Strong Hitter Environment", "Should land in the Strong Hitter tier");
-assert(allHitterFriendly.inputsUsed.length === 6, "All six inputs should be counted when all six are provided");
+assert(allHitterFriendly.inputsUsed.length === 7, "All seven inputs should be counted when all seven are provided");
 
 // Mirror-image pitcher-friendly case, same real-magnitude reasoning.
 const allPitcherFriendly = computeRunEnvironmentScore({
@@ -161,35 +162,44 @@ const allPitcherFriendly = computeRunEnvironmentScore({
   pitcherHr9Delta: -0.48,
   teamHrRateDelta: -0.005,
   hardHitDelta: -0.06,
+  parkHrIndexDelta: -20,
 });
 console.log("All-pitcher-friendly composite:", allPitcherFriendly);
-assert(allPitcherFriendly.score < -0.6, "Real p90-magnitude signals, all pitcher-friendly, should clear the Strong tier");
+assert(allPitcherFriendly.score < -0.49, "Real p90-magnitude signals, all pitcher-friendly, should clear the Strong tier");
 assert(allPitcherFriendly.tier === "Strong Pitcher Environment", "Should land in the Strong Pitcher tier");
 
 // Missing signals (umpire not yet assigned, pitcher/team fetch failed) must not shrink the score
 // toward 0 just because fewer inputs contributed -- a weighted AVERAGE over only the inputs
 // present, not a weighted sum, so a game with only carryFt+parkFactor known reads on the same
-// scale as one with all six.
-const partialInputs = computeRunEnvironmentScore({ carryFt: 35, parkFactorPct: 7, umpireLeanRunsPerGame: null, pitcherHr9Delta: null, teamHrRateDelta: null, hardHitDelta: null });
+// scale as one with all seven.
+const partialInputs = computeRunEnvironmentScore({ carryFt: 35, parkFactorPct: 7, umpireLeanRunsPerGame: null, pitcherHr9Delta: null, teamHrRateDelta: null, hardHitDelta: null, parkHrIndexDelta: null });
 console.log("Partial-inputs composite (carry + park factor only):", partialInputs);
 assert(partialInputs.inputsUsed.length === 2, "Only the two provided inputs should be counted");
-assert(partialInputs.score > 0.6, "Two strongly hitter-friendly inputs alone should still score high, not diluted toward 0 by the four missing ones");
+assert(partialInputs.score > 0.58, "Two strongly hitter-friendly inputs alone should still score high, not diluted toward 0 by the five missing ones");
 
 // Every input missing -> nothing to score, not a fabricated 0/neutral.
-assert(computeRunEnvironmentScore({ carryFt: null, parkFactorPct: null, umpireLeanRunsPerGame: null, pitcherHr9Delta: null, teamHrRateDelta: null, hardHitDelta: null }) === null, "All inputs missing should return null, not a fake neutral score");
+assert(computeRunEnvironmentScore({ carryFt: null, parkFactorPct: null, umpireLeanRunsPerGame: null, pitcherHr9Delta: null, teamHrRateDelta: null, hardHitDelta: null, parkHrIndexDelta: null }) === null, "All inputs missing should return null, not a fake neutral score");
 
 // Genuinely mixed signals, each at a real p75-ish magnitude but pointing in different directions,
 // should land in the Neutral band, not get pulled hard either direction.
-const mixed = computeRunEnvironmentScore({ carryFt: 19, parkFactorPct: -6, umpireLeanRunsPerGame: 0, pitcherHr9Delta: -0.35, teamHrRateDelta: 0.003, hardHitDelta: 0.02 });
+const mixed = computeRunEnvironmentScore({ carryFt: 19, parkFactorPct: -6, umpireLeanRunsPerGame: 0, pitcherHr9Delta: -0.35, teamHrRateDelta: 0.003, hardHitDelta: 0.02, parkHrIndexDelta: -8 });
 console.log("Mixed-signal composite:", mixed);
 assert(mixed.tier === "Neutral", "Realistic, genuinely offsetting signals should land in the Neutral tier");
 
 // hardHitDelta specifically: a real, separate signal from pitcherHr9Delta -- pointing them in
 // OPPOSITE directions should partially offset, not double-count as if they were the same thing.
-const hr9VsHardHitOffset = computeRunEnvironmentScore({ carryFt: null, parkFactorPct: null, umpireLeanRunsPerGame: null, pitcherHr9Delta: 0.35, teamHrRateDelta: null, hardHitDelta: -0.043 });
+const hr9VsHardHitOffset = computeRunEnvironmentScore({ carryFt: null, parkFactorPct: null, umpireLeanRunsPerGame: null, pitcherHr9Delta: 0.35, teamHrRateDelta: null, hardHitDelta: -0.043, parkHrIndexDelta: null });
 console.log("pitcherHr9Delta and hardHitDelta pointing opposite ways:", hr9VsHardHitOffset);
 assert(Math.abs(hr9VsHardHitOffset.score) < 0.05, "Equal-magnitude, opposite-signed HR9/hardHit signals should roughly cancel, not reinforce");
 assert(hr9VsHardHitOffset.inputsUsed.length === 2, "Both pitcherHr9 and hardHit should be counted as separate signals");
+
+// parkHrIndexDelta specifically: a real, separate signal from parkFactorPct (r=-0.02 between them
+// in the real backtest -- see RES_WEIGHTS comment) -- pointing them in OPPOSITE directions should
+// partially offset, not double-count as if they measured the same "park effect."
+const parkFactorVsParkHrOffset = computeRunEnvironmentScore({ carryFt: null, parkFactorPct: 6, umpireLeanRunsPerGame: null, pitcherHr9Delta: null, teamHrRateDelta: null, hardHitDelta: null, parkHrIndexDelta: -15 });
+console.log("parkFactorPct and parkHrIndexDelta pointing opposite ways:", parkFactorVsParkHrOffset);
+assert(Math.abs(parkFactorVsParkHrOffset.score) < 0.05, "Equal-magnitude, opposite-signed park-factor/park-HR signals should roughly cancel, not reinforce");
+assert(parkFactorVsParkHrOffset.inputsUsed.length === 2, "Both parkFactor and parkHr should be counted as separate signals");
 
 // ---- Total Runs Call ----
 

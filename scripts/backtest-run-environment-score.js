@@ -198,6 +198,29 @@ async function fetchParkFactors(season) {
   });
 }
 
+// Real outcome-based park factor (parkHrIndexDelta, added 2026-09-12) -- a different Savant report
+// (type=year, not type=distance) from fetchParkFactors above; see rules-engine.js's RES_WEIGHTS
+// comment for why this is additive, not a replacement (confirmed nearly uncorrelated, r=-0.02, with
+// the existing extra_distance-based parkFactorPct).
+async function fetchParkHrIndex(season) {
+  return cached(`park-hr-index-${season}`, async () => {
+    const url = `https://baseballsavant.mlb.com/leaderboard/statcast-park-factors?type=year&year=${season}&batSide=&stat=index_wOBA&condition=All&rolling=`;
+    const res = await fetch(url, { headers: HEADERS });
+    if (!res.ok) throw new Error(`Baseball Savant park factors (year/outcome) ${res.status}`);
+    const html = await res.text();
+    const match = html.match(/var data = (\[.*?\]);/s);
+    if (!match) throw new Error("Baseball Savant park factors (year/outcome): expected data array not found");
+    const rows = JSON.parse(match[1]);
+    const byVenueKey = {};
+    for (const r of rows) {
+      const venueKey = MLB_TEAM_ID_TO_KEY[Number(r.main_team_id)];
+      if (!venueKey) continue;
+      byVenueKey[venueKey] = Number(r.index_hr) - 100; // 100 = league average
+    }
+    return byVenueKey;
+  });
+}
+
 // Throwing hand never changes -- cached indefinitely, one call per unique pitcher regardless of
 // how many games/seasons they appear in across this backtest.
 async function fetchPitcherHand(pitcherId) {
@@ -403,12 +426,12 @@ function pickEvenlySpaced(arr, n) {
 async function main() {
   console.error(`Run Environment Score backtest -- season ${SEASON}, ~${GAMES_PER_TEAM} home games/team\n`);
 
-  const [leagueRates, parkFactors, hardHitBaseline] = await Promise.all([fetchLeagueHrRate(SEASON), fetchParkFactors(SEASON), fetchLeagueHardHitBaseline(SEASON)]);
+  const [leagueRates, parkFactors, hardHitBaseline, parkHrIndex] = await Promise.all([fetchLeagueHrRate(SEASON), fetchParkFactors(SEASON), fetchLeagueHardHitBaseline(SEASON), fetchParkHrIndex(SEASON)]);
   console.error(`League pitcherHr9: ${leagueRates.pitcherHr9League?.toFixed(3)}, hitting HR-rate vs L/R: ${leagueRates.hittingLeagueByHand.L?.toFixed(4)}/${leagueRates.hittingLeagueByHand.R?.toFixed(4)}`);
   console.error(`League hard-hit rate: ${hardHitBaseline.leagueHardHitRate?.toFixed(4)} (${hardHitBaseline.leagueAttempts} batted balls)`);
 
   const samples = [];
-  const missing = { carryFt: 0, parkFactorPct: 0, umpireLean: 0, pitcherHr9: 0, teamHrRate: 0, hardHit: 0 };
+  const missing = { carryFt: 0, parkFactorPct: 0, umpireLean: 0, pitcherHr9: 0, teamHrRate: 0, hardHit: 0, parkHr: 0 };
   const teamKeys = Object.keys(MLB_STADIUMS);
 
   for (const key of teamKeys) {
@@ -497,6 +520,8 @@ async function main() {
         }
       }
 
+      const parkHrIndexDelta = parkHrIndex[key] ?? null;
+
       // Team HR-rate-vs-opposing-starter's-hand: home lineup vs away starter's hand, away lineup vs
       // home starter's hand -- each compared to the league average for that same hand split.
       const deltas = [];
@@ -515,7 +540,7 @@ async function main() {
       const actualCombinedRuns = g.awayScore + g.homeScore;
       const actualCombinedHomeRuns = box.awayHomeRuns != null && box.homeHomeRuns != null ? box.awayHomeRuns + box.homeHomeRuns : null;
 
-      const inputs = { carryFt, parkFactorPct, umpireLeanRunsPerGame, pitcherHr9Delta, teamHrRateDelta, hardHitDelta };
+      const inputs = { carryFt, parkFactorPct, umpireLeanRunsPerGame, pitcherHr9Delta, teamHrRateDelta, hardHitDelta, parkHrIndexDelta };
       const res = computeRunEnvironmentScore(inputs);
 
       if (carryFt == null) missing.carryFt++;
@@ -524,6 +549,7 @@ async function main() {
       if (pitcherHr9Delta == null) missing.pitcherHr9++;
       if (teamHrRateDelta == null) missing.teamHrRate++;
       if (hardHitDelta == null) missing.hardHit++;
+      if (parkHrIndexDelta == null) missing.parkHr++;
 
       samples.push({
         venue: key,
@@ -630,6 +656,7 @@ function analyze(samples, missing) {
   distLine("pitcherHr9Delta", samples.map((s) => s.pitcherHr9Delta));
   distLine("teamHrRateDelta", samples.map((s) => s.teamHrRateDelta));
   distLine("hardHitDelta", samples.map((s) => s.hardHitDelta));
+  distLine("parkHrIndexDelta", samples.map((s) => s.parkHrIndexDelta));
 
   console.log("\n--- Current composite RES score distribution (existing RES_WEIGHTS/RES_SCALE) ---");
   distLine("resScore", samples.map((s) => s.resScore));
@@ -685,6 +712,7 @@ function analyze(samples, missing) {
   corrLine("pitcherHr9Delta", "pitcherHr9Delta");
   corrLine("teamHrRateDelta", "teamHrRateDelta");
   corrLine("hardHitDelta", "hardHitDelta");
+  corrLine("parkHrIndexDelta", "parkHrIndexDelta");
 
   // ---- Total Runs Call regression (computeTotalRunsCall's TOTAL_RUNS_REGRESSION in rules-engine.js) ----
   // Refits impliedTotal = intercept + slope * resScore against actualCombinedRuns -- reproduces the

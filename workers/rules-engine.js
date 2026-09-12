@@ -333,6 +333,25 @@ function scoreNflGame(weather, venue) {
 // 0.0272 vs runs, essentially flat vs HR at 0.0346 -> 0.0344) -- the two signals catch different
 // things rather than duplicating each other, so only "add, don't replace" actually helped. Weighted
 // the same as pitcherHr9Delta (0.4), same weight-class reasoning: a real signal, but not a strong one.
+//
+// parkHr was ADDED the same day, after a broader "what else would make MLB/NFL great and unique"
+// brainstorm turned up three candidate ideas -- this was the one that actually worked. Real per-park
+// FOUL TERRITORY square footage (scraped from Clem's Baseball, andrewclem.com, the same site already
+// used for cfBearingDeg in data/stadiums.js) was tested first and is a real, honest NULL: r=0.018 vs
+// runs, r=0.004 vs HR -- essentially zero, not shipped. Real MLB-level BULLPEN FATIGUE (bullpen
+// innings thrown in the prior 2 days, either team, computed from real per-game pitching-staff data)
+// was tested second and is also a real null: r=0.014 vs runs allowed, and a fatigued-bullpen quartile
+// allowed almost exactly the same runs as the freshest quartile (4.16 vs 4.12) -- not shipped either.
+// The one that worked: Baseball Savant's OUTCOME-based park factor (`index_hr`, the real 100-scaled
+// HR-specific park index, scraped from the same statcast-park-factors leaderboard already used for
+// parkFactor above, just a different report -- type=year instead of type=distance) turned out to be
+// nearly UNCORRELATED with the currently-shipped parkFactor (r=-0.02) -- genuinely new information,
+// not a duplicate, because parkFactor only ever captured temp/altitude/roof/environment-driven fly-
+// ball DISTANCE, never whether that distance actually clears a specific park's fence height/shape.
+// Added as a 7th signal (not a replacement, same "add don't replace" lesson as hardHit above):
+// composite r2 vs runs 0.0243 -> 0.0270, and vs HR 0.0265 -> 0.0413 -- the strongest single addition
+// tested today, especially for HR specifically, which is exactly where a real fence-aware signal
+// should help most. Weighted the same as the existing parkFactor (0.8), same "park effect" class.
 const RES_WEIGHTS = {
   carry: 1.0,
   parkFactor: 0.8,
@@ -340,6 +359,7 @@ const RES_WEIGHTS = {
   pitcherHr9: 0.4, // lowered from 0.8 -- see comment above
   teamHrRate: 0.8,
   hardHit: 0.4, // added 2026-09-12 -- see comment above
+  parkHr: 0.8, // added 2026-09-12 -- see comment above
 };
 
 const RES_SCALE = {
@@ -349,6 +369,7 @@ const RES_SCALE = {
   pitcherHr9Delta: 0.35, // real p75 was 0.36
   teamHrRateDelta: 0.0045, // real p75 was 0.0044 -- old value of 0.015 was ~3x too generous, see above
   hardHitDelta: 0.043, // real p75-of-|value| across the 2,430-game backtest (p90 was 0.062)
+  parkHrIndexDelta: 15.0, // real p75-of-|value| across the 2,430-game backtest (index_hr minus its 100 league-average baseline)
 };
 
 // Gates a starter's HR/9 out of the score entirely below this many innings pitched this season --
@@ -375,18 +396,17 @@ const MIN_PITCHER_BATTED_BALLS = 50;
 // 2,430-game backtest are -0.53/-0.30/+0.31/+0.63 -- essentially unchanged from the thresholds
 // below (within 0.03), so left as-is rather than introduce false precision over a shift this small.
 //
-// Re-checked again 2026-09-12 after adding hardHitDelta as a 6th signal (see RES_WEIGHTS comment):
-// real p10/p25/p75/p90 of the new composite across the same 2,430-game backtest are
-// -0.46/-0.25/+0.30/+0.60 -- a larger shift than the 2026-09-06 check (up to 0.06 at p90, vs that
-// check's <0.03), from adding a 6th signal diluting the most extreme composite values slightly, as
-// expected. Still small relative to each tier's 0.3-wide band and doesn't relabel a meaningful
-// volume of real games, so left as-is again rather than chase a moving target every time a signal
-// changes -- but documented honestly here since it's a bigger shift than last time's "unchanged."
+// Re-checked again 2026-09-12 after adding hardHitDelta as a 6th signal AND parkHrIndexDelta as a
+// 7th (see RES_WEIGHTS comment for both) -- computed once for the final 7-signal state rather than
+// twice for each intermediate step: real p10/p25/p75/p90 of the new composite across the same
+// 2,430-game backtest are -0.49/-0.25/+0.27/+0.58. The largest single shift (p10, -0.6 -> -0.49, a
+// 0.11 move) is bigger than either prior check accepted as "small enough to leave alone," so this
+// time the thresholds below were actually updated to match, rather than left to keep drifting.
 function runEnvironmentTier(score) {
-  if (score >= 0.6) return "Strong Hitter Environment";
-  if (score >= 0.3) return "Hitter Leaning";
-  if (score > -0.3) return "Neutral";
-  if (score > -0.6) return "Pitcher Leaning";
+  if (score >= 0.58) return "Strong Hitter Environment";
+  if (score >= 0.27) return "Hitter Leaning";
+  if (score > -0.25) return "Neutral";
+  if (score > -0.49) return "Pitcher Leaning";
   return "Strong Pitcher Environment";
 }
 
@@ -402,6 +422,9 @@ function runEnvironmentTier(score) {
  *   hardHitDelta: number|null - avg of both starters' hard-hit rate allowed (Statcast, launch speed
  *     >= 95mph) minus league-average hard-hit rate, gated at MIN_PITCHER_BATTED_BALLS -- a separate
  *     signal from pitcherHr9Delta, not a replacement for it (see RES_WEIGHTS comment)
+ *   parkHrIndexDelta: number|null - this park's real outcome-based Statcast HR index (100 = league
+ *     average) minus 100 -- a separate signal from parkFactorPct, not a replacement for it (see
+ *     RES_WEIGHTS comment)
  * @returns {{score: number, tier: string, inputsUsed: string[]}|null} null only if every input is
  *   missing (nothing to score)
  */
@@ -417,6 +440,7 @@ function computeRunEnvironmentScore(inputs) {
   add("pitcherHr9", inputs.pitcherHr9Delta, "pitcherHr9Delta");
   add("teamHrRate", inputs.teamHrRateDelta, "teamHrRateDelta");
   add("hardHit", inputs.hardHitDelta, "hardHitDelta");
+  add("parkHr", inputs.parkHrIndexDelta, "parkHrIndexDelta");
 
   if (!contributions.length) return null;
 
@@ -453,6 +477,13 @@ function computeRunEnvironmentScore(inputs) {
 // produces across its entire range (Strong Pitcher's implied ~6.2 to Strong Hitter's implied
 // ~11.4). This remains a real, modest, correctly-signed signal (same conclusion as the Run
 // Environment Score's own backtest writeup), not a strong predictor of any single game.
+// REFIT AGAIN 2026-09-12 (same day), after adding parkHrIndexDelta as a 7th RES signal (see
+// RES_WEIGHTS comment) -- resScore's composition changed again, so this was re-derived once more
+// against the same full 2,430-game backtest rather than left to drift a third generation stale:
+// intercept 8.844->8.841 (barely moved), slope 1.543->1.739, R2 0.0244->0.0271 (another real, if
+// still modest, improvement), residStd 4.538->4.532 (essentially unchanged). Same honest framing as
+// before applies: this is a real, correctly-signed signal, not a strong predictor of any one game.
+//
 // TOTAL_CALL_MARGIN below is deliberately wide (not tuned against real historical odds, which this
 // project doesn't have -- RotoGrinders only exposes today's live line, not a historical archive)
 // specifically so the call only fires "Likely Over/Under" on a genuinely large gap between our
@@ -461,7 +492,7 @@ function computeRunEnvironmentScore(inputs) {
 // Revisit both the regression and the margin together whenever resScore's composition changes
 // again, and once real historical market-line outcomes can be collected to actually backtest this
 // call's hit rate, the same way every other constant in this file has been.
-const TOTAL_RUNS_REGRESSION = { intercept: 8.844, slope: 1.543 };
+const TOTAL_RUNS_REGRESSION = { intercept: 8.841, slope: 1.739 };
 const TOTAL_CALL_MARGIN = 1.0; // runs of gap between implied total and market line before calling a lean at all
 
 /**

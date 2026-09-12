@@ -150,6 +150,36 @@ async function fetchParkFactors(env) {
   });
 }
 
+// Real OUTCOME-based park factor (Run Environment Score's parkHrIndexDelta input, added 2026-09-12
+// after a broader MLB feature brainstorm -- see RES_WEIGHTS comment in rules-engine.js for the full
+// investigation, including the two ideas that turned out to be real nulls). Different Savant report
+// than fetchParkFactors above -- `type=year` instead of `type=distance` -- which gives a real,
+// 100-scaled index of actual HR/scoring OUTCOMES (a 3-year rolling window, per Savant's own
+// methodology) rather than pure physics-based extra-distance. Confirmed nearly uncorrelated with
+// fetchParkFactors' own extra_distance (r=-0.02) -- genuinely new information, not a duplicate,
+// because a park's fence height/shape affects HR outcomes independent of how much raw fly-ball
+// distance the weather/altitude/roof physics alone would predict.
+async function fetchParkHrIndex(env) {
+  const year = new Date().getUTCFullYear();
+  return cached(env, `parkhrindex:mlb:${year}`, 24 * 60 * 60, async () => {
+    const url = `https://baseballsavant.mlb.com/leaderboard/statcast-park-factors?type=year&year=${year}&batSide=&stat=index_wOBA&condition=All&rolling=`;
+    const res = await fetch(url, { headers: { "User-Agent": "GiddyUpSports-Weather/1.0 (contact: jvilla10214@gmail.com)" } });
+    if (!res.ok) throw new Error(`Baseball Savant park factors (year/outcome) ${res.status}`);
+    const html = await res.text();
+    const match = html.match(/var data = (\[.*?\]);/s);
+    if (!match) throw new Error("Baseball Savant park factors (year/outcome): expected data array not found in page");
+    const rows = JSON.parse(match[1]);
+    const byVenueKey = {};
+    for (const r of rows) {
+      const venueKey = MLB_TEAM_ID_TO_KEY[Number(r.main_team_id)];
+      if (!venueKey) continue;
+      // 100 = league average; store as a delta so callers don't all have to remember to subtract it.
+      byVenueKey[venueKey] = Number(r.index_hr) - 100;
+    }
+    return { year, byVenueKey };
+  });
+}
+
 // ---- Total Runs O/U line (RotoGrinders) ----
 //
 // rotogrinders.com/weather/mlb server-renders the day's full slate (confirmed live: all 15 games on
@@ -1321,6 +1351,17 @@ async function handleGame(env, sport, params) {
           hardHitDelta = null;
         }
 
+        // parkHrIndexDelta (see fetchParkHrIndex above and RES_WEIGHTS in rules-engine.js): wrapped
+        // separately again, same reasoning -- a hiccup on this specific Savant report shouldn't
+        // touch parkFactor (a different report, fetched separately above) or either HR9/hardHit signal.
+        let parkHrIndexDelta = null;
+        try {
+          const parkHrIndex = await fetchParkHrIndex(env);
+          parkHrIndexDelta = parkHrIndex.byVenueKey[venueKey] ?? null;
+        } catch (err) {
+          parkHrIndexDelta = null;
+        }
+
         // Each lineup's HR rate vs the OPPOSING starter's throwing hand (home lineup faces the away
         // starter, and vice versa), compared to the league-average rate for that same hand.
         const teamHrDeltas = [];
@@ -1347,6 +1388,7 @@ async function handleGame(env, sport, params) {
           pitcherHr9Delta,
           teamHrRateDelta,
           hardHitDelta,
+          parkHrIndexDelta,
         });
       }
     } catch (err) {
