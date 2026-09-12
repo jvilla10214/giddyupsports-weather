@@ -551,6 +551,74 @@ async function fetchNflTeamScoringTendency(env) {
   });
 }
 
+// ---- NCAAF venue geocoding ("Top 25 Watch") ----
+//
+// Unlike MLB/NFL, NCAAF has no static per-team stadiums dict (data/stadiums.js) -- 130+ FBS teams
+// plus rotating FCS/G5 opponents made a hand-curated file both impractical and a duplicate of data
+// ESPN already hands over every request (see the NCAAF module plan). ESPN's own scoreboard venue
+// object has no lat/lon (confirmed live, checked three ways: the site API scoreboard, the site API
+// rankings/team detail, and the core API's dedicated venue endpoint -- none of them expose it), so
+// this geocodes from the city/state the client already has (from its own ESPN-sourced schedule,
+// see index.html's fetchNcaafScheduleClientSide) using Open-Meteo's free geocoding API -- the same
+// provider already used for weather elsewhere in this app (see DECISIONS.md). Cached a full year
+// per venue (effectively permanent -- a stadium's city doesn't move), same spirit as MLB/NFL's
+// static lat/lon never needing a refetch.
+const US_STATE_NAMES = {
+  AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California", CO: "Colorado",
+  CT: "Connecticut", DE: "Delaware", DC: "District of Columbia", FL: "Florida", GA: "Georgia",
+  HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa", KS: "Kansas", KY: "Kentucky",
+  LA: "Louisiana", ME: "Maine", MD: "Maryland", MA: "Massachusetts", MI: "Michigan", MN: "Minnesota",
+  MS: "Mississippi", MO: "Missouri", MT: "Montana", NE: "Nebraska", NV: "Nevada", NH: "New Hampshire",
+  NJ: "New Jersey", NM: "New Mexico", NY: "New York", NC: "North Carolina", ND: "North Dakota",
+  OH: "Ohio", OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania", RI: "Rhode Island",
+  SC: "South Carolina", SD: "South Dakota", TN: "Tennessee", TX: "Texas", UT: "Utah", VT: "Vermont",
+  VA: "Virginia", WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming",
+};
+
+async function fetchNcaafVenueGeo(env, venueId, city, state) {
+  return cached(env, `ncaaf-venue-geo:${venueId}`, 365 * 24 * 60 * 60, async () => {
+    const stateName = US_STATE_NAMES[state] || state;
+    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=10&country=US`;
+    const res = await fetch(url, { headers: { "User-Agent": "GiddyUpSports-Weather/1.0 (contact: jvilla10214@gmail.com)" } });
+    if (!res.ok) throw new Error(`Open-Meteo geocoding ${res.status}`);
+    const data = await res.json();
+    const match = (data.results || []).find((r) => r.admin1 === stateName);
+    if (!match) throw new Error(`No geocoding match for "${city}, ${state}"`);
+    return { lat: match.latitude, lon: match.longitude };
+  });
+}
+
+async function handleNcaafGame(env, params) {
+  const venueId = params.get("venueKey");
+  const city = params.get("city");
+  const state = params.get("state");
+  const indoor = params.get("indoor") === "1";
+  const venueName = params.get("venueName") || "Venue";
+  const preview = params.get("preview") === "1";
+  const startTimeUtc = params.get("startTimeUtc");
+  if (!venueId || !city || !state) return json({ error: "ncaaf requires venueKey, city, and state" }, 400);
+
+  let geo;
+  try {
+    geo = await fetchNcaafVenueGeo(env, venueId, city, state);
+  } catch (err) {
+    return json({ error: `Could not locate venue: ${err.message}` }, 400);
+  }
+
+  const weather = await fetchWeather(env, geo.lat, geo.lon, startTimeUtc);
+  // Lightweight venue object matching just enough of MLB/NFL's shape for scoreNflGame (reused
+  // UNMODIFIED, see the NCAAF module plan) and the frontend's renderStatPairs/ensureMap -- ESPN's
+  // own "indoor" boolean has no retractable-roof concept (ESPN doesn't distinguish, unlike NFL's
+  // static roofType), so this only ever produces "dome" or "open", never "retractable".
+  const venue = { venue: venueName, roofType: indoor ? "dome" : "open", lat: geo.lat, lon: geo.lon };
+  const score = scoreNflGame(weather, venue);
+
+  if (preview) return json({ sport: "ncaaf", venue, weather, score, insight: null });
+
+  const insight = await narrate(env, "ncaaf", score, weather, venue, null, null, null, null, null);
+  return json({ sport: "ncaaf", venue, weather, score, insight: insight.text });
+}
+
 // ---- Weather ----
 
 const NWS_HEADERS = { "User-Agent": "GiddyUpSports-Weather/1.0 (weather.giddyupsports contact: jvilla10214@gmail.com)" };
@@ -1066,10 +1134,14 @@ async function narrate(env, sport, score, weather, venue, parkFactor, umpire, ru
     // shown as their own dedicated badges elsewhere in the view (umpireNoteEl, runEnvNoteEl, the
     // Park Factor stat-pair), so this text's only job is the weather/carry read itself, as briefly
     // as possible, not a full recap of everything already visible on screen.
+    // NCAAF reuses the NFL prompt verbatim (same scoreNflGame output shape -- windTier/
+    // passingImpact/fgRangeImpact -- see Stage 2 plan in memory), just swapping the sport label so
+    // the model isn't told it's analyzing an NFL game when it's actually college football.
+    const footballLabel = sport === "ncaaf" ? "college football" : "NFL";
     const prompt =
       sport === "mlb"
         ? `You are a concise baseball weather analyst. Venue: ${venueLabel}. These are ${conditionsLabel}: ${weather.tempF}F, ${weather.humidityPct}% humidity. ${mlbWindLine} Overall lean: ${score.scoringLean}.${handedNote}${parkFactorNote} In ONE short sentence (max 25 words), state what this means for hitters and scoring today. Describe these as ${conditionsLabel}, not as something else. No disclaimers, no hedging filler, no restating the numbers above.`
-        : `You are a concise NFL weather analyst. Venue: ${venueLabel}. These are ${conditionsLabel}: ${weather.tempF}F, wind at ${weather.windSpeedMph}mph, precip chance ${weather.precipProbPct}%. Rules-engine read: wind tier ${score.windTier}, passing impact "${score.passingImpact}", field-goal range impact "${score.fgRangeImpact}". Do NOT state a compass direction or cardinal letter for the wind — none is reliably known, so only describe speed/tier and its effect. Describe these as ${conditionsLabel}, not as something else. In ONE short sentence (max 25 words), state what this means for the passing game and kicking today. No disclaimers, no hedging filler.`;
+        : `You are a concise ${footballLabel} weather analyst. Venue: ${venueLabel}. These are ${conditionsLabel}: ${weather.tempF}F, wind at ${weather.windSpeedMph}mph, precip chance ${weather.precipProbPct}%. Rules-engine read: wind tier ${score.windTier}, passing impact "${score.passingImpact}", field-goal range impact "${score.fgRangeImpact}". Do NOT state a compass direction or cardinal letter for the wind — none is reliably known, so only describe speed/tier and its effect. Describe these as ${conditionsLabel}, not as something else. In ONE short sentence (max 25 words), state what this means for the passing game and kicking today. No disclaimers, no hedging filler.`;
     // Deterministic umpire fact, appended after whatever the model wrote -- see the comment above
     // for why this isn't in the prompt. Kept to a single terse clause, not a full sentence or two:
     // umpireNoteEl already shows this umpire's full accuracy/consistency/lean as its own badge, so
@@ -1381,15 +1453,16 @@ export default {
       if (url.pathname === "/api/schedule") {
         const sport = url.searchParams.get("sport");
         if (sport === "mlb") return json(await fetchMlbSchedule(env));
-        if (sport === "nfl") {
-          return json({ error: "NFL schedule is fetched client-side (ESPN blocks Worker IPs) — see index.html and DECISIONS.md" }, 400);
+        if (sport === "nfl" || sport === "ncaaf") {
+          return json({ error: `${sport.toUpperCase()} schedule is fetched client-side (ESPN blocks Worker IPs) — see index.html and DECISIONS.md` }, 400);
         }
-        return json({ error: "sport must be mlb or nfl" }, 400);
+        return json({ error: "sport must be mlb, nfl, or ncaaf" }, 400);
       }
 
       if (url.pathname === "/api/game") {
         const sport = url.searchParams.get("sport");
-        if (sport !== "mlb" && sport !== "nfl") return json({ error: "sport must be mlb or nfl" }, 400);
+        if (sport === "ncaaf") return await handleNcaafGame(env, url.searchParams);
+        if (sport !== "mlb" && sport !== "nfl") return json({ error: "sport must be mlb, nfl, or ncaaf" }, 400);
         return await handleGame(env, sport, url.searchParams);
       }
 

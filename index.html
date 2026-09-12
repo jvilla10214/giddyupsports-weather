@@ -452,6 +452,7 @@
   .game-card .gc-matchup { font-family: var(--font-display); font-weight: 700; font-size: 1.2rem; letter-spacing: 0.01em; }
   .game-card .gc-matchup em { font-style: normal; color: var(--text-faint); font-weight: 400; font-family: var(--font-body); margin: 0 4px; }
   .game-card .gc-weather { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.76rem; color: var(--text-muted); min-height: 1.1em; }
+  .game-card .gc-rank { font-size: 0.74rem; color: var(--text-muted); font-weight: 600; }
   .game-card .gc-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); flex: none; }
   .game-card .gc-dot.good { background: var(--accent-live); }
   .game-card .gc-dot.warn { background: var(--accent-ai); }
@@ -685,7 +686,7 @@
     <div class="sport-toggle" id="sportToggle" role="group" aria-label="Sport">
       <button data-sport="mlb" aria-pressed="false">MLB</button>
       <button data-sport="nfl" aria-pressed="false">NFL</button>
-      <button disabled title="Coming soon">NCAAF</button>
+      <button data-sport="ncaaf" aria-pressed="false">NCAAF</button>
       <button disabled title="Coming soon">Tennis</button>
       <button disabled title="Coming soon">Golf</button>
     </div>
@@ -711,6 +712,12 @@
         <div class="lt-sport">NFL · Football</div>
         <div class="lt-desc">Frozen turf under floodlight — where atmospheric pressure and fourth-quarter pressure read the same on the gauge.</div>
         <div class="lt-status">Live</div>
+      </button>
+      <button class="landing-tile live" data-sport="ncaaf" style="--tile-accent:#8B2E2E; --tile-accent-2:#3E6B8F;">
+        <div class="lt-name">Top 25 Watch</div>
+        <div class="lt-sport">NCAAF · College Football</div>
+        <div class="lt-desc">Saturday's ranked matchups only — AP and Coaches poll teams, with the same wind/passing read as the NFL board.</div>
+        <div class="lt-status">Beta</div>
       </button>
       <div class="landing-tile soon" style="--tile-accent:#A83E30; --tile-accent-2:#5D7268;">
         <div class="lt-name">Links &amp; Lie</div>
@@ -829,7 +836,7 @@
   // structures especially -- SoFi Stadium's roof alone runs ~330m/1,000ft+ long) are real-world
   // larger than MLB parks on average. Values measured live off the largest venue in each sport
   // (Coors Field for MLB, SoFi Stadium for NFL) so every smaller venue also fits with margin.
-  const STADIUM_HALF_EXTENT_M = { mlb: 95, nfl: 190 };
+  const STADIUM_HALF_EXTENT_M = { mlb: 95, nfl: 190, ncaaf: 190 };
 
   const sportToggle = document.getElementById("sportToggle");
   const statusLine = document.getElementById("statusLine");
@@ -1089,13 +1096,83 @@
     });
   }
 
+  // NCAAF ("Top 25 Watch") -- STAGE 1 ONLY (schedule + rankings + filter/tag), no weather/Worker
+  // wiring yet. Same free/CORS-open, client-side-fetch pattern as NFL above (ESPN blocks Worker
+  // IPs). groups=80 restricts the scoreboard to FBS only -- FCS/Div II/III games are a different,
+  // much larger, unranked-by-these-polls universe this feature isn't scoped for.
+  const NCAAF_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard?groups=80&limit=200";
+  const NCAAF_RANKINGS_URL = "https://site.api.espn.com/apis/site/v2/sports/football/college-football/rankings";
+
+  async function fetchNcaafRankedTeamLookup() {
+    const res = await fetch(NCAAF_RANKINGS_URL);
+    if (!res.ok) throw new Error(`ESPN rankings API ${res.status}`);
+    const data = await res.json();
+    // id "1" = AP Top 25, id "2" = AFCA Coaches Poll -- confirmed live, matches this feature's spec.
+    const ap = data.rankings?.find((r) => r.id === "1");
+    const coaches = data.rankings?.find((r) => r.id === "2");
+    const byTeamId = {};
+    for (const r of ap?.ranks || []) byTeamId[r.team.id] = { ...(byTeamId[r.team.id] || {}), ap: r.current };
+    for (const r of coaches?.ranks || []) byTeamId[r.team.id] = { ...(byTeamId[r.team.id] || {}), coaches: r.current };
+    return byTeamId;
+  }
+
+  function ncaafRankTag(rank, label) {
+    if (!rank) return null;
+    const parts = [];
+    if (rank.ap) parts.push(`AP #${rank.ap}`);
+    if (rank.coaches) parts.push(`Coaches #${rank.coaches}`);
+    return `${label}: ${parts.join(", ")}`;
+  }
+
+  async function fetchNcaafScheduleClientSide() {
+    const [schedRes, rankedTeamLookup] = await Promise.all([fetch(NCAAF_SCOREBOARD_URL), fetchNcaafRankedTeamLookup()]);
+    if (!schedRes.ok) throw new Error(`ESPN scoreboard API ${schedRes.status}`);
+    const data = await schedRes.json();
+    const games = [];
+    for (const ev of data.events || []) {
+      const comp = ev.competitions?.[0];
+      const home = comp?.competitors?.find((c) => c.homeAway === "home");
+      const away = comp?.competitors?.find((c) => c.homeAway === "away");
+      const homeRank = rankedTeamLookup[home?.team?.id];
+      const awayRank = rankedTeamLookup[away?.team?.id];
+      if (!homeRank && !awayRank) continue; // keep only games with at least one ranked team, either poll
+      games.push({
+        gameId: ev.id,
+        startTimeUtc: ev.date,
+        away: away?.team?.displayName,
+        home: home?.team?.displayName,
+        awayAbbr: away?.team?.abbreviation || null,
+        homeAbbr: home?.team?.abbreviation || null,
+        venue: comp?.venue?.fullName,
+        venueKey: comp?.venue?.id || null, // ESPN venue id -- NOT a stadiums-dict key like MLB/NFL (see Stage 2 plan), just a stable per-game identifier
+        venueCity: comp?.venue?.address?.city || null,
+        venueState: comp?.venue?.address?.state || null,
+        venueIndoor: comp?.venue?.indoor ?? null,
+        status: ev.status?.type?.description,
+        rankTagAway: ncaafRankTag(awayRank, away?.team?.abbreviation || away?.team?.displayName),
+        rankTagHome: ncaafRankTag(homeRank, home?.team?.abbreviation || home?.team?.displayName),
+      });
+    }
+    // Kickoff time, earliest first -- ESPN's own scoreboard order isn't guaranteed chronological
+    // once filtered down to a subset like this.
+    games.sort((a, b) => new Date(a.startTimeUtc) - new Date(b.startTimeUtc));
+    return games;
+  }
+
   function gameCardHtml(g, i) {
     const d = new Date(g.startTimeUtc);
     const date = d.toLocaleDateString([], { weekday: "short", month: "numeric", day: "numeric" });
     const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    // NCAAF rank tag(s) -- Stage 1 only has this + matchup/time/venue, no weather dot yet (see
+    // loadSchedule's ncaaf branch, which skips loadGridPreviews entirely for this sport for now).
+    const rankLine =
+      g.rankTagAway || g.rankTagHome
+        ? `<div class="gc-rank">${[g.rankTagAway, g.rankTagHome].filter(Boolean).join(" · ")}</div>`
+        : "";
     return `<button class="game-card" data-idx="${i}">
       <div class="gc-time">${date} &middot; ${time}</div>
       <div class="gc-matchup">${g.awayAbbr || g.away}<em>@</em>${g.homeAbbr || g.home}</div>
+      ${rankLine}
       <div class="gc-weather" id="gcw-${i}"><span class="gc-dot"></span>…</div>
     </button>`;
   }
@@ -1115,7 +1192,13 @@
     await Promise.all(
       games.map(async (g, i) => {
         try {
-          const res = await fetch(`${WORKER_BASE}/api/game?sport=${sport}&venueKey=${g.venueKey}&preview=1&startTimeUtc=${encodeURIComponent(g.startTimeUtc)}`);
+          // See showDetail's ncaafParams comment -- NCAAF has no static stadiums-dict, so venue
+          // city/state/indoor/name ride along from the client's own ESPN-sourced schedule.
+          const ncaafParams =
+            sport === "ncaaf"
+              ? `&city=${encodeURIComponent(g.venueCity || "")}&state=${encodeURIComponent(g.venueState || "")}&indoor=${g.venueIndoor ? "1" : "0"}&venueName=${encodeURIComponent(g.venue || "")}`
+              : "";
+          const res = await fetch(`${WORKER_BASE}/api/game?sport=${sport}&venueKey=${g.venueKey}&preview=1&startTimeUtc=${encodeURIComponent(g.startTimeUtc)}${ncaafParams}`);
           const data = await res.json();
           const el = document.getElementById(`gcw-${i}`);
           if (!el || data.error) return;
@@ -1148,6 +1231,8 @@
       let games;
       if (sport === "nfl") {
         games = await fetchNflScheduleClientSide();
+      } else if (sport === "ncaaf") {
+        games = await fetchNcaafScheduleClientSide();
       } else {
         const res = await fetch(`${WORKER_BASE}/api/schedule?sport=${sport}`);
         const data = await res.json();
@@ -1156,8 +1241,8 @@
       }
       currentGames = games.filter((g) => g.venueKey);
       if (!currentGames.length) {
-        emptyStateText.textContent = "No games on the slate right now.";
-        setStatus("No games on the slate right now.");
+        emptyStateText.textContent = sport === "ncaaf" ? "No ranked teams playing right now." : "No games on the slate right now.";
+        setStatus(sport === "ncaaf" ? "No ranked teams playing right now." : "No games on the slate right now.");
         return;
       }
       gamesGrid.innerHTML = currentGames.map(gameCardHtml).join("");
@@ -1623,14 +1708,22 @@
     windRoseSpeed.textContent = "—";
     windRoseDir.textContent = "mph";
     setStatus("Fetching conditions…");
-    loadAlmanac(sport, game); // fire-and-forget, doesn't block the main view
+    loadAlmanac(sport, game); // fire-and-forget, doesn't block the main view; already a no-op for non-MLB sports
+
     try {
       const gameIdParam = game.gameId ? `&gameId=${encodeURIComponent(game.gameId)}` : "";
       // awayAbbr: needed server-side for NFL's Game Environment Score (team scoring tendency
       // lookup) -- NFL's own schedule is fetched client-side (ESPN blocks Worker IPs, see
       // DECISIONS.md), so the Worker has no other way to know the opponent for a given home venue.
       const awayAbbrParam = game.awayAbbr ? `&awayAbbr=${encodeURIComponent(game.awayAbbr)}` : "";
-      const res = await fetch(`${WORKER_BASE}/api/game?sport=${sport}&venueKey=${game.venueKey}&startTimeUtc=${encodeURIComponent(game.startTimeUtc)}${gameIdParam}${awayAbbrParam}`);
+      // NCAAF has no static stadiums-dict (unlike MLB/NFL) -- venue city/state/indoor/name come
+      // from the client's own ESPN-sourced schedule (see fetchNcaafScheduleClientSide) and are
+      // passed through so the Worker can geocode+score without a lookup table (see Stage 2 plan).
+      const ncaafParams =
+        sport === "ncaaf"
+          ? `&city=${encodeURIComponent(game.venueCity || "")}&state=${encodeURIComponent(game.venueState || "")}&indoor=${game.venueIndoor ? "1" : "0"}&venueName=${encodeURIComponent(game.venue || "")}`
+          : "";
+      const res = await fetch(`${WORKER_BASE}/api/game?sport=${sport}&venueKey=${game.venueKey}&startTimeUtc=${encodeURIComponent(game.startTimeUtc)}${gameIdParam}${awayAbbrParam}${ncaafParams}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       ensureMap(data.venue.lat, data.venue.lon, STADIUM_HALF_EXTENT_M[sport]);
