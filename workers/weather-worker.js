@@ -40,7 +40,7 @@
  */
 
 import { MLB_STADIUMS, NFL_STADIUMS, MLB_TEAM_ID_TO_KEY, MLB_KEY_TO_TEAM_ID } from "../data/stadiums.js";
-import { scoreMlbGame, scoreNflGame, windCompassOrVariable, computeRunEnvironmentScore, MIN_PITCHER_IP, computeTotalRunsCall, computeGameEnvironmentScore, MIN_TEAM_GAMES_FOR_TENDENCY } from "./rules-engine.js";
+import { scoreMlbGame, scoreNflGame, windCompassOrVariable, computeRunEnvironmentScore, MIN_PITCHER_IP, MIN_PITCHER_BATTED_BALLS, computeTotalRunsCall, computeGameEnvironmentScore, MIN_TEAM_GAMES_FOR_TENDENCY } from "./rules-engine.js";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -415,6 +415,42 @@ async function fetchPitcherHrTendency(env, pitcherId) {
   });
 }
 
+// Real Statcast quality-of-contact (hard-hit rate allowed), added 2026-09-12 as a 6th Run
+// Environment Score signal alongside pitcherHr9Delta -- see RES_WEIGHTS comment in rules-engine.js
+// for why this is additive, not a replacement. Baseball Savant's Statcast leaderboard CSV export
+// (confirmed working live via &csv=true, unlike the park-factors leaderboard above which needs the
+// HTML-embedded-array scrape instead) already gives EVERY pitcher's own season-to-date hard-hit
+// rate pre-aggregated (ev95plus/attempts) in one bulk fetch -- unlike the backtest script (which
+// needed pitch-level batted-ball dates to reconstruct a point-in-time rate for PAST games), a live
+// request today needs no per-pitcher fetch or point-in-time reconstruction at all: "this season so
+// far" already IS point-in-time for a request happening today, same reasoning as
+// fetchPitcherHrTendency/fetchLeagueHrRate above. Cached a full day, same as those.
+async function fetchLeagueHardHitRate(env) {
+  const year = new Date().getUTCFullYear();
+  return cached(env, `league-hardhit:${year}`, 24 * 60 * 60, async () => {
+    const url = `https://baseballsavant.mlb.com/leaderboard/statcast?type=pitcher&year=${year}&position=&team=&min=1&sort=xba&sortDir=desc&csv=true`;
+    const res = await fetch(url, { headers: { "User-Agent": "GiddyUpSports-Weather/1.0 (contact: jvilla10214@gmail.com)" } });
+    if (!res.ok) throw new Error(`Baseball Savant Statcast leaderboard ${res.status}`);
+    const text = await res.text();
+    const lines = text.split("\n").filter(Boolean);
+    const header = parseCsvLine(lines[0].replace(/^﻿/, ""));
+    const idx = Object.fromEntries(header.map((h, i) => [h, i]));
+    const byPitcherId = {};
+    let leagueAttempts = 0;
+    let leagueHardHit = 0;
+    for (let i = 1; i < lines.length; i++) {
+      const cols = parseCsvLine(lines[i]);
+      const attempts = Number(cols[idx.attempts]);
+      const ev95plus = Number(cols[idx.ev95plus]);
+      if (!Number.isFinite(attempts) || !attempts) continue;
+      byPitcherId[cols[idx.player_id]] = { attempts, hardHitRate: Number.isFinite(ev95plus) ? ev95plus / attempts : null };
+      leagueAttempts += attempts;
+      if (Number.isFinite(ev95plus)) leagueHardHit += ev95plus;
+    }
+    return { year, byPitcherId, leagueHardHitRate: leagueAttempts ? leagueHardHit / leagueAttempts : null };
+  });
+}
+
 // NFL schedule is intentionally NOT fetched here. ESPN's scoreboard API (site.api.espn.com) sends
 // Access-Control-Allow-Origin: * (it's fine with real browsers) but returns 403 to every request
 // from a Cloudflare Worker regardless of headers — confirmed by testing identical requests with
@@ -465,6 +501,15 @@ function parseCsvLine(line) {
 
 async function fetchNflTeamScoringTendency(env) {
   const season = currentNflSeason();
+  // VERIFIED 2026-09-12, prompted by the backtest audit that found the BACKTEST's teamScoringDelta
+  // had a look-ahead bug (see NFL_GES_SCALE comment in rules-engine.js): this live fetch was already
+  // correct and needed no change. The loop below only sums games with a non-blank score, and
+  // nflverse's games.csv only populates a score after a game is actually played -- so a request
+  // today naturally only sees real season-to-date results. An NFL team plays at most one game per
+  // week, so "games played so far" and "weeks strictly prior" are the same thing from that team's
+  // own perspective -- nothing for this function to fix, same distinction already found true for
+  // fetchPitcherHrTendency/fetchLeagueHrRate during MLB's equivalent audit.
+  //
   // Cached a few hours, not a full day like MLB's season-long data -- team scoring averages shift
   // meaningfully week to week early in a season (each game is a bigger fraction of the sample),
   // and nflverse updates this file within hours of games finishing.
@@ -1188,6 +1233,22 @@ async function handleGame(env, sport, params) {
           ? qualifyingHr9Deltas.reduce((a, b) => a + b, 0) / qualifyingHr9Deltas.length
           : null;
 
+        // hardHitDelta (see fetchLeagueHardHitRate above and RES_WEIGHTS in rules-engine.js):
+        // wrapped separately from the HR9 fetch above -- a Statcast leaderboard hiccup shouldn't
+        // wipe out an already-succeeded pitcherHr9Delta, since they're independent signals now.
+        let hardHitDelta = null;
+        try {
+          const hardHitRates = await fetchLeagueHardHitRate(env);
+          const qualifyingHardHitRates = [game.homeProbablePitcher, game.awayProbablePitcher]
+            .filter(Boolean)
+            .map((p) => hardHitRates.byPitcherId[String(p.id)])
+            .filter((r) => r && r.attempts >= MIN_PITCHER_BATTED_BALLS && r.hardHitRate != null && hardHitRates.leagueHardHitRate != null)
+            .map((r) => r.hardHitRate - hardHitRates.leagueHardHitRate);
+          hardHitDelta = qualifyingHardHitRates.length ? qualifyingHardHitRates.reduce((a, b) => a + b, 0) / qualifyingHardHitRates.length : null;
+        } catch (err) {
+          hardHitDelta = null;
+        }
+
         // Each lineup's HR rate vs the OPPOSING starter's throwing hand (home lineup faces the away
         // starter, and vice versa), compared to the league-average rate for that same hand.
         const teamHrDeltas = [];
@@ -1213,6 +1274,7 @@ async function handleGame(env, sport, params) {
           umpireLeanRunsPerGame,
           pitcherHr9Delta,
           teamHrRateDelta,
+          hardHitDelta,
         });
       }
     } catch (err) {

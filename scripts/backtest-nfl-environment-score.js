@@ -12,14 +12,26 @@
 // Usage: node scripts/backtest-nfl-environment-score.js [minSeason] [maxSeason]
 //   defaults to 2020-2025 (REG season only; playoffs excluded -- small, unusual sample).
 //
-// KNOWN LIMITATION, same category as MLB's: team scoring tendency uses each team's FULL SEASON
-// scored/allowed average, not stats-as-of-that-week -- mild look-ahead bias, documented and
-// accepted the same way MLB's pitcher/team HR9 signals were.
+// FIXED 2026-09-12: this previously used each team's FULL SEASON scored/allowed average (only
+// leave-one-out, excluding the game being predicted itself) -- the same class of look-ahead bias
+// already found in MLB's pitcherHr9Delta, just not yet corrected here. Now computes a real
+// point-in-time cumulative average (through STRICTLY PRIOR WEEKS of that season only, gated at
+// MIN_TEAM_GAMES_FOR_TENDENCY). Real effect: standalone correlation drops from r=0.181 to r=0.145,
+// full composite r2 vs actual total points from 0.0420 to 0.0305 -- real but more modest than
+// pitcherHr9Delta's near-total collapse. IMPORTANT: production (fetchNflTeamScoringTendency in
+// weather-worker.js) was ALREADY correct -- it only sums games with a non-blank score, and
+// nflverse's games.csv only populates a score after a game is actually played, so a live request
+// today naturally already sees only real season-to-date results (an NFL team plays at most one game
+// per week, so "games played so far" and "weeks strictly prior" are the same thing from that team's
+// own perspective). This was purely a backtest-methodology bug, same distinction already made for
+// MLB's fix. See NFL_GES_SCALE/nflGameEnvironmentTier comments in rules-engine.js for the updated
+// constants this produced.
 
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { MIN_TEAM_GAMES_FOR_TENDENCY } from "../workers/rules-engine.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CACHE_DIR = path.join(__dirname, ".res-cache");
@@ -158,35 +170,57 @@ async function main() {
   });
   console.log(`Loaded ${rows.length} total nflverse rows, ${games.length} completed REG games in ${minSeason}-${maxSeason}.`);
 
-  // Team season scoring stats (full-season aggregate, same "documented mild look-ahead" limitation
-  // as the MLB backtest's pitcher/team HR9 signals) -- points scored/allowed per game.
-  const teamSeasonStats = {}; // `${season}:${team}` -> { scoredSum, allowedSum, games }
+  // League-average total per season -- a centering constant, not itself a per-game predictive
+  // signal, so it's fine to use the season's full real total here (same reasoning as the hard-hit
+  // league baseline in the MLB backtest script).
   const leagueTotalsBySeason = {}; // season -> { sum, games }
   for (const g of games) {
-    const season = g.season;
-    const homeScore = Number(g.home_score);
-    const awayScore = Number(g.away_score);
-    const total = homeScore + awayScore;
+    const total = Number(g.home_score) + Number(g.away_score);
+    leagueTotalsBySeason[g.season] = leagueTotalsBySeason[g.season] || { sum: 0, games: 0 };
+    leagueTotalsBySeason[g.season].sum += total;
+    leagueTotalsBySeason[g.season].games += 1;
+  }
 
+  // Team scoring tendency: TRUE point-in-time, cumulative through STRICTLY PRIOR WEEKS of that
+  // season only -- built incrementally in season/week order below so "prior" is real, not a
+  // future-informed lookup. FIXED 2026-09-12 (see header comment): the old leave-one-out-but-
+  // full-season version still let a week-3 game's tendency reflect weeks 4-18, which hadn't been
+  // played yet at the time that game would actually be predicted.
+  const gamesSorted = games.slice().sort((a, b) => Number(a.season) - Number(b.season) || Number(a.week) - Number(b.week));
+  const teamCumulative = {}; // `${season}:${team}` -> { scoredSum, allowedSum, games } as of games processed so far
+  const teamScoringDeltaByGameId = {};
+  for (const g of gamesSorted) {
+    const season = g.season;
     const homeKey = `${season}:${g.home_team}`;
     const awayKey = `${season}:${g.away_team}`;
-    teamSeasonStats[homeKey] = teamSeasonStats[homeKey] || { scoredSum: 0, allowedSum: 0, games: 0 };
-    teamSeasonStats[homeKey].scoredSum += homeScore;
-    teamSeasonStats[homeKey].allowedSum += awayScore;
-    teamSeasonStats[homeKey].games += 1;
-    teamSeasonStats[awayKey] = teamSeasonStats[awayKey] || { scoredSum: 0, allowedSum: 0, games: 0 };
-    teamSeasonStats[awayKey].scoredSum += awayScore;
-    teamSeasonStats[awayKey].allowedSum += homeScore;
-    teamSeasonStats[awayKey].games += 1;
+    const leagueAvgTotal = leagueTotalsBySeason[season].sum / leagueTotalsBySeason[season].games;
 
-    leagueTotalsBySeason[season] = leagueTotalsBySeason[season] || { sum: 0, games: 0 };
-    leagueTotalsBySeason[season].sum += total;
-    leagueTotalsBySeason[season].games += 1;
+    const homeCum = teamCumulative[homeKey];
+    const awayCum = teamCumulative[awayKey];
+    let teamScoringDelta = null;
+    if (homeCum && awayCum && homeCum.games >= MIN_TEAM_GAMES_FOR_TENDENCY && awayCum.games >= MIN_TEAM_GAMES_FOR_TENDENCY) {
+      const homeInvolvement = (homeCum.scoredSum + homeCum.allowedSum) / homeCum.games;
+      const awayInvolvement = (awayCum.scoredSum + awayCum.allowedSum) / awayCum.games;
+      teamScoringDelta = (homeInvolvement + awayInvolvement) / 2 - leagueAvgTotal;
+    }
+    teamScoringDeltaByGameId[g.game_id] = teamScoringDelta;
+
+    // Update cumulative AFTER computing this game's point-in-time value, so this game itself never
+    // contributes to its own (or an earlier game's) "prior" figure.
+    const homeScore = Number(g.home_score);
+    const awayScore = Number(g.away_score);
+    teamCumulative[homeKey] = teamCumulative[homeKey] || { scoredSum: 0, allowedSum: 0, games: 0 };
+    teamCumulative[homeKey].scoredSum += homeScore;
+    teamCumulative[homeKey].allowedSum += awayScore;
+    teamCumulative[homeKey].games += 1;
+    teamCumulative[awayKey] = teamCumulative[awayKey] || { scoredSum: 0, allowedSum: 0, games: 0 };
+    teamCumulative[awayKey].scoredSum += awayScore;
+    teamCumulative[awayKey].allowedSum += homeScore;
+    teamCumulative[awayKey].games += 1;
   }
 
   const samples = [];
   for (const g of games) {
-    const season = g.season;
     const homeScore = Number(g.home_score);
     const awayScore = Number(g.away_score);
     const actualTotal = homeScore + awayScore;
@@ -194,24 +228,11 @@ async function main() {
     const roofClosed = g.roof === "closed" || g.roof === "dome";
     const windMph = g.wind !== "" ? Number(g.wind) : roofClosed ? 0 : null;
     const tempF = g.temp !== "" ? Number(g.temp) : null; // null (not 0) when missing -- a dome's "no temp effect" is handled by roofClosed gating windMph/temp contributions entirely, not by faking a temp value.
-
-    // Leave-one-out: subtract THIS game's own scored/allowed contribution before averaging, so a
-    // team's computed tendency doesn't partly reflect the very outcome being predicted (a real,
-    // checkable form of look-ahead bias a full-season average would otherwise have -- with ~17
-    // games/season, one game is ~6% of the average, enough to matter for a correlation check).
-    const homeStats = teamSeasonStats[`${season}:${g.home_team}`];
-    const awayStats = teamSeasonStats[`${season}:${g.away_team}`];
-    const leagueAvgTotal = leagueTotalsBySeason[season].sum / leagueTotalsBySeason[season].games;
-    let teamScoringDelta = null;
-    if (homeStats && awayStats && homeStats.games > 1 && awayStats.games > 1) {
-      const homeInvolvement = (homeStats.scoredSum - homeScore + homeStats.allowedSum - awayScore) / (homeStats.games - 1);
-      const awayInvolvement = (awayStats.scoredSum - awayScore + awayStats.allowedSum - homeScore) / (awayStats.games - 1);
-      teamScoringDelta = (homeInvolvement + awayInvolvement) / 2 - leagueAvgTotal;
-    }
+    const teamScoringDelta = teamScoringDeltaByGameId[g.game_id] ?? null;
 
     samples.push({
       gameId: g.game_id,
-      season,
+      season: g.season,
       week: g.week,
       home: g.home_team,
       away: g.away_team,
@@ -273,6 +294,12 @@ async function main() {
   }
   const scored = samples.map((s) => ({ ...s, gameEnvScore: composite(s) }));
   const fit = olsFit(scored.map((s) => s.gameEnvScore), scored.map((s) => s.actualTotal));
+
+  // Tier-threshold percentiles -- reproduces the real numbers nflGameEnvironmentTier's thresholds
+  // in rules-engine.js are calibrated against, so a future re-run can check them the same way.
+  const scoreSorted = scored.map((s) => s.gameEnvScore).filter((v) => v != null).sort((a, b) => a - b);
+  console.log("\n--- Composite score percentiles (nflGameEnvironmentTier's real calibration source) ---");
+  for (const p of [0.1, 0.25, 0.5, 0.75, 0.9]) console.log(`  p${p * 100}: ${percentile(scoreSorted, p).toFixed(3)}`);
   console.log("\n--- Composite Game Environment Score vs actual total points ---");
   console.log(`  OLS fit: impliedTotal = ${fit.intercept.toFixed(3)} + ${fit.slope.toFixed(3)} * gameEnvScore`);
   console.log(`  n=${fit.n}  r=${fit.r.toFixed(4)}  r2=${fit.r2.toFixed(4)}  residStd=${fit.residStd.toFixed(3)}`);

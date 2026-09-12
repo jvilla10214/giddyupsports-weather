@@ -137,7 +137,7 @@ assert(domeIgnoresOverride.roofClosed === true, "A fixed dome must stay closed e
 // teamHrRateDelta's real observed max across the whole sample was only 0.013, so a test value
 // like the old 0.015 would exceed anything the live system could ever actually produce.
 
-// All five signals near their real p90 magnitude, all pointing hitter-friendly -> a genuinely
+// All six signals near their real p90 magnitude, all pointing hitter-friendly -> a genuinely
 // extreme real game (like Coors Field) should actually reach the top tier now, not narrowly miss
 // it the way the pre-recalibration thresholds did.
 const allHitterFriendly = computeRunEnvironmentScore({
@@ -146,11 +146,12 @@ const allHitterFriendly = computeRunEnvironmentScore({
   umpireLeanRunsPerGame: 0.09, // real p90 was 0.093
   pitcherHr9Delta: 0.48, // real p90 was 0.48
   teamHrRateDelta: 0.005, // real p90 was 0.005
+  hardHitDelta: 0.06, // real p90 was 0.062
 });
 console.log("All-hitter-friendly composite:", allHitterFriendly);
 assert(allHitterFriendly.score > 0.6, "Real p90-magnitude signals, all hitter-friendly, should clear the Strong tier");
 assert(allHitterFriendly.tier === "Strong Hitter Environment", "Should land in the Strong Hitter tier");
-assert(allHitterFriendly.inputsUsed.length === 5, "All five inputs should be counted when all five are provided");
+assert(allHitterFriendly.inputsUsed.length === 6, "All six inputs should be counted when all six are provided");
 
 // Mirror-image pitcher-friendly case, same real-magnitude reasoning.
 const allPitcherFriendly = computeRunEnvironmentScore({
@@ -159,6 +160,7 @@ const allPitcherFriendly = computeRunEnvironmentScore({
   umpireLeanRunsPerGame: -0.4, // within the real observed min of -0.584
   pitcherHr9Delta: -0.48,
   teamHrRateDelta: -0.005,
+  hardHitDelta: -0.06,
 });
 console.log("All-pitcher-friendly composite:", allPitcherFriendly);
 assert(allPitcherFriendly.score < -0.6, "Real p90-magnitude signals, all pitcher-friendly, should clear the Strong tier");
@@ -167,20 +169,27 @@ assert(allPitcherFriendly.tier === "Strong Pitcher Environment", "Should land in
 // Missing signals (umpire not yet assigned, pitcher/team fetch failed) must not shrink the score
 // toward 0 just because fewer inputs contributed -- a weighted AVERAGE over only the inputs
 // present, not a weighted sum, so a game with only carryFt+parkFactor known reads on the same
-// scale as one with all five.
-const partialInputs = computeRunEnvironmentScore({ carryFt: 35, parkFactorPct: 7, umpireLeanRunsPerGame: null, pitcherHr9Delta: null, teamHrRateDelta: null });
+// scale as one with all six.
+const partialInputs = computeRunEnvironmentScore({ carryFt: 35, parkFactorPct: 7, umpireLeanRunsPerGame: null, pitcherHr9Delta: null, teamHrRateDelta: null, hardHitDelta: null });
 console.log("Partial-inputs composite (carry + park factor only):", partialInputs);
 assert(partialInputs.inputsUsed.length === 2, "Only the two provided inputs should be counted");
-assert(partialInputs.score > 0.6, "Two strongly hitter-friendly inputs alone should still score high, not diluted toward 0 by the three missing ones");
+assert(partialInputs.score > 0.6, "Two strongly hitter-friendly inputs alone should still score high, not diluted toward 0 by the four missing ones");
 
 // Every input missing -> nothing to score, not a fabricated 0/neutral.
-assert(computeRunEnvironmentScore({ carryFt: null, parkFactorPct: null, umpireLeanRunsPerGame: null, pitcherHr9Delta: null, teamHrRateDelta: null }) === null, "All inputs missing should return null, not a fake neutral score");
+assert(computeRunEnvironmentScore({ carryFt: null, parkFactorPct: null, umpireLeanRunsPerGame: null, pitcherHr9Delta: null, teamHrRateDelta: null, hardHitDelta: null }) === null, "All inputs missing should return null, not a fake neutral score");
 
 // Genuinely mixed signals, each at a real p75-ish magnitude but pointing in different directions,
 // should land in the Neutral band, not get pulled hard either direction.
-const mixed = computeRunEnvironmentScore({ carryFt: 19, parkFactorPct: -6, umpireLeanRunsPerGame: 0, pitcherHr9Delta: -0.35, teamHrRateDelta: 0.003 });
+const mixed = computeRunEnvironmentScore({ carryFt: 19, parkFactorPct: -6, umpireLeanRunsPerGame: 0, pitcherHr9Delta: -0.35, teamHrRateDelta: 0.003, hardHitDelta: 0.02 });
 console.log("Mixed-signal composite:", mixed);
 assert(mixed.tier === "Neutral", "Realistic, genuinely offsetting signals should land in the Neutral tier");
+
+// hardHitDelta specifically: a real, separate signal from pitcherHr9Delta -- pointing them in
+// OPPOSITE directions should partially offset, not double-count as if they were the same thing.
+const hr9VsHardHitOffset = computeRunEnvironmentScore({ carryFt: null, parkFactorPct: null, umpireLeanRunsPerGame: null, pitcherHr9Delta: 0.35, teamHrRateDelta: null, hardHitDelta: -0.043 });
+console.log("pitcherHr9Delta and hardHitDelta pointing opposite ways:", hr9VsHardHitOffset);
+assert(Math.abs(hr9VsHardHitOffset.score) < 0.05, "Equal-magnitude, opposite-signed HR9/hardHit signals should roughly cancel, not reinforce");
+assert(hr9VsHardHitOffset.inputsUsed.length === 2, "Both pitcherHr9 and hardHit should be counted as separate signals");
 
 // ---- Total Runs Call ----
 
@@ -189,7 +198,7 @@ assert(mixed.tier === "Neutral", "Realistic, genuinely offsetting signals should
 const overCall = computeTotalRunsCall(0, 6.5);
 console.log("Total call vs a low market line:", overCall);
 assert(overCall.call === "Likely Over", "A market line well below our implied total should call Likely Over");
-assert(overCall.impliedTotal > 8, "Score 0 should imply a total near the regression's intercept (~8.77)");
+assert(overCall.impliedTotal > 8, "Score 0 should imply a total near the regression's intercept (~8.84)");
 
 // Same score against a very high market line -> Likely Under.
 const underCall = computeTotalRunsCall(0, 11);
@@ -209,19 +218,20 @@ assert(underCall.delta < 0, "A Likely Under call should have a negative delta (i
 
 // ---- Game Environment Score (NFL) ----
 // Test magnitudes grounded in the real 2020-2025 nflverse backtest (scripts/backtest-nfl-environment-score.js):
-// windMph real p90 ~15mph, tempF real p10 ~cold winter game, teamScoringDelta real p90 ~3.8.
+// windMph real p90 ~15mph, tempF real p10/p90 ~35/80F, teamScoringDelta (point-in-time corrected
+// 2026-09-12, see NFL_GES_SCALE comment) real p90 ~6.2.
 
 // Calm + warm + high-scoring teams, all pointing the same way -> should clear the Strong High tier.
-const highScoringNfl = computeGameEnvironmentScore({ windMph: 0, tempF: 85, roofClosed: false, teamScoringDelta: 6 });
+const highScoringNfl = computeGameEnvironmentScore({ windMph: 0, tempF: 85, roofClosed: false, teamScoringDelta: 6.2 });
 console.log("High-scoring NFL environment:", highScoringNfl);
-assert(highScoringNfl.score >= 0.72, "Calm + warm + high-scoring teams should clear the Strong High-Scoring threshold");
+assert(highScoringNfl.score >= 0.62, "Calm + warm + high-scoring teams should clear the Strong High-Scoring threshold");
 assert(highScoringNfl.tier === "Strong High-Scoring Environment", "Should land in the Strong High-Scoring tier");
 assert(highScoringNfl.inputsUsed.length === 3, "All three inputs should be counted when all three are provided");
 
 // High wind + freezing + low-scoring teams -> should clear the Strong Low tier.
-const lowScoringNfl = computeGameEnvironmentScore({ windMph: 20, tempF: 15, roofClosed: false, teamScoringDelta: -3.8 });
+const lowScoringNfl = computeGameEnvironmentScore({ windMph: 20, tempF: 15, roofClosed: false, teamScoringDelta: -6.2 });
 console.log("Low-scoring NFL environment:", lowScoringNfl);
-assert(lowScoringNfl.score <= -0.91, "High wind + freezing + low-scoring teams should clear the Strong Low-Scoring threshold");
+assert(lowScoringNfl.score <= -0.92, "High wind + freezing + low-scoring teams should clear the Strong Low-Scoring threshold");
 assert(lowScoringNfl.tier === "Strong Low-Scoring Environment", "Should land in the Strong Low-Scoring tier");
 
 // A closed roof must gate wind/temp out entirely, same as scoreNflGame's own roofClosed handling --

@@ -45,13 +45,16 @@
 //    per-game fanout (boxscore + starter HR/9 + umpire lookups) practical. Spread evenly across each
 //    team's home schedule (every Nth home date) rather than e.g. the first N games of the season, so
 //    the sample isn't concentrated in one part of the season/weather cycle.
-// 5. Missing signals: not every sampled game will have all 5 inputs (an unassigned/unrecognized
-//    umpire, a starter under MIN_PITCHER_IP, a fetch that 404s). computeRunEnvironmentScore already
+// 5. Missing signals: not every sampled game will have all 6 inputs (an unassigned/unrecognized
+//    umpire, a starter under MIN_PITCHER_IP/MIN_PITCHER_BATTED_BALLS, a fetch that 404s). computeRunEnvironmentScore already
 //    handles partial input sets via its weighted-average design -- this script reports how often
 //    each signal was actually available, since a signal missing on 80% of games is a different kind
 //    of problem than one that's just slightly noisy.
+// 6. hardHitDelta (added 2026-09-12): a real, separate Statcast quality-of-contact signal from
+//    pitcherHr9Delta, not a replacement for it -- see rules-engine.js's RES_WEIGHTS comment for the
+//    investigation that found adding it (not swapping or splitting weight) is what actually helped.
 
-import { scoreMlbGame, computeRunEnvironmentScore, MIN_PITCHER_IP } from "../workers/rules-engine.js";
+import { scoreMlbGame, computeRunEnvironmentScore, MIN_PITCHER_IP, MIN_PITCHER_BATTED_BALLS } from "../workers/rules-engine.js";
 import { MLB_STADIUMS, MLB_TEAM_ID_TO_KEY, MLB_KEY_TO_TEAM_ID } from "../data/stadiums.js";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -135,6 +138,47 @@ async function fetchLeagueHrRate(season) {
   });
 }
 
+// League hard-hit-rate baseline: a centering constant, not itself a per-game predictive signal, so
+// (like the NFL backtest's leagueAvgTotal) it's fine to use the season's real FINAL aggregate rather
+// than needing its own point-in-time reconstruction -- same reasoning production's
+// fetchLeagueHardHitRate in weather-worker.js already relies on for "today," just for a full
+// completed season here instead. One bulk CSV fetch (confirmed working live via &csv=true, unlike
+// the park-factors leaderboard below which needs the HTML-embedded-array scrape instead) covers
+// every pitcher who recorded a batted ball that season.
+async function fetchLeagueHardHitBaseline(season) {
+  return cached(`league-hardhit-${season}`, async () => {
+    const url = `https://baseballsavant.mlb.com/leaderboard/statcast?type=pitcher&year=${season}&position=&team=&min=1&sort=xba&sortDir=desc&csv=true`;
+    const res = await fetch(url, { headers: HEADERS });
+    if (!res.ok) throw new Error(`Baseball Savant Statcast leaderboard ${res.status}`);
+    const text = await res.text();
+    const lines = text.split("\n").filter(Boolean);
+    function parseLine(line) {
+      const out = [];
+      let cur = "", inQ = false;
+      for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if (c === '"') { inQ = !inQ; continue; }
+        if (c === "," && !inQ) { out.push(cur); cur = ""; continue; }
+        cur += c;
+      }
+      out.push(cur);
+      return out;
+    }
+    const header = parseLine(lines[0].replace(/^﻿/, ""));
+    const idx = Object.fromEntries(header.map((h, i) => [h, i]));
+    let leagueAttempts = 0, leagueHardHit = 0;
+    for (let i = 1; i < lines.length; i++) {
+      const cols = parseLine(lines[i]);
+      const attempts = Number(cols[idx.attempts]);
+      const ev95plus = Number(cols[idx.ev95plus]);
+      if (!Number.isFinite(attempts) || !attempts) continue;
+      leagueAttempts += attempts;
+      if (Number.isFinite(ev95plus)) leagueHardHit += ev95plus;
+    }
+    return { leagueHardHitRate: leagueAttempts ? leagueHardHit / leagueAttempts : null, leagueAttempts };
+  });
+}
+
 async function fetchParkFactors(season) {
   return cached(`park-factors-${season}`, async () => {
     const url = `https://baseballsavant.mlb.com/leaderboard/statcast-park-factors?type=distance&year=${season}&batSide=&stat=index_wOBA&condition=All&rolling=`;
@@ -195,6 +239,73 @@ async function fetchPitcherHr9(pitcherId, season, gameDate) {
     inningsPitched: pit?.inningsPitched ?? 0,
     qualifies: pit != null,
   };
+}
+
+// ---- hardHitDelta (Statcast quality-of-contact, added 2026-09-12 as a 6th RES signal) ----
+//
+// Needs real batted-ball-level dates to reconstruct a point-in-time rate for a PAST game, unlike
+// production's fetchLeagueHardHitRate (weather-worker.js) which can just use Savant's own
+// already-aggregated "season to date" leaderboard, since "today" naturally has no future games to
+// leak from. A backtest has no such shortcut -- same reasoning as pitcherHr9's gameLog approach
+// above, just against Baseball Savant instead of the MLB Stats API.
+//
+// Query params reverse-engineered live from the site's own "Download Data as CSV" button (2026-09-12)
+// -- an EARLIER attempt at this exact query silently returned wrong/empty results when combined with
+// several other empty hf* filter params also present in the request; this minimal shape (only the
+// params actually needed) is the one confirmed working against real pitchers who played in-season.
+async function fetchPitcherBattedBalls(pitcherId, season) {
+  return cached(`pitcher-battedballs-${pitcherId}-${season}`, async () => {
+    const url =
+      `https://baseballsavant.mlb.com/statcast_search/csv?hfGT=R%7C&hfSea=${season}%7C&player_type=pitcher` +
+      `&pitchers_lookup%5B%5D=${pitcherId}&hfBBT=ground_ball%7Cline_drive%7Cfly_ball%7Cpopup%7C` +
+      `&min_pitches=0&min_results=0&min_pas=0&sort_col=pitches&sort_order=desc&type=details&all=true&minors=false&wbc=false`;
+    const res = await fetch(url, { headers: HEADERS });
+    if (!res.ok) throw new Error(`Savant CSV ${res.status} for pitcher ${pitcherId}`);
+    const text = await res.text();
+    return parseSavantBattedBallCsv(text);
+  });
+}
+
+// Quote-aware -- REQUIRED, not cosmetic: Savant's own player_name column is literally formatted
+// "Last, First" (comma embedded inside quotes), so a naive line.split(",") silently shifts every
+// later column on every row. Caught live during the original investigation: it produced a league
+// hard-hit rate of 54% (real MLB average is ~35-40%) and a flat-zero barrel/HR rate, both impossible.
+function parseSavantBattedBallCsv(text) {
+  function parseLine(line) {
+    const out = [];
+    let cur = "", inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') { inQ = !inQ; continue; }
+      if (c === "," && !inQ) { out.push(cur); cur = ""; continue; }
+      cur += c;
+    }
+    out.push(cur);
+    return out;
+  }
+  const lines = text.split("\n").filter((l) => l.trim().length);
+  const header = parseLine(lines[0].replace(/^﻿/, ""));
+  const idx = (name) => header.indexOf(name);
+  const iDate = idx("game_date"), iSpeed = idx("launch_speed"), iBbType = idx("bb_type");
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cells = parseLine(lines[i]);
+    if (cells.length < header.length) continue;
+    if (!cells[iDate] || !cells[iBbType]) continue; // only real, dated batted balls
+    rows.push({ date: cells[iDate], launchSpeed: cells[iSpeed] ? Number(cells[iSpeed]) : null });
+  }
+  return rows;
+}
+
+function pointInTimeHardHitRate(battedBalls, beforeDate) {
+  let n = 0, hardHit = 0;
+  for (const b of battedBalls) {
+    if (b.date >= beforeDate) continue; // strictly prior batted balls only
+    n++;
+    if (b.launchSpeed != null && b.launchSpeed >= 95) hardHit++;
+  }
+  if (n < MIN_PITCHER_BATTED_BALLS) return null;
+  return { n, hardHitRate: hardHit / n };
 }
 
 const LEAN_MIN_CAREER_GAMES = 20; // same gate as fetchUmpireCareerLean in weather-worker.js
@@ -292,11 +403,12 @@ function pickEvenlySpaced(arr, n) {
 async function main() {
   console.error(`Run Environment Score backtest -- season ${SEASON}, ~${GAMES_PER_TEAM} home games/team\n`);
 
-  const [leagueRates, parkFactors] = await Promise.all([fetchLeagueHrRate(SEASON), fetchParkFactors(SEASON)]);
+  const [leagueRates, parkFactors, hardHitBaseline] = await Promise.all([fetchLeagueHrRate(SEASON), fetchParkFactors(SEASON), fetchLeagueHardHitBaseline(SEASON)]);
   console.error(`League pitcherHr9: ${leagueRates.pitcherHr9League?.toFixed(3)}, hitting HR-rate vs L/R: ${leagueRates.hittingLeagueByHand.L?.toFixed(4)}/${leagueRates.hittingLeagueByHand.R?.toFixed(4)}`);
+  console.error(`League hard-hit rate: ${hardHitBaseline.leagueHardHitRate?.toFixed(4)} (${hardHitBaseline.leagueAttempts} batted balls)`);
 
   const samples = [];
-  const missing = { carryFt: 0, parkFactorPct: 0, umpireLean: 0, pitcherHr9: 0, teamHrRate: 0 };
+  const missing = { carryFt: 0, parkFactorPct: 0, umpireLean: 0, pitcherHr9: 0, teamHrRate: 0, hardHit: 0 };
   const teamKeys = Object.keys(MLB_STADIUMS);
 
   for (const key of teamKeys) {
@@ -362,6 +474,29 @@ async function main() {
       const hr9s = [awayPitcher, homePitcher].filter((p) => p?.qualifies && p.hr9 != null).map((p) => p.hr9);
       const pitcherHr9Delta = hr9s.length && leagueRates.pitcherHr9League != null ? hr9s.reduce((a, b) => a + b, 0) / hr9s.length - leagueRates.pitcherHr9League : null;
 
+      // hardHitDelta -- separate signal from pitcherHr9Delta above, see rules-engine.js's
+      // RES_WEIGHTS comment. Fetched lazily per starter, same as fetchPitcherHr9 above; the disk
+      // cache means a starter appearing across many sampled games only costs one real fetch.
+      let hardHitDelta = null;
+      if (hardHitBaseline.leagueHardHitRate != null) {
+        try {
+          const [awayBB, homeBB] = await Promise.all([
+            box.awayStarterId ? fetchPitcherBattedBalls(box.awayStarterId, SEASON) : null,
+            box.homeStarterId ? fetchPitcherBattedBalls(box.homeStarterId, SEASON) : null,
+          ]);
+          const rates = [awayBB, homeBB]
+            .filter(Boolean)
+            .map((bb) => pointInTimeHardHitRate(bb, g.date))
+            .filter(Boolean);
+          if (rates.length) {
+            const avgRate = rates.reduce((a, r) => a + r.hardHitRate, 0) / rates.length;
+            hardHitDelta = avgRate - hardHitBaseline.leagueHardHitRate;
+          }
+        } catch {
+          // leave null -- a Savant hiccup for one starter shouldn't break this game's other signals
+        }
+      }
+
       // Team HR-rate-vs-opposing-starter's-hand: home lineup vs away starter's hand, away lineup vs
       // home starter's hand -- each compared to the league average for that same hand split.
       const deltas = [];
@@ -380,7 +515,7 @@ async function main() {
       const actualCombinedRuns = g.awayScore + g.homeScore;
       const actualCombinedHomeRuns = box.awayHomeRuns != null && box.homeHomeRuns != null ? box.awayHomeRuns + box.homeHomeRuns : null;
 
-      const inputs = { carryFt, parkFactorPct, umpireLeanRunsPerGame, pitcherHr9Delta, teamHrRateDelta };
+      const inputs = { carryFt, parkFactorPct, umpireLeanRunsPerGame, pitcherHr9Delta, teamHrRateDelta, hardHitDelta };
       const res = computeRunEnvironmentScore(inputs);
 
       if (carryFt == null) missing.carryFt++;
@@ -388,6 +523,7 @@ async function main() {
       if (umpireLeanRunsPerGame == null) missing.umpireLean++;
       if (pitcherHr9Delta == null) missing.pitcherHr9++;
       if (teamHrRateDelta == null) missing.teamHrRate++;
+      if (hardHitDelta == null) missing.hardHit++;
 
       samples.push({
         venue: key,
@@ -442,6 +578,33 @@ function pearson(xs, ys) {
   return num / Math.sqrt(dx2 * dy2);
 }
 
+function olsFit(xs, ys) {
+  const pairs = xs.map((x, i) => [x, ys[i]]).filter(([x, y]) => x != null && y != null && Number.isFinite(x) && Number.isFinite(y));
+  const n = pairs.length;
+  const mx = mean(pairs.map((p) => p[0]));
+  const my = mean(pairs.map((p) => p[1]));
+  let sxy = 0,
+    sxx = 0,
+    syy = 0;
+  for (const [x, y] of pairs) {
+    const dx = x - mx,
+      dy = y - my;
+    sxy += dx * dy;
+    sxx += dx * dx;
+    syy += dy * dy;
+  }
+  const slope = sxy / sxx;
+  const intercept = my - slope * mx;
+  const r = sxy / Math.sqrt(sxx * syy);
+  let ssRes = 0;
+  for (const [x, y] of pairs) {
+    const resid = y - (intercept + slope * x);
+    ssRes += resid * resid;
+  }
+  const residStd = Math.sqrt(ssRes / (n - 2));
+  return { n, slope, intercept, r, r2: r * r, residStd };
+}
+
 function distLine(label, arr) {
   const clean = arr.filter((v) => v != null && Number.isFinite(v));
   if (!clean.length) {
@@ -466,6 +629,7 @@ function analyze(samples, missing) {
   distLine("umpireLeanRunsPerGame", samples.map((s) => s.umpireLeanRunsPerGame));
   distLine("pitcherHr9Delta", samples.map((s) => s.pitcherHr9Delta));
   distLine("teamHrRateDelta", samples.map((s) => s.teamHrRateDelta));
+  distLine("hardHitDelta", samples.map((s) => s.hardHitDelta));
 
   console.log("\n--- Current composite RES score distribution (existing RES_WEIGHTS/RES_SCALE) ---");
   distLine("resScore", samples.map((s) => s.resScore));
@@ -520,6 +684,16 @@ function analyze(samples, missing) {
   corrLine("umpireLeanRunsPerGame", "umpireLeanRunsPerGame");
   corrLine("pitcherHr9Delta", "pitcherHr9Delta");
   corrLine("teamHrRateDelta", "teamHrRateDelta");
+  corrLine("hardHitDelta", "hardHitDelta");
+
+  // ---- Total Runs Call regression (computeTotalRunsCall's TOTAL_RUNS_REGRESSION in rules-engine.js) ----
+  // Refits impliedTotal = intercept + slope * resScore against actualCombinedRuns -- reproduces the
+  // exact fit that constant is calibrated against, so it can be re-derived (not just correlation-
+  // checked) whenever resScore's own composition changes, same as tier thresholds already are.
+  const withScore = samples.filter((s) => s.resScore != null);
+  const fit = olsFit(withScore.map((s) => s.resScore), withScore.map((s) => s.actualCombinedRuns));
+  console.log("\n--- Total Runs Call regression (impliedTotal = intercept + slope * resScore) ---");
+  console.log(`  n=${fit.n}  intercept=${fit.intercept.toFixed(3)}  slope=${fit.slope.toFixed(3)}  r=${fit.r.toFixed(4)}  r2=${fit.r2.toFixed(4)}  residStd=${fit.residStd.toFixed(3)}`);
 
   console.log("\nDone. Full sample data: scripts/data/run-environment-score-samples.json");
 }

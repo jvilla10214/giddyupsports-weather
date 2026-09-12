@@ -319,12 +319,27 @@ function scoreNflGame(weather, venue) {
 // corrected or even verified -- MLB Stats API's team-splits endpoint doesn't support date-range
 // filtering (confirmed: identical output with/without startDate/endDate), so its own r=0.09/0.19
 // may also be somewhat inflated in ways this app can't currently measure or fix.
+//
+// hardHit was ADDED 2026-09-12, after the user asked specifically whether a real Statcast quality-
+// of-contact metric could make the pitcher-HR-susceptibility signal more accurate. Investigated with
+// the same point-in-time discipline as pitcherHr9's fix above (Baseball Savant batted-ball data,
+// 367 starters, cumulative hard-hit rate -- launch_speed >= 95mph -- through strictly-prior batted
+// balls only, gated at MIN_PITCHER_BATTED_BALLS). Standalone, hardHitDelta's correlation was only
+// marginal (r=0.066/0.022 vs runs/HR, barely above pitcherHr9Delta's own r=0.04/0.02) -- the real
+// test was whether it helps the ACTUAL composite, not just on its own. Checked four ways against the
+// full 2,430-game backtest: REPLACING pitcherHr9Delta with it made the composite worse (r2 vs runs
+// 0.0243 -> 0.0207); splitting the existing weight between both made it worse too (0.0229); but
+// ADDING it as a genuinely separate signal, keeping pitcherHr9Delta untouched, improved it (0.0243 ->
+// 0.0272 vs runs, essentially flat vs HR at 0.0346 -> 0.0344) -- the two signals catch different
+// things rather than duplicating each other, so only "add, don't replace" actually helped. Weighted
+// the same as pitcherHr9Delta (0.4), same weight-class reasoning: a real signal, but not a strong one.
 const RES_WEIGHTS = {
   carry: 1.0,
   parkFactor: 0.8,
   umpireLean: 0.4,
   pitcherHr9: 0.4, // lowered from 0.8 -- see comment above
   teamHrRate: 0.8,
+  hardHit: 0.4, // added 2026-09-12 -- see comment above
 };
 
 const RES_SCALE = {
@@ -333,12 +348,18 @@ const RES_SCALE = {
   umpireLeanRunsPerGame: 0.2, // real p75 was 0.207 -- old value of 0.1 over-amplified this signal
   pitcherHr9Delta: 0.35, // real p75 was 0.36
   teamHrRateDelta: 0.0045, // real p75 was 0.0044 -- old value of 0.015 was ~3x too generous, see above
+  hardHitDelta: 0.043, // real p75-of-|value| across the 2,430-game backtest (p90 was 0.062)
 };
 
 // Gates a starter's HR/9 out of the score entirely below this many innings pitched this season --
 // same small-sample reasoning as MIN_CAREER_GAMES for umpires above; a rookie's first start or two
 // isn't a real rate yet.
 const MIN_PITCHER_IP = 10;
+
+// Same reasoning as MIN_PITCHER_IP, applied to hardHitDelta's batted-ball sample instead of innings
+// pitched -- a starter's first few balls in play aren't a real rate yet. 50 batted balls is roughly
+// half a season's worth for a typical starter, matching the gate used during the original investigation.
+const MIN_PITCHER_BATTED_BALLS = 50;
 
 // Thresholds recalibrated 2026-09-05 from the real p10/p25/p75/p90 of the RECALIBRATED score
 // across the same 450-game backtest (median 0.02, p25 -0.27, p75 0.34, p10 -0.49, p90 0.61) -- same
@@ -353,6 +374,14 @@ const MIN_PITCHER_IP = 10;
 // RES_WEIGHTS comment above): real p10/p25/p75/p90 of the corrected composite across the full
 // 2,430-game backtest are -0.53/-0.30/+0.31/+0.63 -- essentially unchanged from the thresholds
 // below (within 0.03), so left as-is rather than introduce false precision over a shift this small.
+//
+// Re-checked again 2026-09-12 after adding hardHitDelta as a 6th signal (see RES_WEIGHTS comment):
+// real p10/p25/p75/p90 of the new composite across the same 2,430-game backtest are
+// -0.46/-0.25/+0.30/+0.60 -- a larger shift than the 2026-09-06 check (up to 0.06 at p90, vs that
+// check's <0.03), from adding a 6th signal diluting the most extreme composite values slightly, as
+// expected. Still small relative to each tier's 0.3-wide band and doesn't relabel a meaningful
+// volume of real games, so left as-is again rather than chase a moving target every time a signal
+// changes -- but documented honestly here since it's a bigger shift than last time's "unchanged."
 function runEnvironmentTier(score) {
   if (score >= 0.6) return "Strong Hitter Environment";
   if (score >= 0.3) return "Hitter Leaning";
@@ -370,6 +399,9 @@ function runEnvironmentTier(score) {
  *   pitcherHr9Delta: number|null - avg of both starters' HR/9 minus league-average HR/9
  *   teamHrRateDelta: number|null - avg of both lineups' HR-rate-vs-opposing-starter's-hand minus
  *     league average for that same split
+ *   hardHitDelta: number|null - avg of both starters' hard-hit rate allowed (Statcast, launch speed
+ *     >= 95mph) minus league-average hard-hit rate, gated at MIN_PITCHER_BATTED_BALLS -- a separate
+ *     signal from pitcherHr9Delta, not a replacement for it (see RES_WEIGHTS comment)
  * @returns {{score: number, tier: string, inputsUsed: string[]}|null} null only if every input is
  *   missing (nothing to score)
  */
@@ -384,6 +416,7 @@ function computeRunEnvironmentScore(inputs) {
   add("umpireLean", inputs.umpireLeanRunsPerGame, "umpireLeanRunsPerGame");
   add("pitcherHr9", inputs.pitcherHr9Delta, "pitcherHr9Delta");
   add("teamHrRate", inputs.teamHrRateDelta, "teamHrRateDelta");
+  add("hardHit", inputs.hardHitDelta, "hardHitDelta");
 
   if (!contributions.length) return null;
 
@@ -407,20 +440,28 @@ function computeRunEnvironmentScore(inputs) {
 // the full 2,430-game 2025 backtest (scripts/backtest-run-environment-score.js, dataset at
 // scripts/data/run-environment-score-samples.json): impliedTotal = INTERCEPT + SLOPE * resScore.
 //
-// HONEST CAVEAT, worth reading before changing anything below: R-squared for this fit is only
-// 0.032 -- resScore explains roughly 3% of game-to-game variance in actual total runs -- and the
-// residual standard deviation is 4.52 runs, which DWARFS the ~5-run swing the score produces across
-// its entire range (Strong Pitcher's implied ~6.2 to Strong Hitter's implied ~11.4). This is a real,
-// modest, correctly-signed signal (same conclusion as the Run Environment Score's own backtest
-// writeup), not a strong predictor of any single game. TOTAL_CALL_MARGIN below is deliberately
-// wide (not tuned against real historical odds, which this project doesn't have -- RotoGrinders only
-// exposes today's live line, not a historical archive) specifically so the call only fires "Likely
-// Over/Under" on a genuinely large gap between our implied total and the market line, and reads
-// "Toss-up" otherwise -- consistent with the honest, unconfident framing that residual std dev
-// demands. Revisit both the regression and the margin once real historical market-line outcomes can
-// be collected to actually backtest this call's hit rate, the same way every other constant in this
-// file has been.
-const TOTAL_RUNS_REGRESSION = { intercept: 8.765, slope: 1.729 };
+// REFIT 2026-09-12, after adding hardHitDelta as a 6th RES signal (see RES_WEIGHTS comment) --
+// caught along the way: this regression had NEVER been refit after the 2026-09-06 pitcherHr9Delta
+// point-in-time correction either, so it was already two generations stale. The 0.032 R-squared
+// this comment used to cite was the ORIGINAL pre-pitcherHr9-fix number -- the true post-fix,
+// pre-hardHit R2 was actually ~0.020-0.022 (see RES_WEIGHTS comment), never propagated here. This
+// refit reflects BOTH corrections at once against the same full 2,430-game 2025 backtest: real
+// R-squared is now 0.0244 (resScore explains ~2.4% of game-to-game variance in actual total runs,
+// a genuine improvement over the true 0.020-0.022 baseline it was actually starting from, not a
+// regression from the stale 0.032 this comment used to claim) -- and the residual standard
+// deviation is 4.54 runs, barely moved from before and still DWARFING the ~5-run swing the score
+// produces across its entire range (Strong Pitcher's implied ~6.2 to Strong Hitter's implied
+// ~11.4). This remains a real, modest, correctly-signed signal (same conclusion as the Run
+// Environment Score's own backtest writeup), not a strong predictor of any single game.
+// TOTAL_CALL_MARGIN below is deliberately wide (not tuned against real historical odds, which this
+// project doesn't have -- RotoGrinders only exposes today's live line, not a historical archive)
+// specifically so the call only fires "Likely Over/Under" on a genuinely large gap between our
+// implied total and the market line, and reads "Toss-up" otherwise -- consistent with the honest,
+// unconfident framing the residual std dev demands; left unchanged since residStd barely moved.
+// Revisit both the regression and the margin together whenever resScore's composition changes
+// again, and once real historical market-line outcomes can be collected to actually backtest this
+// call's hit rate, the same way every other constant in this file has been.
+const TOTAL_RUNS_REGRESSION = { intercept: 8.844, slope: 1.543 };
 const TOTAL_CALL_MARGIN = 1.0; // runs of gap between implied total and market line before calling a lean at all
 
 /**
@@ -453,11 +494,28 @@ function computeTotalRunsCall(resScore, marketLine) {
 //
 // Weights/scales below are the real ones backtested (not placeholders needing a later revisit,
 // unlike MLB's initial pass) -- each scale is that signal's real p75-of-|value| across the sample.
+//
+// teamScoringDelta's SCALE was corrected 2026-09-12: the original backtest only did leave-one-out
+// (excluded a game's own score from its own team-season average) but still pulled from the team's
+// FULL COMPLETED season, including weeks after the game being predicted -- the same class of
+// look-ahead bias already found and fixed in both NFL's original naive points-per-game signal and
+// MLB's pitcherHr9Delta. Rebuilt with real point-in-time data (cumulative through STRICTLY PRIOR
+// weeks of that season only, gated at MIN_TEAM_GAMES_FOR_TENDENCY): real correlation drops from
+// r=0.181 to r=0.145 standalone (full composite r2 vs actual total points: 0.0420 -> 0.0305) -- a
+// real, if more modest, degradation than pitcherHr9Delta's near-total collapse. IMPORTANT: unlike
+// that MLB bug, production (fetchNflTeamScoringTendency in weather-worker.js) was ALREADY correct --
+// it only sums games with a non-blank score, and nflverse's games.csv only populates a score after
+// a game is actually played, so a live request today naturally already sees only real season-to-date
+// results (and an NFL team plays at most one game per week, so "games played so far" and "weeks
+// strictly prior" are the same thing from that team's own perspective -- nothing to fix there). This
+// was purely a backtest-methodology bug, same distinction already made twice before. Even after the
+// correction, team scoring tendency remains the STRONGEST of the three GES inputs (wind's own r is
+// only -0.089, temp's is 0.082) -- weight left at 1.0, only the scale changed.
 const NFL_GES_WEIGHTS = { wind: 1.0, temp: 0.6, team: 1.0 };
 const NFL_GES_SCALE = {
   windMph: 11, // real p75 across 2020-2025 outdoor/open-roof games
   tempFDeltaFrom60: 25, // real p75 of |tempF - 60|, outdoor/open-roof games only
-  teamScoringDelta: 3.29, // real p75 of |value|, leave-one-out corrected (excludes each game's own score from that team's season average)
+  teamScoringDelta: 4.3, // real p75 of |value|, point-in-time corrected -- was 3.29 -- see comment above
 };
 
 // Gates team scoring tendency out entirely below this many games of season-to-date data -- same
@@ -468,11 +526,17 @@ const MIN_TEAM_GAMES_FOR_TENDENCY = 3;
 // backtest (median -0.25, not 0 -- the wind term can only ever subtract, never add, since wind
 // speed can't be negative, so the whole distribution skews low). Percentile-based, same
 // methodology as MLB's LEAN_HITTER_THRESHOLD/CARRY_LEAN_THRESHOLD_FT, not a symmetric guess.
+//
+// Re-derived 2026-09-12 against the point-in-time-corrected teamScoringDelta (see NFL_GES_SCALE
+// comment above): real p10/p25/p75/p90 of the corrected composite are -0.92/-0.60/+0.13/+0.62 --
+// the upper tail moved more than the lower one (p90 0.72->0.62, p75 0.19->0.13, vs p25/p10 barely
+// moving), consistent with the corrected signal being noisier early in a season. Updated to match,
+// same as MLB's pitcherHr9 recalibration.
 function nflGameEnvironmentTier(score) {
-  if (score >= 0.72) return "Strong High-Scoring Environment";
-  if (score >= 0.19) return "High-Scoring Leaning";
+  if (score >= 0.62) return "Strong High-Scoring Environment";
+  if (score >= 0.13) return "High-Scoring Leaning";
   if (score > -0.6) return "Neutral";
-  if (score > -0.91) return "Low-Scoring Leaning";
+  if (score > -0.92) return "Low-Scoring Leaning";
   return "Strong Low-Scoring Environment";
 }
 
@@ -514,6 +578,7 @@ export {
   windCompassOrVariable,
   computeRunEnvironmentScore,
   MIN_PITCHER_IP,
+  MIN_PITCHER_BATTED_BALLS,
   computeTotalRunsCall,
   computeGameEnvironmentScore,
   MIN_TEAM_GAMES_FOR_TENDENCY,
