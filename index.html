@@ -453,6 +453,7 @@
   .game-card .gc-matchup em { font-style: normal; color: var(--text-faint); font-weight: 400; font-family: var(--font-body); margin: 0 4px; }
   .game-card .gc-weather { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.76rem; color: var(--text-muted); min-height: 1.1em; }
   .game-card .gc-rank { font-size: 0.74rem; color: var(--text-muted); font-weight: 600; }
+  .game-card .gc-pitchers { font-size: 0.74rem; color: var(--text-faint); }
   .game-card .gc-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); flex: none; }
   .game-card .gc-dot.good { background: var(--accent-live); }
   .game-card .gc-dot.warn { background: var(--accent-ai); }
@@ -1169,10 +1170,20 @@
       g.rankTagAway || g.rankTagHome
         ? `<div class="gc-rank">${[g.rankTagAway, g.rankTagHome].filter(Boolean).join(" · ")}</div>`
         : "";
+    // MLB starting pitchers -- this data was already fetched (fetchMlbSchedule hydrates
+    // probablePitcher) and used internally for the Run Environment Score's pitcher signals, but
+    // never actually shown to the user until now. "TBD" per side rather than hiding the row
+    // entirely when a starter isn't announced yet (routine this far out, not an error -- same
+    // "unannounced is normal" treatment the umpire/starter signals already give it server-side).
+    const pitchersLine =
+      currentSport === "mlb"
+        ? `<div class="gc-pitchers">${g.awayProbablePitcher?.name || "TBD"} vs ${g.homeProbablePitcher?.name || "TBD"}</div>`
+        : "";
     return `<button class="game-card" data-idx="${i}">
       <div class="gc-time">${date} &middot; ${time}</div>
       <div class="gc-matchup">${g.awayAbbr || g.away}<em>@</em>${g.homeAbbr || g.home}</div>
       ${rankLine}
+      ${pitchersLine}
       <div class="gc-weather" id="gcw-${i}"><span class="gc-dot"></span>…</div>
     </button>`;
   }
@@ -1735,7 +1746,8 @@
       const forecastNote = data.weather.isForecast
         ? ` · conditions forecast for ${new Date(data.weather.forecastForIso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} (game time)`
         : "";
-      venueMeta.textContent = `${game.away} @ ${game.home} · ${suffix}${forecastNote}`;
+      const pitchersNote = sport === "mlb" ? ` · ${game.awayProbablePitcher?.name || "TBD"} vs ${game.homeProbablePitcher?.name || "TBD"}` : "";
+      venueMeta.textContent = `${game.away} @ ${game.home} · ${suffix}${forecastNote}${pitchersNote}`;
       lastWeather = data.weather;
       renderInstrumentCluster(data.weather, data.score);
       renderStatPairs(sport, data.venue, data.score, data.parkFactor);
