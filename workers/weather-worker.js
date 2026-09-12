@@ -71,14 +71,21 @@ async function cached(env, key, ttlSeconds, fetcher) {
 
 async function fetchMlbSchedule(env) {
   const date = todayIso();
-  return cached(env, `schedule:mlb:${date}`, 15 * 60, async () => {
+  // Cache TTL dropped from 15min to 60s 2026-09-12 when live score/inning data was added below --
+  // pitcher/umpire/venue data barely changes minute to minute, but a score sitting stale for up to
+  // 15 minutes would defeat the point of calling it "live." One extra MLB Stats API call a minute
+  // per active session is a non-issue (no rate limit ever hit on this endpoint elsewhere in this app).
+  return cached(env, `schedule:mlb:${date}`, 60, async () => {
     // hydrate=officials adds each game's umpire crew -- used to pull the home-plate umpire's name
     // for the umpire-tendency feature (see fetchUmpireStats) without a second API call per game.
     // hydrate=probablePitcher adds each side's starter (id/name only -- no handedness or stats;
     // those come from a separate per-pitcher fetch, see fetchPitcherHrTendency) for the Run
     // Environment Score's pitcher-HR-tendency input. Like hpUmpire, this isn't known/published for
     // every game this far out -- probablePitcher is simply absent until MLB has announced it.
-    const url = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&startDate=${date}&endDate=${date}&hydrate=venue,officials,probablePitcher`;
+    // hydrate=linescore adds real-time inning/score detail (added 2026-09-12 for the live-score
+    // badge) -- confirmed live: currentInning/inningState/isTopInning are present and accurate for
+    // in-progress games via this same schedule call, no separate per-game endpoint needed.
+    const url = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&startDate=${date}&endDate=${date}&hydrate=venue,officials,probablePitcher,linescore`;
     const res = await fetch(url, { headers: { "User-Agent": "GiddyUpSports-Weather/1.0" } });
     if (!res.ok) throw new Error(`MLB Stats API ${res.status}`);
     const data = await res.json();
@@ -89,6 +96,11 @@ async function fetchMlbSchedule(env) {
         const hpUmpire = (g.officials || []).find((o) => o.officialType === "Home Plate")?.official?.fullName || null;
         const homeProbablePitcher = g.teams?.home?.probablePitcher ? { id: g.teams.home.probablePitcher.id, name: g.teams.home.probablePitcher.fullName } : null;
         const awayProbablePitcher = g.teams?.away?.probablePitcher ? { id: g.teams.away.probablePitcher.id, name: g.teams.away.probablePitcher.fullName } : null;
+        // abstractGameState is one of "Preview"/"Live"/"Final" -- the reliable field for "has this
+        // game actually started" (detailedState has many more granular values -- "Warmup", "Delayed",
+        // "Manager challenge", etc. -- that all still mean "don't show a score yet" or "still live").
+        const abstractState = g.status?.abstractGameState;
+        const ls = g.linescore || {};
         games.push({
           gameId: String(g.gamePk),
           startTimeUtc: g.gameDate,
@@ -101,6 +113,11 @@ async function fetchMlbSchedule(env) {
           venue: g.venue?.name,
           venueKey,
           status: g.status?.detailedState,
+          abstractState,
+          awayScore: abstractState === "Preview" ? null : (g.teams?.away?.score ?? null),
+          homeScore: abstractState === "Preview" ? null : (g.teams?.home?.score ?? null),
+          inningState: abstractState === "Live" ? ls.inningState || null : null,
+          currentInning: abstractState === "Live" ? ls.currentInning || null : null,
           hpUmpire,
           homeProbablePitcher,
           awayProbablePitcher,

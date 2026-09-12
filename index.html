@@ -454,6 +454,10 @@
   .game-card .gc-weather { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.76rem; color: var(--text-muted); min-height: 1.1em; }
   .game-card .gc-rank { font-size: 0.74rem; color: var(--text-muted); font-weight: 600; }
   .game-card .gc-pitchers { font-size: 0.74rem; color: var(--text-faint); }
+  .game-card .gc-score { font-family: var(--font-mono); font-size: 0.76rem; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 5px; }
+  .game-card .gc-score.final { color: var(--text-muted); font-weight: 600; }
+  .game-card .gc-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-live); flex: none; animation: gcLivePulse 1.6s ease-in-out infinite; }
+  @keyframes gcLivePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
   .game-card .gc-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); flex: none; }
   .game-card .gc-dot.good { background: var(--accent-live); }
   .game-card .gc-dot.warn { background: var(--accent-ai); }
@@ -1083,6 +1087,12 @@
       const comp = ev.competitions?.[0];
       const home = comp?.competitors?.find((c) => c.homeAway === "home");
       const away = comp?.competitors?.find((c) => c.homeAway === "away");
+      // Live score fields (added 2026-09-12, same shape used for NCAAF below): ESPN's own
+      // status.type.state is "pre"/"in"/"post" -- more reliable than the free-text description for
+      // "should a score show at all" (score is literally "0" pre-game, not null/absent, so state is
+      // the real gate). shortDetail is ESPN's own pre-formatted clock+quarter string ("2:00 - 4th",
+      // "Final") -- no need to build quarter/clock formatting by hand the way MLB's inning label was.
+      const state = ev.status?.type?.state;
       return {
         gameId: ev.id,
         startTimeUtc: ev.date,
@@ -1093,6 +1103,10 @@
         venue: comp?.venue?.fullName,
         venueKey: home?.team?.abbreviation || null,
         status: ev.status?.type?.description,
+        gameState: state,
+        awayScore: state !== "pre" ? Number(away?.score) : null,
+        homeScore: state !== "pre" ? Number(home?.score) : null,
+        statusDetail: ev.status?.type?.shortDetail || null,
       };
     });
   }
@@ -1137,6 +1151,8 @@
       const homeRank = rankedTeamLookup[home?.team?.id];
       const awayRank = rankedTeamLookup[away?.team?.id];
       if (!homeRank && !awayRank) continue; // keep only games with at least one ranked team, either poll
+      // Live score fields -- same shape/reasoning as fetchNflScheduleClientSide above.
+      const state = ev.status?.type?.state;
       games.push({
         gameId: ev.id,
         startTimeUtc: ev.date,
@@ -1150,6 +1166,10 @@
         venueState: comp?.venue?.address?.state || null,
         venueIndoor: comp?.venue?.indoor ?? null,
         status: ev.status?.type?.description,
+        gameState: state,
+        awayScore: state !== "pre" ? Number(away?.score) : null,
+        homeScore: state !== "pre" ? Number(home?.score) : null,
+        statusDetail: ev.status?.type?.shortDetail || null,
         rankTagAway: ncaafRankTag(awayRank, away?.team?.abbreviation || away?.team?.displayName),
         rankTagHome: ncaafRankTag(homeRank, home?.team?.abbreviation || home?.team?.displayName),
       });
@@ -1158,6 +1178,42 @@
     // once filtered down to a subset like this.
     games.sort((a, b) => new Date(a.startTimeUtc) - new Date(b.startTimeUtc));
     return games;
+  }
+
+  // MLB live-score badge (added 2026-09-12): abstractState is the reliable "Preview"/"Live"/"Final"
+  // field (detailedState has many more granular values -- "Warmup", "Delayed", "Manager challenge"
+  // -- that all still mean "don't show a score yet" or "still live"). Ordinal-suffix inning label,
+  // e.g. "Bot 6th" -- MLB's own inningState values are "Top"/"Bottom"/"Middle"/"End".
+  function inningLabel(inningState, currentInning) {
+    if (!currentInning) return "";
+    const stateAbbr = { Top: "Top", Bottom: "Bot", Middle: "Mid", End: "End" }[inningState] || inningState || "";
+    const ord = currentInning === 1 ? "1st" : currentInning === 2 ? "2nd" : currentInning === 3 ? "3rd" : `${currentInning}th`;
+    return `${stateAbbr} ${ord}`;
+  }
+
+  function mlbScoreLine(g) {
+    if (g.abstractState === "Live") {
+      return `<div class="gc-score live"><span class="gc-live-dot"></span>${inningLabel(g.inningState, g.currentInning)} &middot; ${g.awayScore}-${g.homeScore}</div>`;
+    }
+    if (g.abstractState === "Final") {
+      return `<div class="gc-score final">FINAL &middot; ${g.awayScore}-${g.homeScore}</div>`;
+    }
+    return ""; // Preview -- no score yet, the scheduled time above already covers it
+  }
+
+  // NFL/NCAAF live score (added 2026-09-12) -- both fetched client-side from the same ESPN
+  // scoreboard shape (fetchNflScheduleClientSide/fetchNcaafScheduleClientSide), so one shared
+  // renderer covers both. gameState is ESPN's own "pre"/"in"/"post" (the reliable gate -- score is
+  // literally "0" pre-game, not null). statusDetail is ESPN's own pre-formatted clock+quarter
+  // string ("2:00 - 4th", "Final") -- no quarter/clock formatting to build by hand here.
+  function footballScoreLine(g) {
+    if (g.gameState === "in") {
+      return `<div class="gc-score live"><span class="gc-live-dot"></span>${g.statusDetail || "LIVE"} &middot; ${g.awayScore}-${g.homeScore}</div>`;
+    }
+    if (g.gameState === "post") {
+      return `<div class="gc-score final">FINAL &middot; ${g.awayScore}-${g.homeScore}</div>`;
+    }
+    return ""; // pre-game -- no score yet, the scheduled time above already covers it
   }
 
   function gameCardHtml(g, i) {
@@ -1179,11 +1235,13 @@
       currentSport === "mlb"
         ? `<div class="gc-pitchers">${g.awayProbablePitcher?.name || "TBD"} vs ${g.homeProbablePitcher?.name || "TBD"}</div>`
         : "";
+    const scoreLine = currentSport === "mlb" ? mlbScoreLine(g) : currentSport === "nfl" || currentSport === "ncaaf" ? footballScoreLine(g) : "";
     return `<button class="game-card" data-idx="${i}">
       <div class="gc-time">${date} &middot; ${time}</div>
       <div class="gc-matchup">${g.awayAbbr || g.away}<em>@</em>${g.homeAbbr || g.home}</div>
       ${rankLine}
       ${pitchersLine}
+      ${scoreLine}
       <div class="gc-weather" id="gcw-${i}"><span class="gc-dot"></span>…</div>
     </button>`;
   }
@@ -1747,7 +1805,17 @@
         ? ` · conditions forecast for ${new Date(data.weather.forecastForIso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} (game time)`
         : "";
       const pitchersNote = sport === "mlb" ? ` · ${game.awayProbablePitcher?.name || "TBD"} vs ${game.homeProbablePitcher?.name || "TBD"}` : "";
-      venueMeta.textContent = `${game.away} @ ${game.home} · ${suffix}${forecastNote}${pitchersNote}`;
+      const scoreNote =
+        sport === "mlb" && game.abstractState === "Live"
+          ? ` · LIVE ${inningLabel(game.inningState, game.currentInning)}, ${game.awayScore}-${game.homeScore}`
+          : sport === "mlb" && game.abstractState === "Final"
+            ? ` · FINAL ${game.awayScore}-${game.homeScore}`
+            : (sport === "nfl" || sport === "ncaaf") && game.gameState === "in"
+              ? ` · LIVE ${game.statusDetail || ""}, ${game.awayScore}-${game.homeScore}`
+              : (sport === "nfl" || sport === "ncaaf") && game.gameState === "post"
+                ? ` · FINAL ${game.awayScore}-${game.homeScore}`
+                : "";
+      venueMeta.textContent = `${game.away} @ ${game.home} · ${suffix}${forecastNote}${pitchersNote}${scoreNote}`;
       lastWeather = data.weather;
       renderInstrumentCluster(data.weather, data.score);
       renderStatPairs(sport, data.venue, data.score, data.parkFactor);
