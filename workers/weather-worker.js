@@ -63,10 +63,23 @@ function json(data, status = 200) {
 // night games were still being played. Fixed by computing the date in America/New_York specifically
 // (MLB's own home base, and the convention this app's other date-sensitive logic -- getaway days,
 // etc. -- already assumes) rather than the server's UTC clock.
-function todayIso() {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+function dateIsoInEastern(date) {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date);
   const byType = Object.fromEntries(parts.map((p) => [p.type, p.value]));
   return `${byType.year}-${byType.month}-${byType.day}`;
+}
+function todayIso() {
+  return dateIsoInEastern(new Date());
+}
+
+// Calendar-date arithmetic on a plain YYYY-MM-DD string (added 2026-09-12 for the Today/Tomorrow
+// toggle) -- constructs the date at UTC noon specifically so adding/subtracting whole days can
+// never accidentally cross a DST boundary and land on the wrong calendar day (midnight UTC is the
+// case that actually risks it; noon UTC never does, for any real-world timezone offset).
+function addDaysIso(dateIso, days) {
+  const d = new Date(`${dateIso}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
 async function cached(env, key, ttlSeconds, fetcher) {
@@ -79,13 +92,19 @@ async function cached(env, key, ttlSeconds, fetcher) {
 
 // ---- Schedules ----
 
-async function fetchMlbSchedule(env) {
-  const date = todayIso();
+// dateIso defaults to today (America/New_York) but accepts any YYYY-MM-DD -- added 2026-09-12 for
+// the Today/Tomorrow toggle. A future date's games are always "Preview" (nothing to hydrate from
+// linescore yet), so this same query/shape naturally handles both without a separate code path.
+async function fetchMlbSchedule(env, dateIso = todayIso()) {
+  const date = dateIso;
   // Cache TTL dropped from 15min to 60s 2026-09-12 when live score/inning data was added below --
   // pitcher/umpire/venue data barely changes minute to minute, but a score sitting stale for up to
   // 15 minutes would defeat the point of calling it "live." One extra MLB Stats API call a minute
   // per active session is a non-issue (no rate limit ever hit on this endpoint elsewhere in this app).
-  return cached(env, `schedule:mlb:${date}`, 60, async () => {
+  // A future date (tomorrow's toggle) has nothing "live" to go stale, so it gets the old, gentler
+  // 15min TTL instead -- only today's own date needs the aggressive 60s refresh.
+  const ttlSeconds = date === todayIso() ? 60 : 15 * 60;
+  return cached(env, `schedule:mlb:${date}`, ttlSeconds, async () => {
     // hydrate=officials adds each game's umpire crew -- used to pull the home-plate umpire's name
     // for the umpire-tendency feature (see fetchUmpireStats) without a second API call per game.
     // hydrate=probablePitcher adds each side's starter (id/name only -- no handedness or stats;
@@ -1279,6 +1298,12 @@ async function handleGame(env, sport, params) {
   const venue = stadiums[venueKey];
   if (!venue) return json({ error: `Unknown venueKey "${venueKey}" for sport ${sport}` }, 400);
 
+  // The game's own real US game-day date (added 2026-09-12 for the Today/Tomorrow toggle) -- NOT
+  // always today's date. Every fetchMlbSchedule call below needs this, not the server's "today," so
+  // a tomorrow-toggle game's umpire/pitcher/RES lookups actually find their game in tomorrow's
+  // schedule instead of silently missing it in today's.
+  const mlbScheduleDate = sport === "mlb" && startTimeUtc ? dateIsoInEastern(new Date(startTimeUtc)) : todayIso();
+
   const weather = await fetchWeather(env, venue.lat, venue.lon, startTimeUtc);
 
   // Real roof status (see fetchGameRoofStatus): only fetched for the non-preview detail view of a
@@ -1320,7 +1345,7 @@ async function handleGame(env, sport, params) {
   let umpire = null;
   if (sport === "mlb" && gameId) {
     try {
-      const schedule = await fetchMlbSchedule(env);
+      const schedule = await fetchMlbSchedule(env, mlbScheduleDate);
       const game = schedule.games.find((g) => g.gameId === gameId);
       if (game?.hpUmpire) {
         const stats = await fetchUmpireStats(env);
@@ -1354,7 +1379,7 @@ async function handleGame(env, sport, params) {
   let pitcherAdjustedEra = null; // { home, away } -- see computeConditionsAdjustedEra in rules-engine.js
   if (sport === "mlb" && gameId) {
     try {
-      const schedule = await fetchMlbSchedule(env);
+      const schedule = await fetchMlbSchedule(env, mlbScheduleDate);
       const game = schedule.games.find((g) => g.gameId === gameId);
       if (game) {
         const leagueRates = await fetchLeagueHrRate(env);
@@ -1548,7 +1573,25 @@ export default {
     try {
       if (url.pathname === "/api/schedule") {
         const sport = url.searchParams.get("sport");
-        if (sport === "mlb") return json(await fetchMlbSchedule(env));
+        if (sport === "mlb") {
+          // Today/Tomorrow toggle (added 2026-09-12): the CLIENT only ever sends a small integer
+          // dayOffset (0=today, 1=tomorrow), never a raw date -- the actual calendar date is always
+          // computed HERE, server-side, from todayIso() (America/New_York), so the browser's own
+          // clock/timezone can never disagree with what "today" means for MLB's schedule. An
+          // explicit ?date=YYYY-MM-DD is still accepted too (validated against exactly that shape),
+          // for direct testing/linking; dayOffset takes priority when both are somehow present.
+          const dayOffsetParam = url.searchParams.get("dayOffset");
+          const requestedDate = url.searchParams.get("date");
+          let dateIso;
+          if (dayOffsetParam != null && /^-?\d+$/.test(dayOffsetParam)) {
+            dateIso = addDaysIso(todayIso(), Number(dayOffsetParam));
+          } else if (requestedDate && /^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) {
+            dateIso = requestedDate;
+          } else {
+            dateIso = todayIso();
+          }
+          return json(await fetchMlbSchedule(env, dateIso));
+        }
         if (sport === "nfl" || sport === "ncaaf") {
           return json({ error: `${sport.toUpperCase()} schedule is fetched client-side (ESPN blocks Worker IPs) — see index.html and DECISIONS.md` }, 400);
         }

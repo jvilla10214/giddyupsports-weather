@@ -365,6 +365,32 @@
   .sport-toggle button:disabled { color: var(--text-faint); cursor: default; opacity: 0.5; }
   .sport-toggle button:not(:disabled):not([aria-pressed="true"]):hover { color: var(--text); }
 
+  /* Today/Tomorrow toggle (MLB only, added 2026-09-12) -- same visual language as .sport-toggle
+     above, just smaller and left-aligned above the game grid rather than in the masthead. */
+  .day-toggle {
+    display: inline-flex;
+    background: var(--bg-elevated);
+    border: 1px solid var(--line);
+    border-radius: 100px;
+    padding: 3px;
+    gap: 2px;
+    margin-bottom: 10px;
+  }
+  .day-toggle button {
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 0.76rem;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    padding: 6px 14px;
+    border-radius: 100px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .day-toggle button[aria-pressed="true"] { background: var(--accent-live-dim); color: var(--accent-live); }
+  .day-toggle button:not([aria-pressed="true"]):hover { color: var(--text); }
+
   /* ---------- Theme toggle: explicit override for the system-preference-only dark/light split ----------
      Before this the site only ever reacted to prefers-color-scheme with no way to override it --
      someone on a light-system machine who wanted the (very deliberately designed) dark identity had
@@ -739,6 +765,11 @@
     </div>
   </div>
 
+  <div id="dayToggle" class="day-toggle" style="display:none;" role="group" aria-label="Day">
+    <button data-day="0" aria-pressed="true">Today</button>
+    <button data-day="1" aria-pressed="false">Tomorrow</button>
+  </div>
+
   <div id="emptyState" class="empty-state" style="display:none;">
     <div class="icon-ring">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
@@ -881,6 +912,8 @@
   let map, marker;
   let currentGames = [];
   let currentSport = null; // null until a sport is picked from the landing page
+  let currentDayOffset = 0; // Today/Tomorrow toggle (MLB only) -- 0=today, 1=tomorrow
+  const dayToggle = document.getElementById("dayToggle");
   let lastWeather = null; // most recently rendered game's weather, for theme-change canvas redraws
 
   function setStatus(msg) { statusLine.textContent = msg || ""; }
@@ -1288,15 +1321,25 @@
     );
   }
 
-  async function loadSchedule(sport) {
+  async function loadSchedule(sport, dayOffset = 0) {
     currentSport = sport;
+    currentDayOffset = sport === "mlb" ? dayOffset : 0; // toggle only exists for MLB -- always reset for other sports
     document.documentElement.dataset.sport = sport;
     landingView.style.display = "none";
     sportToggle.querySelectorAll("button[data-sport]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.sport === sport)));
     gameView.style.display = "none";
     gamesGrid.style.display = "none";
+    // Today/Tomorrow toggle (added 2026-09-12) -- MLB only, since NFL/NCAAF are weekly slates, not
+    // daily ones, so "tomorrow" isn't a meaningful distinction for them the way it is for MLB.
+    if (sport === "mlb") {
+      dayToggle.style.display = "inline-flex";
+      dayToggle.querySelectorAll("button[data-day]").forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.day) === currentDayOffset)));
+    } else {
+      dayToggle.style.display = "none";
+    }
+    const dayLabel = currentDayOffset === 1 ? "tomorrow's" : "today's";
     emptyState.style.display = "flex";
-    emptyStateText.textContent = `Loading today's ${sport.toUpperCase()} slate…`;
+    emptyStateText.textContent = `Loading ${dayLabel} ${sport.toUpperCase()} slate…`;
     setStatus(`Fetching ${sport.toUpperCase()} schedule…`);
     try {
       let games;
@@ -1305,15 +1348,18 @@
       } else if (sport === "ncaaf") {
         games = await fetchNcaafScheduleClientSide();
       } else {
-        const res = await fetch(`${WORKER_BASE}/api/schedule?sport=${sport}`);
+        // dayOffset, not a client-computed date -- the Worker computes the actual calendar date
+        // itself (America/New_York), so the browser's own clock/timezone can never disagree with
+        // what "today" or "tomorrow" means for MLB's schedule (see todayIso()'s own fix history).
+        const res = await fetch(`${WORKER_BASE}/api/schedule?sport=${sport}&dayOffset=${currentDayOffset}`);
         const data = await res.json();
         if (data.error) throw new Error(data.error);
         games = data.games || [];
       }
       currentGames = games.filter((g) => g.venueKey);
       if (!currentGames.length) {
-        emptyStateText.textContent = sport === "ncaaf" ? "No ranked teams playing right now." : "No games on the slate right now.";
-        setStatus(sport === "ncaaf" ? "No ranked teams playing right now." : "No games on the slate right now.");
+        emptyStateText.textContent = sport === "ncaaf" ? "No ranked teams playing right now." : `No games on ${dayLabel} slate.`;
+        setStatus(sport === "ncaaf" ? "No ranked teams playing right now." : `No games on ${dayLabel} slate.`);
         return;
       }
       gamesGrid.innerHTML = currentGames.map(gameCardHtml).join("");
@@ -1786,6 +1832,7 @@
   async function showDetail(sport, game) {
     emptyState.style.display = "none";
     gamesGrid.style.display = "none";
+    dayToggle.style.display = "none"; // no "Today/Tomorrow" floating above a single game's detail view
     gameView.style.display = "flex";
     renderGameStrip(currentGames.indexOf(game));
     venueTag.textContent = `${game.venue || "Venue"}…`;
@@ -1875,6 +1922,12 @@
     loadSchedule(btn.dataset.sport);
   });
 
+  dayToggle.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-day]");
+    if (!btn || btn.getAttribute("aria-pressed") === "true") return;
+    loadSchedule(currentSport, Number(btn.dataset.day));
+  });
+
   landingView.addEventListener("click", (e) => {
     const btn = e.target.closest(".landing-tile.live");
     if (!btn) return;
@@ -1883,9 +1936,11 @@
 
   brandLogo.addEventListener("click", () => {
     currentSport = null;
+    currentDayOffset = 0;
     gameView.style.display = "none";
     gamesGrid.style.display = "none";
     emptyState.style.display = "none";
+    dayToggle.style.display = "none";
     sportToggle.querySelectorAll("button[data-sport]").forEach((b) => b.setAttribute("aria-pressed", "false"));
     landingView.style.display = "flex";
     setStatus("");
@@ -1930,6 +1985,7 @@
   backBtn.addEventListener("click", () => {
     gameView.style.display = "none";
     gamesGrid.style.display = "grid";
+    if (currentSport === "mlb") dayToggle.style.display = "inline-flex";
   });
 
   // No auto-load on start -- the landing page (shown by default in the HTML) is the front door;
