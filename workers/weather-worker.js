@@ -40,7 +40,7 @@
  */
 
 import { MLB_STADIUMS, NFL_STADIUMS, MLB_TEAM_ID_TO_KEY, MLB_KEY_TO_TEAM_ID } from "../data/stadiums.js";
-import { scoreMlbGame, scoreNflGame, windCompassOrVariable, computeRunEnvironmentScore, MIN_PITCHER_IP, MIN_PITCHER_BATTED_BALLS, computeTotalRunsCall, computeGameEnvironmentScore, MIN_TEAM_GAMES_FOR_TENDENCY } from "./rules-engine.js";
+import { scoreMlbGame, scoreNflGame, windCompassOrVariable, computeRunEnvironmentScore, MIN_PITCHER_IP, MIN_PITCHER_BATTED_BALLS, computeTotalRunsCall, computeConditionsAdjustedEra, computeGameEnvironmentScore, MIN_TEAM_GAMES_FOR_TENDENCY } from "./rules-engine.js";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -456,6 +456,7 @@ async function fetchPitcherHrTendency(env, pitcherId) {
       pitcherId: Number(pitcherId),
       throwsHand: person?.pitchHand?.code || null,
       hr9: stat?.homeRunsPer9 != null ? Number(stat.homeRunsPer9) : null,
+      era: stat?.era != null ? Number(stat.era) : null, // real season ERA -- baseline for computeConditionsAdjustedEra
       inningsPitched: ip,
       qualifies: ip >= MIN_PITCHER_IP,
     };
@@ -1025,7 +1026,7 @@ async function getAlmanacMatch(env, venueKey, venue, todayWeather) {
 
 // ---- AI narration ----
 
-async function narrate(env, sport, score, weather, venue, parkFactor, umpire, runEnvironmentScore, totalRunsCall, gameEnvironmentScore) {
+async function narrate(env, sport, score, weather, venue, parkFactor, umpire, runEnvironmentScore, totalRunsCall, gameEnvironmentScore, pitcherAdjustedEra) {
   const venueLabel = venue.venue;
 
   // Indoor games (fixed dome, or a retractable roof assumed closed) always land on the same
@@ -1071,7 +1072,7 @@ async function narrate(env, sport, score, weather, venue, parkFactor, umpire, ru
   // totalRunsCall's call/marketLine are in the cache key too, same reasoning as runEnvironmentScore's
   // tier just above -- a line can move (or become known for the first time) independent of everything
   // else in this key.
-  const cacheKey = `insight:${sport}:${venueLabel}:${todayIso()}:${Math.round(weather.windSpeedMph)}:${Math.round(weather.tempF)}:${score.windZone || score.windCompass || score.windTier || "na"}:${weather.isForecast ? "f" : "c"}:${umpire?.name || "noump"}:${runEnvironmentScore?.tier || "noenv"}:${totalRunsCall ? `${totalRunsCall.call}-${totalRunsCall.marketLine}` : "nototal"}:${gameEnvironmentScore?.tier || "nogameenv"}`;
+  const cacheKey = `insight:${sport}:${venueLabel}:${todayIso()}:${Math.round(weather.windSpeedMph)}:${Math.round(weather.tempF)}:${score.windZone || score.windCompass || score.windTier || "na"}:${weather.isForecast ? "f" : "c"}:${umpire?.name || "noump"}:${runEnvironmentScore?.tier || "noenv"}:${totalRunsCall ? `${totalRunsCall.call}-${totalRunsCall.marketLine}` : "nototal"}:${gameEnvironmentScore?.tier || "nogameenv"}:${pitcherAdjustedEra ? `${pitcherAdjustedEra.away?.adjusted}-${pitcherAdjustedEra.home?.adjusted}` : "noera"}`;
   return cached(env, cacheKey, 6 * 60 * 60, async () => {
     if (!env.AI) return { text: "AI narration unavailable (no AI binding configured).", cached: false };
     // Gave up trying to prompt-engineer the model into correctly pairing handedness with field
@@ -1228,6 +1229,19 @@ async function narrate(env, sport, score, weather, venue, parkFactor, umpire, ru
       if (sport !== "nfl" || !gameEnvironmentScore) return "";
       return ` Scoring environment: ${gameEnvironmentScore.tier} (${gameEnvironmentScore.inputsUsed.length}/3 signals).`;
     }
+    // Conditions-Adjusted ERA (see computeConditionsAdjustedEra in rules-engine.js): same terse
+    // appended-clause treatment as the others above -- the number itself is a plain deterministic
+    // calculation (never handed to the model to compute or restate), pitcherNoteEl already shows
+    // both starters' real/adjusted ERA as their own badge, so this is just enough for the AI
+    // paragraph to acknowledge it exists without a full restatement of what's already on screen.
+    function pitcherAdjustedEraSentence() {
+      if (sport !== "mlb" || !pitcherAdjustedEra) return "";
+      const parts = [];
+      if (pitcherAdjustedEra.away?.adjusted != null) parts.push(`away starter ~${pitcherAdjustedEra.away.adjusted} ERA`);
+      if (pitcherAdjustedEra.home?.adjusted != null) parts.push(`home starter ~${pitcherAdjustedEra.home.adjusted} ERA`);
+      if (!parts.length) return "";
+      return ` Conditions-adjusted today: ${parts.join(", ")}.`;
+    }
     try {
       // 200 -> 60: a hard length backstop, not just a prompt request -- this model has a documented
       // history of not reliably following wording-only instructions (see the failures above), so a
@@ -1237,7 +1251,7 @@ async function narrate(env, sport, score, weather, venue, parkFactor, umpire, ru
         max_tokens: 60,
       });
       const aiText = result.response?.trim() || "No insight generated.";
-      return { text: aiText + umpireSentence() + runEnvironmentSentence() + totalRunsSentence() + gameEnvironmentSentence(), cached: false };
+      return { text: aiText + umpireSentence() + runEnvironmentSentence() + totalRunsSentence() + gameEnvironmentSentence() + pitcherAdjustedEraSentence(), cached: false };
     } catch (err) {
       return { text: `AI narration failed: ${err.message}`, cached: false };
     }
@@ -1278,7 +1292,7 @@ async function handleGame(env, sport, params) {
   // nobody's opened yet. The rules-engine score above is pure JS, so it's free either way. Same
   // reasoning extends to park factors and umpire tendencies here -- both real, but not worth
   // fetching nine times over for cards nobody's opened.
-  if (preview) return json({ sport, venue, weather, score, insight: null, parkFactor: null, umpire: null, runEnvironmentScore: null, totalRunsCall: null, gameEnvironmentScore: null });
+  if (preview) return json({ sport, venue, weather, score, insight: null, parkFactor: null, umpire: null, runEnvironmentScore: null, totalRunsCall: null, gameEnvironmentScore: null, pitcherAdjustedEra: null });
 
   // Both of these are wrapped individually so a scrape hiccup on either external site degrades to
   // "no data today" for that one field, not a broken game page -- neither is load-bearing for the
@@ -1327,6 +1341,7 @@ async function handleGame(env, sport, params) {
   // NOT YET surfaced in the UI or handed to the AI narration -- this stage only computes and
   // returns the raw score/tier so it can be checked against real games before either of those.
   let runEnvironmentScore = null;
+  let pitcherAdjustedEra = null; // { home, away } -- see computeConditionsAdjustedEra in rules-engine.js
   if (sport === "mlb" && gameId) {
     try {
       const schedule = await fetchMlbSchedule(env);
@@ -1407,9 +1422,21 @@ async function handleGame(env, sport, params) {
           hardHitDelta,
           parkHrIndexDelta,
         });
+
+        // Conditions-Adjusted ERA (see computeConditionsAdjustedEra in rules-engine.js): each
+        // starter's own real ERA scaled by how much more/less scoring today's resScore implies vs a
+        // neutral day. Requires a resScore to adjust by -- null for both sides if the composite
+        // itself couldn't be computed (e.g. a dome game with every other signal also missing).
+        if (runEnvironmentScore) {
+          pitcherAdjustedEra = {
+            home: homePitcher?.era != null ? { real: homePitcher.era, adjusted: computeConditionsAdjustedEra(homePitcher.era, runEnvironmentScore.score) } : null,
+            away: awayPitcher?.era != null ? { real: awayPitcher.era, adjusted: computeConditionsAdjustedEra(awayPitcher.era, runEnvironmentScore.score) } : null,
+          };
+        }
       }
     } catch (err) {
       runEnvironmentScore = null;
+      pitcherAdjustedEra = null;
     }
   }
 
@@ -1466,8 +1493,8 @@ async function handleGame(env, sport, params) {
     }
   }
 
-  const insight = await narrate(env, sport, score, weather, venue, parkFactor, umpire, runEnvironmentScore, totalRunsCall, gameEnvironmentScore);
-  return json({ sport, venue, weather, score, insight: insight.text, parkFactor, umpire, runEnvironmentScore, totalRunsCall, gameEnvironmentScore });
+  const insight = await narrate(env, sport, score, weather, venue, parkFactor, umpire, runEnvironmentScore, totalRunsCall, gameEnvironmentScore, pitcherAdjustedEra);
+  return json({ sport, venue, weather, score, insight: insight.text, parkFactor, umpire, runEnvironmentScore, totalRunsCall, gameEnvironmentScore, pitcherAdjustedEra });
 }
 
 async function handleAlmanac(env, sport, params) {

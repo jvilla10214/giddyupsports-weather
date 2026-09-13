@@ -798,6 +798,7 @@
           <div class="handed-note" id="umpireNote" style="display:none;"></div>
           <div class="handed-note" id="runEnvNote" style="display:none;"></div>
           <div class="handed-note" id="totalCallNote" style="display:none;"></div>
+          <div class="handed-note" id="pitcherNote" style="display:none;"></div>
           <div class="insight-text" id="insightText">Loading AI read…</div>
         </div>
       </div>
@@ -864,6 +865,7 @@
   const handedNoteEl = document.getElementById("handedNote");
   const umpireNoteEl = document.getElementById("umpireNote");
   const runEnvNoteEl = document.getElementById("runEnvNote");
+  const pitcherNoteEl = document.getElementById("pitcherNote");
   const totalCallNoteEl = document.getElementById("totalCallNote");
   const almanacCard = document.getElementById("almanacCard");
   const almanacBody = document.getElementById("almanacBody");
@@ -1517,6 +1519,32 @@
     totalCallNoteEl.style.display = "flex";
   }
 
+  // Starting pitchers: clickable link-through (Baseball Savant's player page -- confirmed live that
+  // the bare MLBAM id alone 301-redirects to the correct full slug, e.g. /savant-player/543037 ->
+  // /savant-player/gerrit-cole-543037, so no separate name-to-slug lookup is needed) plus each
+  // starter's Conditions-Adjusted ERA (see computeConditionsAdjustedEra in rules-engine.js) --
+  // real season ERA shown alongside so the adjustment is always checkable against the real number,
+  // never presented as if it replaced it.
+  function pitcherLinkHtml(pitcher, adjustedEra) {
+    if (!pitcher) return "TBD";
+    const name = pitcher.id
+      ? `<a href="https://baseballsavant.mlb.com/savant-player/${pitcher.id}" target="_blank" rel="noopener">${pitcher.name}</a>`
+      : pitcher.name;
+    const eraTag = adjustedEra?.adjusted != null ? ` <span class="pill-lean neutral" style="margin-left:4px;">Adj ERA ${adjustedEra.adjusted}</span> <span style="color:var(--text-faint); font-size:0.85em;">(season ${adjustedEra.real})</span>` : "";
+    return `${name}${eraTag}`;
+  }
+
+  function renderPitcherNote(game, pitcherAdjustedEra) {
+    if (!game?.awayProbablePitcher && !game?.homeProbablePitcher) {
+      pitcherNoteEl.style.display = "none";
+      return;
+    }
+    pitcherNoteEl.innerHTML =
+      `<span class="hn-dot"></span>` +
+      `${pitcherLinkHtml(game.awayProbablePitcher, pitcherAdjustedEra?.away)} vs ${pitcherLinkHtml(game.homeProbablePitcher, pitcherAdjustedEra?.home)}`;
+    pitcherNoteEl.style.display = "flex";
+  }
+
   // Analog wind-rose: needle rotated to the TOWARD bearing (where the wind is headed, not where
   // it's coming from -- the site-wide convention, see DECISIONS.md), same conversion the wind-flow
   // canvas and score.windCompass already use, so all three always agree with each other.
@@ -1770,6 +1798,7 @@
     umpireNoteEl.style.display = "none";
     runEnvNoteEl.style.display = "none";
     totalCallNoteEl.style.display = "none";
+    pitcherNoteEl.style.display = "none";
     almanacCard.style.display = "none";
     gaugeCluster.innerHTML = "";
     statPairs.innerHTML = "";
@@ -1830,6 +1859,7 @@
         renderRunEnvironmentNote(data.gameEnvironmentScore, "Scoring Environment", 3);
       }
       renderTotalCallNote(data.totalRunsCall);
+      if (sport === "mlb") renderPitcherNote(game, data.pitcherAdjustedEra);
       insightText.textContent = data.insight || "No insight generated.";
       if (window.setWindFlow) window.setWindFlow(data.weather.windFromDeg || 0, data.weather.windSpeedMph || 0);
       setStatus(`Updated ${new Date().toLocaleTimeString()}`);

@@ -1,6 +1,6 @@
 // Quick sanity checks for rules-engine.js against known real-world cases.
 // Run with: node workers/rules-engine.test.js
-import { scoreMlbGame, scoreNflGame, computeRunEnvironmentScore, computeTotalRunsCall, computeGameEnvironmentScore } from "./rules-engine.js";
+import { scoreMlbGame, scoreNflGame, computeRunEnvironmentScore, computeTotalRunsCall, computeConditionsAdjustedEra, computeGameEnvironmentScore } from "./rules-engine.js";
 import { MLB_STADIUMS, NFL_STADIUMS } from "../data/stadiums.js";
 
 function assert(cond, msg) {
@@ -225,6 +225,26 @@ assert(tossUp.call === "Toss-up", "A market line within TOTAL_CALL_MARGIN of our
 // delta should be signed correctly: impliedTotal - marketLine, positive means we lean Over.
 assert(overCall.delta > 0, "A Likely Over call should have a positive delta (implied above market)");
 assert(underCall.delta < 0, "A Likely Under call should have a negative delta (implied below market)");
+
+// ---- Conditions-Adjusted ERA ----
+
+// A neutral (resScore=0) day should leave the pitcher's real ERA unchanged -- no scaling at all.
+assert(computeConditionsAdjustedEra(4.0, 0) === 4.0, "resScore=0 (a neutral day) should not adjust ERA at all");
+
+// A real hitter-friendly score (e.g. Strong Hitter Environment territory) should scale ERA UP --
+// more scoring expected today means a higher expected ERA, not lower.
+const hitterFriendlyAdjustedEra = computeConditionsAdjustedEra(4.0, 0.6);
+console.log("Adjusted ERA in a hitter-friendly environment (base 4.00, resScore 0.6):", hitterFriendlyAdjustedEra);
+assert(hitterFriendlyAdjustedEra > 4.0, "A hitter-friendly resScore should scale ERA up, not down");
+
+// Mirror-image pitcher-friendly case should scale ERA DOWN.
+const pitcherFriendlyAdjustedEra = computeConditionsAdjustedEra(4.0, -0.6);
+console.log("Adjusted ERA in a pitcher-friendly environment (base 4.00, resScore -0.6):", pitcherFriendlyAdjustedEra);
+assert(pitcherFriendlyAdjustedEra < 4.0, "A pitcher-friendly resScore should scale ERA down, not up");
+
+// Missing inputs -> null, not a fabricated number.
+assert(computeConditionsAdjustedEra(null, 0.5) === null, "A missing ERA should return null, not a fake adjustment");
+assert(computeConditionsAdjustedEra(4.0, null) === null, "A missing resScore should return null, not a fake adjustment");
 
 // ---- Game Environment Score (NFL) ----
 // Test magnitudes grounded in the real 2020-2025 nflverse backtest (scripts/backtest-nfl-environment-score.js):

@@ -507,6 +507,37 @@ function computeTotalRunsCall(resScore, marketLine) {
   return { impliedTotal, marketLine, delta, call };
 }
 
+// ---- Conditions-Adjusted ERA ----
+//
+// Requested 2026-09-12: an estimate of a starter's ERA "as adjusted for today's weather, this
+// park, and this specific opponent." Deliberately NOT delegated to the AI model to invent a number
+// -- this file has nine-plus documented cases of that model mishandling numbers it's handed
+// (flipped signs, scrambled values, fabricated claims), so this is a plain deterministic
+// calculation in code, same as every other number in this file; the model's only job, if used at
+// all, is narrating an already-resolved fact (see narrate()'s pitcherAdjustedEraSentence).
+//
+// Deliberately reuses the ALREADY-VALIDATED Run Environment Score / Total Runs Call regression
+// rather than inventing a new, unbacktested formula: TOTAL_RUNS_REGRESSION already gives a real,
+// backtested relationship between resScore and actual expected combined runs for a game (the exact
+// weather + park + opponent-HR-tendency inputs the request asked for -- resScore already folds in
+// carry, park factor(s), and teamHrRateDelta, which is specifically this pitcher's opponent's HR
+// rate vs his throwing hand). Scaling the pitcher's own REAL season ERA by the ratio of today's
+// implied total to a neutral (resScore=0) day's implied total answers "how much more/less scoring
+// should we expect today vs. a typical day," and applies that same multiplier to this specific
+// pitcher's own real rate -- rather than asserting a made-up new "vs this opponent" ERA split,
+// which would need its own real backtest (see the deferred idea's own note on small-sample risk
+// for pitcher-vs-team splits) that hasn't been done.
+//
+// HONEST CAVEAT: this inherits the Total Runs Call's own real, modest R2 (0.0271) -- so, like that
+// feature, this is a real, correctly-signed adjustment, not a strong prediction for any single
+// start. Framed in the UI/narration as an estimate, not a confident forecast.
+function computeConditionsAdjustedEra(era, resScore) {
+  if (era == null || !Number.isFinite(era) || resScore == null || !Number.isFinite(resScore)) return null;
+  const impliedTotal = TOTAL_RUNS_REGRESSION.intercept + TOTAL_RUNS_REGRESSION.slope * resScore;
+  const neutralTotal = TOTAL_RUNS_REGRESSION.intercept; // resScore=0 -- a "typical" day's implied total
+  return Math.round(era * (impliedTotal / neutralTotal) * 100) / 100;
+}
+
 // ---- Game Environment Score (NFL) ----
 //
 // DESCRIPTIVE ONLY -- deliberately NOT a betting call, unlike MLB's Run Environment Score/Total
@@ -611,6 +642,7 @@ export {
   MIN_PITCHER_IP,
   MIN_PITCHER_BATTED_BALLS,
   computeTotalRunsCall,
+  computeConditionsAdjustedEra,
   computeGameEnvironmentScore,
   MIN_TEAM_GAMES_FOR_TENDENCY,
 };
