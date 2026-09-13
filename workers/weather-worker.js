@@ -55,8 +55,18 @@ function json(data, status = 200) {
   });
 }
 
+// Real bug fixed 2026-09-12, caught live: this used to return new Date().toISOString().slice(0,10)
+// -- raw UTC. MLB's own schedule (and RotoGrinders' lines, and every other "today" used throughout
+// this file) is keyed by the US game-day date, not UTC -- and UTC is 4-5 hours AHEAD of every US
+// timezone, so any night game starting after ~8pm ET already reads as tomorrow's UTC calendar date.
+// Real symptom: Sunday's games appeared on the schedule mid-Saturday-night while Saturday's own
+// night games were still being played. Fixed by computing the date in America/New_York specifically
+// (MLB's own home base, and the convention this app's other date-sensitive logic -- getaway days,
+// etc. -- already assumes) rather than the server's UTC clock.
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+  const byType = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+  return `${byType.year}-${byType.month}-${byType.day}`;
 }
 
 async function cached(env, key, ttlSeconds, fetcher) {
