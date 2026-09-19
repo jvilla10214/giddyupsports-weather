@@ -1784,19 +1784,28 @@
     oddsHero.textContent = `O/U ${totalCall.marketLine}`;
   }
 
-  // Suggested Bet (added 2026-09-19): deliberately NOT the same treatment for every sport --
-  // MLB has a real (if modest, R-squared ~0.032, honestly captioned in the detail row above) fitted
-  // signal, so it gets an actual lean. NFL does not: scripts/backtest-nfl-environment-score.js and
-  // the qbChange follow-up (scripts/backtest-nfl-qbchange-composite.js) both tested the real call
-  // logic against real historical odds with an honest train/test split, and neither survived --
-  // Likely Over came back at 46-53% hit rate (at/under the ~52.4% breakeven against standard vig)
-  // and Likely Under was worse (37-51%) in every version tried. Shipping a confident NFL lean here
-  // would mean asserting something concretely disproven by this app's own backtesting, so NFL always
-  // shows the honest "no edge" state instead of fabricating one. NCAAF is different again -- never
-  // backtested at all, so it says that explicitly rather than "no edge" (a check that did happen)
-  // or hiding the slot (which would look like a missing/broken box now that it lives in its own
-  // Bet Box card alongside MLB and NFL's real content).
-  function renderSuggestedBet(sport, totalCall) {
+  // NFL lean (added 2026-09-19): reuses the SAME Game Environment Score tier already shown as its
+  // own badge (computeGameEnvironmentScore in rules-engine.js -- wind/temp/team scoring tendency,
+  // real deterministic composite) rather than inventing a new number. Deliberately labeled "AI Lean"
+  // and captioned, NOT "Likely Over/Under" like MLB's -- scripts/backtest-nfl-environment-score.js
+  // and the qbChange follow-up (scripts/backtest-nfl-qbchange-composite.js) both proved, with an
+  // honest train/test split against real historical odds, that this exact composite does NOT beat
+  // the market (Likely Over 46-53% hit rate, Likely Under 37-51%, both at/under the ~52.4% breakeven
+  // -- see those files). This is a real, honest directional read of live conditions -- it is NOT a
+  // validated betting edge, and the caption says so every time, not just in a code comment.
+  function nflLeanFromTier(tier) {
+    if (tier === "Strong High-Scoring Environment" || tier === "High-Scoring Leaning") return { label: "Lean Over", cls: "good" };
+    if (tier === "Strong Low-Scoring Environment" || tier === "Low-Scoring Leaning") return { label: "Lean Under", cls: "info" };
+    return { label: "Toss-up", cls: "neutral" };
+  }
+
+  // Suggested Bet: deliberately NOT the same treatment for every sport -- MLB has a real (if modest,
+  // R-squared ~0.032, honestly captioned in the detail row above) fitted signal tested against a
+  // real market line, so it gets a genuine call. NFL gets an honest AI-read lean (see above) rather
+  // than a validated call. NCAAF is different again -- never backtested at all, so it says that
+  // explicitly rather than implying a check that didn't happen or hiding the slot outright (which
+  // would look like a missing/broken box now that it lives in its own Bet Box card).
+  function renderSuggestedBet(sport, totalCall, gameEnvironmentScore) {
     if (sport === "mlb") {
       if (!totalCall) {
         suggestedBet.style.display = "none";
@@ -1808,8 +1817,16 @@
         suggestedBet.style.display = "flex";
       }
     } else if (sport === "nfl") {
-      suggestedBet.innerHTML = `<span class="sb-label">Suggested bet</span><span class="sb-none">No confident lean — backtested, no edge found</span>`;
-      suggestedBet.style.display = "flex";
+      if (!gameEnvironmentScore) {
+        suggestedBet.style.display = "none";
+      } else {
+        const lean = nflLeanFromTier(gameEnvironmentScore.tier);
+        suggestedBet.innerHTML =
+          `<span class="sb-label">AI lean</span>` +
+          `<span class="pill-lean ${lean.cls}" style="margin-left:8px; font-size:1em;">${lean.label}</span>` +
+          `<span style="margin-left:8px; color: var(--text-muted); font-size: 0.8em;">directional read, not a proven betting edge — see model notes</span>`;
+        suggestedBet.style.display = "flex";
+      }
     } else {
       suggestedBet.innerHTML = `<span class="sb-label">Suggested bet</span><span class="sb-none">Not yet modeled for this sport</span>`;
       suggestedBet.style.display = "flex";
@@ -2092,12 +2109,10 @@
     // Doesn't depend on the Worker fetch below, so it's set immediately and never waits on (or
     // disappears if) that call fails -- see the odds-hero CSS comment for the :empty collapse.
     oddsHero.textContent = oddsSummaryText(game);
-    // NFL's "no confident lean" is a fixed message that doesn't need the Worker fetch below either
-    // -- set immediately so it doesn't sit blank while conditions load. MLB's real call still has to
-    // wait for data.totalRunsCall, so the call after that fetch resolves (below) is what matters
-    // there; this early call is a harmless no-op for MLB (renderSuggestedBet("mlb", null) hides it,
-    // same as its initial state) and NCAAF (always hidden -- not modeled yet).
-    renderSuggestedBet(sport, null);
+    // Only NCAAF's "not yet modeled" message doesn't need the Worker fetch below -- MLB's real call
+    // needs data.totalRunsCall and NFL's AI lean needs data.gameEnvironmentScore, so both wait for
+    // the real call below (this early call just establishes the correct hidden state until then).
+    renderSuggestedBet(sport, null, null);
     insightText.textContent = "Loading AI read…";
     insightTop.innerHTML = "";
     fieldCarryEl.style.display = "none";
@@ -2173,7 +2188,7 @@
         renderRunEnvironmentNote(data.gameEnvironmentScore, "Scoring Environment", 3);
       }
       renderTotalCallNote(data.totalRunsCall);
-      renderSuggestedBet(sport, data.totalRunsCall);
+      renderSuggestedBet(sport, data.totalRunsCall, data.gameEnvironmentScore);
       if (sport === "mlb") renderPitcherNote(game, data.pitcherAdjustedEra);
       insightText.textContent = data.insight || "No insight generated.";
       if (window.setWindFlow) window.setWindFlow(data.weather.windFromDeg || 0, data.weather.windSpeedMph || 0);
