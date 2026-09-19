@@ -451,7 +451,16 @@
     align-items: center;
     gap: 0.05em;
   }
-  .brand-logo .ball { flex: none; transform: translateY(-0.02em); }
+  .brand-logo .ball { flex: none; transform: translateY(-0.02em); display: none; }
+  /* Sport-reactive brand glyph (design audit, Graphics section): the wordmark's stitched-"O" was
+     always a baseball, even on the NFL/NCAAF views -- swapped per data-sport the same way the
+     color/type theme already is, instead of one glyph standing in for every sport. Landing page and
+     any sport with no theme of its own (Tennis/Golf, not live yet) keep the baseball as the default. */
+  .brand-logo .ball-mlb { display: inline; }
+  html[data-sport="nfl"] .brand-logo .ball-mlb { display: none; }
+  html[data-sport="nfl"] .brand-logo .ball-nfl { display: inline; }
+  html[data-sport="ncaaf"] .brand-logo .ball-mlb { display: none; }
+  html[data-sport="ncaaf"] .brand-logo .ball-ncaaf { display: inline; }
   .brand .kicker {
     font-family: var(--font-mono);
     font-size: 0.65rem;
@@ -512,6 +521,32 @@
   }
   .day-toggle button[aria-pressed="true"] { background: var(--accent-live-dim); color: var(--accent-live); }
   .day-toggle button:not([aria-pressed="true"]):hover { color: var(--text); }
+
+  /* Verdict / Full Breakdown toggle (design audit, Layout section) -- same pill-group language as
+     day-toggle above, own class since it means something different (a view mode, not a date). */
+  .detail-mode-toggle {
+    display: inline-flex;
+    background: var(--bg-elevated);
+    border: 1px solid var(--line);
+    border-radius: 100px;
+    padding: 3px;
+    gap: 2px;
+  }
+  .detail-mode-toggle button {
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 0.8rem;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    padding: 7px 16px;
+    border-radius: 100px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .detail-mode-toggle button[aria-pressed="true"] { background: var(--accent-live-dim); color: var(--accent-live); }
+  .detail-mode-toggle button:not([aria-pressed="true"]):hover { color: var(--text); }
+  .detail-mode-section { display: flex; flex-direction: column; gap: 16px; }
 
   /* ---------- Theme toggle: explicit override for the system-preference-only dark/light split ----------
      Before this the site only ever reacted to prefers-color-scheme with no way to override it --
@@ -598,8 +633,18 @@
     border: 1px solid var(--line);
     display: flex; align-items: center; justify-content: center;
   }
-  .empty-state .icon-ring svg { stroke: var(--accent-atmo); }
   .empty-state p { margin: 0; font-size: 0.95rem; }
+  /* Three distinct icons (design audit, Motion/Feedback section) instead of the same clock glyph
+     for "loading" and "for a genuinely broken fetch" -- data-kind on the container picks which one
+     shows, set alongside emptyStateText everywhere this element's message changes. */
+  .empty-state .es-icon { display: none; }
+  .empty-state[data-kind="loading"] .es-icon-loading,
+  .empty-state[data-kind="empty"] .es-icon-empty,
+  .empty-state[data-kind="error"] .es-icon-error { display: block; }
+  @media (prefers-reduced-motion: no-preference) {
+    .empty-state[data-kind="loading"] #emptyStateNeedle { animation: esNeedleSpin 1.3s linear infinite; transform-origin: 46px 46px; }
+  }
+  @keyframes esNeedleSpin { to { transform: rotate(360deg); } }
 
   /* ---------- Quick-look grid: every game on today's slate, front and center ---------- */
   .games-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
@@ -608,9 +653,14 @@
     background: var(--bg-elevated); border: var(--card-border-width) solid var(--line);
     border-radius: var(--radius-md); padding: 14px 16px; cursor: pointer;
     font: inherit; color: inherit; box-shadow: var(--shadow-soft);
-    transition: transform 0.12s ease, border-color 0.12s ease;
+    transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
   }
-  .game-card:hover { transform: translateY(-2px); border-color: var(--accent-atmo); }
+  /* Hover + press (design audit, Polish section): a grid of 16 near-identical cards gave no
+     confirmation of which one you were about to open, or that a click had registered at all --
+     focus-visible gets the same lift as hover (keyboard users deserve the same cue mouse users
+     get), and :active gives a real press-down instead of nothing happening until the click lands. */
+  .game-card:hover, .game-card:focus-visible { transform: translateY(-2px); border-color: var(--accent-atmo); }
+  .game-card:active { transform: translateY(0) scale(0.98); border-color: var(--accent-atmo); box-shadow: none; }
   .game-card .gc-time {
     font-family: var(--font-mono); font-size: 0.66rem; text-transform: uppercase;
     letter-spacing: 0.06em; color: var(--text-faint);
@@ -659,7 +709,14 @@
   .back-btn:hover { color: var(--text); }
 
   /* ---------- Game strip: jump straight to any other game without leaving the detail view ---------- */
-  .game-strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+  /* Edge fade (design audit, Mobile section): with no scroll affordance at all, a pill sliced off
+     at the container edge read as "the layout broke," not "swipe for more." A soft mask-image fade
+     is the standard "this scrolls" cue everywhere from OS tab strips to Twitter's own row of pills. */
+  .game-strip {
+    display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px;
+    -webkit-mask-image: linear-gradient(to right, transparent, black 16px, black calc(100% - 16px), transparent);
+    mask-image: linear-gradient(to right, transparent, black 16px, black calc(100% - 16px), transparent);
+  }
   .game-strip .gs-pill {
     flex: none; display: flex; align-items: baseline; gap: 6px;
     background: var(--bg-elevated); border: var(--card-border-width) solid var(--line);
@@ -995,10 +1052,21 @@
       <button class="brand-logo" id="brandLogo" type="button" aria-label="All sports">
         <span class="wordmark">
           GiddyUpSp
-          <svg class="ball" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <svg class="ball ball-mlb" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
             <circle cx="12" cy="12" r="9.5" />
             <path d="M6.2 4.2c2.4 4 2.4 11.6 0 15.6" stroke-linecap="round" />
             <path d="M17.8 4.2c-2.4 4-2.4 11.6 0 15.6" stroke-linecap="round" />
+          </svg>
+          <svg class="ball ball-nfl" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <ellipse cx="12" cy="12" rx="9.5" ry="6" />
+            <path d="M4.5 12h15" stroke-linecap="round" stroke-width="1.4" />
+            <path d="M9 10v4M12 9.6v4.8M15 10v4" stroke-linecap="round" stroke-width="1.4" />
+          </svg>
+          <svg class="ball ball-ncaaf" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M4 14.5c0-5.2 3.6-9 8-9s8 3.8 8 9" stroke-linecap="round" />
+            <path d="M4 14.5c0 1.6 1.4 2.5 3 2.5h1.3" stroke-linecap="round" />
+            <path d="M20 14.5c0 1.6-1.4 2.5-3 2.5h-1.3" stroke-linecap="round" />
+            <path d="M12 5.5v11" stroke-linecap="round" stroke-width="1.4" />
           </svg>
           rts
         </span>
@@ -1061,9 +1129,27 @@
     <button data-day="1" aria-pressed="false">Tomorrow</button>
   </div>
 
-  <div id="emptyState" class="empty-state" style="display:none;">
+  <div id="emptyState" class="empty-state" data-kind="loading" style="display:none;">
     <div class="icon-ring">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+      <!-- Loading: a miniature of the detail view's own wind-rose, needle spinning -- reuses this
+           product's real graphic instead of a generic spinner, per the design audit. -->
+      <svg class="es-icon es-icon-loading" width="30" height="30" viewBox="0 0 92 92" fill="none">
+        <circle cx="46" cy="46" r="38" stroke="var(--line)" stroke-width="2" />
+        <g id="emptyStateNeedle">
+          <polygon points="46,11 41,29 51,29" fill="var(--accent-atmo)" />
+          <line x1="46" y1="29" x2="46" y2="60" stroke="var(--accent-atmo)" stroke-width="3" />
+        </g>
+        <circle cx="46" cy="46" r="3.5" fill="var(--accent-atmo)" />
+      </svg>
+      <svg class="es-icon es-icon-empty" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-atmo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M8 12h8" />
+      </svg>
+      <svg class="es-icon es-icon-error" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent-warn)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3.6 21 19.6H3Z" />
+        <path d="M12 9.6v4" />
+        <circle cx="12" cy="16.6" r="0.6" fill="var(--accent-warn)" stroke="none" />
+      </svg>
     </div>
     <p id="emptyStateText">Loading today's slate…</p>
   </div>
@@ -1087,75 +1173,90 @@
       <div class="vh-pitchers" id="vhPitchers" style="display:none;"></div>
     </div>
 
-    <div class="pick-hero" id="pickHero" style="display:none;">
-      <div class="pick-hero-label">Suggested bet</div>
-      <div class="pick-hero-call" id="pickHeroCall"></div>
-      <div class="pick-hero-why" id="pickHeroWhy"></div>
+    <!-- Verdict / Full Breakdown (design audit, Layout section): the detail view grew feature by
+         feature into one long undifferentiated scroll -- Bet Box, Analyst Read, QB Watch, map/wind
+         hero, insight panel, gauges, stat pairs, sparkline, almanac, all at equal visual weight.
+         Split into the two real modes the audit called for: "the pick and why" vs. "the full
+         weather/physics behind it," most visitors wanting one or the other, rarely both in full.
+         venueHeading stays outside either mode -- which game this even is isn't content to hide. -->
+    <div class="detail-mode-toggle" id="detailModeToggle" role="group" aria-label="View">
+      <button data-mode="verdict" aria-pressed="true">Verdict</button>
+      <button data-mode="breakdown" aria-pressed="false">Full Breakdown</button>
     </div>
 
-    <div class="bet-box" id="betBox">
-      <div class="bet-box-label">Market line</div>
-      <div class="odds-hero" id="oddsHero"></div>
-    </div>
-
-    <div class="analyst-read" id="analystRead" style="display:none;"></div>
-
-    <div class="hero" id="heroCard">
-      <div id="map"></div>
-      <canvas id="windFlowCanvas" class="wind-flow-canvas"></canvas>
-      <div class="wind-rose" id="windRose">
-        <svg viewBox="0 0 92 92">
-          <circle cx="46" cy="46" r="41" fill="none" stroke="var(--line)" stroke-width="1"/>
-          <circle cx="46" cy="46" r="29" fill="none" stroke="var(--line)" stroke-width="1" stroke-dasharray="1 4"/>
-          <g stroke="var(--line-strong)" stroke-width="1">
-            <line x1="46" y1="5" x2="46" y2="11"/>
-            <line x1="46" y1="81" x2="46" y2="87"/>
-            <line x1="5" y1="46" x2="11" y2="46"/>
-            <line x1="81" y1="46" x2="87" y2="46"/>
-          </g>
-          <text x="46" y="17" text-anchor="middle" font-family="IBM Plex Mono" font-size="7" fill="var(--text-faint)">N</text>
-          <text x="46" y="79" text-anchor="middle" font-family="IBM Plex Mono" font-size="7" fill="var(--text-faint)">S</text>
-          <text x="15" y="49" text-anchor="middle" font-family="IBM Plex Mono" font-size="7" fill="var(--text-faint)">W</text>
-          <text x="77" y="49" text-anchor="middle" font-family="IBM Plex Mono" font-size="7" fill="var(--text-faint)">E</text>
-          <g id="windNeedle" transform="rotate(0 46 46)">
-            <polygon points="46,14 42,29 50,29" fill="var(--accent-atmo)"/>
-            <line x1="46" y1="29" x2="46" y2="56" stroke="var(--accent-atmo)" stroke-width="2"/>
-          </g>
-          <circle cx="46" cy="46" r="2.5" fill="var(--accent-atmo)"/>
-        </svg>
-        <div class="wind-rose-readout"><span class="v" id="windRoseSpeed">—</span><span class="u" id="windRoseDir">mph</span></div>
+    <div class="detail-mode-section" id="verdictSection">
+      <div class="pick-hero" id="pickHero" style="display:none;">
+        <div class="pick-hero-label">Suggested bet</div>
+        <div class="pick-hero-call" id="pickHeroCall"></div>
+        <div class="pick-hero-why" id="pickHeroWhy"></div>
       </div>
+
+      <div class="bet-box" id="betBox">
+        <div class="bet-box-label">Market line</div>
+        <div class="odds-hero" id="oddsHero"></div>
+      </div>
+
+      <div class="analyst-read" id="analystRead" style="display:none;"></div>
     </div>
 
-    <div class="board">
-      <div class="stack">
-        <div class="insight-panel">
-          <div class="insight-top" id="insightTop"></div>
-          <div class="impact-rows" id="fieldCarry" style="display:none;"></div>
-          <div class="impact-scale-marks" id="impactScaleMarks" style="display:none;"></div>
-          <div class="handed-note" id="handedNote" style="display:none;"></div>
-          <div class="handed-note" id="umpireNote" style="display:none;"></div>
-          <div class="handed-note" id="runEnvNote" style="display:none;"></div>
-          <div class="handed-note" id="qbWatchNote" style="display:none;"></div>
-          <div class="handed-note" id="totalCallNote" style="display:none;"></div>
-          <div class="handed-note" id="pitcherNote" style="display:none;"></div>
-          <div class="insight-text" id="insightText">Loading AI read…</div>
+    <div class="detail-mode-section" id="breakdownSection" style="display:none;">
+      <div class="hero" id="heroCard">
+        <div id="map"></div>
+        <canvas id="windFlowCanvas" class="wind-flow-canvas"></canvas>
+        <div class="wind-rose" id="windRose">
+          <svg viewBox="0 0 92 92">
+            <circle cx="46" cy="46" r="41" fill="none" stroke="var(--line)" stroke-width="1"/>
+            <circle cx="46" cy="46" r="29" fill="none" stroke="var(--line)" stroke-width="1" stroke-dasharray="1 4"/>
+            <g stroke="var(--line-strong)" stroke-width="1">
+              <line x1="46" y1="5" x2="46" y2="11"/>
+              <line x1="46" y1="81" x2="46" y2="87"/>
+              <line x1="5" y1="46" x2="11" y2="46"/>
+              <line x1="81" y1="46" x2="87" y2="46"/>
+            </g>
+            <text x="46" y="17" text-anchor="middle" font-family="IBM Plex Mono" font-size="7" fill="var(--text-faint)">N</text>
+            <text x="46" y="79" text-anchor="middle" font-family="IBM Plex Mono" font-size="7" fill="var(--text-faint)">S</text>
+            <text x="15" y="49" text-anchor="middle" font-family="IBM Plex Mono" font-size="7" fill="var(--text-faint)">W</text>
+            <text x="77" y="49" text-anchor="middle" font-family="IBM Plex Mono" font-size="7" fill="var(--text-faint)">E</text>
+            <g id="windNeedle" transform="rotate(0 46 46)">
+              <polygon points="46,14 42,29 50,29" fill="var(--accent-atmo)"/>
+              <line x1="46" y1="29" x2="46" y2="56" stroke="var(--accent-atmo)" stroke-width="2"/>
+            </g>
+            <circle cx="46" cy="46" r="2.5" fill="var(--accent-atmo)"/>
+          </svg>
+          <div class="wind-rose-readout"><span class="v" id="windRoseSpeed">—</span><span class="u" id="windRoseDir">mph</span></div>
         </div>
       </div>
-      <div class="stack">
-        <div class="instrument-cluster" id="gaugeCluster"></div>
-        <div class="stat-pairs" id="statPairs"></div>
-        <div class="sparkline-card" id="sparklineCard" style="display:none;">
-          <div class="sparkline-head">
-            <span class="sh-label">Wind Trend &rarr; Game Time</span>
-            <span class="sh-tag">Forecast</span>
+
+      <div class="board">
+        <div class="stack">
+          <div class="insight-panel">
+            <div class="insight-top" id="insightTop"></div>
+            <div class="impact-rows" id="fieldCarry" style="display:none;"></div>
+            <div class="impact-scale-marks" id="impactScaleMarks" style="display:none;"></div>
+            <div class="handed-note" id="handedNote" style="display:none;"></div>
+            <div class="handed-note" id="umpireNote" style="display:none;"></div>
+            <div class="handed-note" id="runEnvNote" style="display:none;"></div>
+            <div class="handed-note" id="qbWatchNote" style="display:none;"></div>
+            <div class="handed-note" id="totalCallNote" style="display:none;"></div>
+            <div class="handed-note" id="pitcherNote" style="display:none;"></div>
+            <div class="insight-text" id="insightText">Loading AI read…</div>
           </div>
-          <canvas id="sparklineCanvas" width="480" height="120"></canvas>
-          <div class="sparkline-foot"><span id="sparkFootStart">—</span><span id="sparkFootEnd">—</span></div>
         </div>
-        <div class="almanac-card" id="almanacCard" style="display:none;">
-          <div class="almanac-label">Similar Weather Days — Last 15 Years</div>
-          <div class="almanac-body" id="almanacBody">Searching…</div>
+        <div class="stack">
+          <div class="instrument-cluster" id="gaugeCluster"></div>
+          <div class="stat-pairs" id="statPairs"></div>
+          <div class="sparkline-card" id="sparklineCard" style="display:none;">
+            <div class="sparkline-head">
+              <span class="sh-label">Wind Trend &rarr; Game Time</span>
+              <span class="sh-tag">Forecast</span>
+            </div>
+            <canvas id="sparklineCanvas" width="480" height="120"></canvas>
+            <div class="sparkline-foot"><span id="sparkFootStart">—</span><span id="sparkFootEnd">—</span></div>
+          </div>
+          <div class="almanac-card" id="almanacCard" style="display:none;">
+            <div class="almanac-label">Similar Weather Days — Last 15 Years</div>
+            <div class="almanac-body" id="almanacBody">Searching…</div>
+          </div>
         </div>
       </div>
     </div>
@@ -1199,6 +1300,31 @@
   const venueTag = document.getElementById("venueTag");
   const vhMatchup = document.getElementById("vhMatchup");
   const vhPitchers = document.getElementById("vhPitchers");
+  const detailModeToggle = document.getElementById("detailModeToggle");
+  const verdictSection = document.getElementById("verdictSection");
+  const breakdownSection = document.getElementById("breakdownSection");
+  // Verdict / Full Breakdown (design audit, Layout section): defaults to Verdict every time a game
+  // is opened -- "most visitors want one or the other, rarely both in full," and the pick is what
+  // this product leads with everywhere else now (see the landing rebrand). Both sections' own
+  // children keep managing their own display:none/block exactly as before; this only ever toggles
+  // the two wrapping containers, so no other render function needed to change.
+  function setDetailMode(mode) {
+    verdictSection.style.display = mode === "verdict" ? "flex" : "none";
+    breakdownSection.style.display = mode === "breakdown" ? "flex" : "none";
+    detailModeToggle.querySelectorAll("button[data-mode]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === mode)));
+    // The map is usually built (see ensureMap) while Full Breakdown is still hidden, since Verdict
+    // is the default -- Leaflet has no ResizeObserver of its own, so it never notices its container
+    // going from display:none to visible on its own. Re-fit once it actually becomes visible, same
+    // fix ensureMap already uses for the "first view after page load" version of this bug.
+    if (mode === "breakdown" && map && lastMapBounds) {
+      map.invalidateSize();
+      map.fitBounds(lastMapBounds, { animate: false });
+    }
+  }
+  detailModeToggle.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-mode]");
+    if (btn) setDetailMode(btn.dataset.mode);
+  });
   const oddsHero = document.getElementById("oddsHero");
   const pickHero = document.getElementById("pickHero");
   const pickHeroCall = document.getElementById("pickHeroCall");
@@ -1235,6 +1361,7 @@
   const sparkFootEnd = document.getElementById("sparkFootEnd");
 
   let map, marker;
+  let lastMapBounds = null; // re-applied when Full Breakdown is opened, see setDetailMode
   let currentGames = [];
   let currentSport = null; // null until a sport is picked from the landing page
   let currentDayOffset = 0; // Today/Tomorrow toggle (MLB only) -- 0=today, 1=tomorrow
@@ -1974,6 +2101,7 @@
     }
     const dayLabel = currentDayOffset === 1 ? "tomorrow's" : "today's";
     emptyState.style.display = "flex";
+    emptyState.dataset.kind = "loading";
     emptyStateText.textContent = `Loading ${dayLabel} ${sport.toUpperCase()} slate…`;
     setStatus(`Fetching ${sport.toUpperCase()} schedule…`);
     try {
@@ -2000,6 +2128,7 @@
       }
       currentGames = games.filter((g) => g.venueKey);
       if (!currentGames.length) {
+        emptyState.dataset.kind = "empty";
         emptyStateText.textContent = sport === "ncaaf" ? "No ranked teams playing right now." : `No games on ${dayLabel} slate.`;
         setStatus(sport === "ncaaf" ? "No ranked teams playing right now." : `No games on ${dayLabel} slate.`);
         return;
@@ -2010,6 +2139,7 @@
       setStatus(`${currentGames.length} games loaded.`);
       loadGridPreviews(sport, currentGames);
     } catch (err) {
+      emptyState.dataset.kind = "error";
       emptyStateText.textContent = `Could not load the schedule: ${err.message}`;
       setStatus(`Error: ${err.message}`);
     }
@@ -2030,6 +2160,12 @@
 
   function ensureMap(lat, lon, halfExtentM) {
     const bounds = metersToLatLngBox(lat, lon, halfExtentM);
+    // Verdict is now the default mode (see setDetailMode) -- this map lives inside the Full
+    // Breakdown section, so it's usually built while its own container is still display:none.
+    // Stashed here so setDetailMode can re-fit it once Full Breakdown actually becomes visible,
+    // the same invalidateSize()-then-fitBounds fix as the "first view after page load" bug below,
+    // just triggered by the mode toggle instead of the initial layout.
+    lastMapBounds = bounds;
     // Real bug found live: on the very first stadium view after a fresh page load, Leaflet's
     // container can still be mid-layout (display:none -> flex just happened in this same call
     // stack) at the exact moment fitBounds runs, so it reads a stale/zero container size and
@@ -2564,6 +2700,7 @@
     gamesGrid.style.display = "none";
     dayToggle.style.display = "none"; // no "Today/Tomorrow" floating above a single game's detail view
     gameView.style.display = "flex";
+    setDetailMode("verdict"); // reset to the default mode every time a (possibly different) game opens
     startLineAutoRefresh(sport, game);
     renderGameStrip(currentGames.indexOf(game));
     venueTag.textContent = `${game.venue || "Venue"}…`;
