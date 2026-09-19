@@ -602,7 +602,7 @@
   .empty-state p { margin: 0; font-size: 0.95rem; }
 
   /* ---------- Quick-look grid: every game on today's slate, front and center ---------- */
-  .games-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+  .games-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
   .game-card {
     display: flex; flex-direction: column; gap: 8px; text-align: left;
     background: var(--bg-elevated); border: var(--card-border-width) solid var(--line);
@@ -615,12 +615,14 @@
     font-family: var(--font-mono); font-size: 0.66rem; text-transform: uppercase;
     letter-spacing: 0.06em; color: var(--text-faint);
   }
-  .game-card .gc-matchup { font-family: var(--font-display); font-weight: var(--font-display-w0); font-size: 1.2rem; letter-spacing: 0.01em; }
-  .game-card .gc-matchup em { font-style: normal; color: var(--text-faint); font-weight: 400; font-family: var(--font-body); margin: 0 4px; }
-  .team-logo { width: 20px; height: 20px; object-fit: contain; vertical-align: -5px; margin-right: 5px; }
+  .game-card .gc-matchup {
+    font-family: var(--font-display); font-weight: var(--font-display-w0); font-size: 1.12rem;
+    letter-spacing: 0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .game-card .gc-matchup em { font-style: normal; color: var(--text-faint); font-weight: 400; font-family: var(--font-body); margin: 0 3px; }
+  .team-logo { width: 18px; height: 18px; object-fit: contain; vertical-align: -4px; margin-right: 4px; }
   .vh-matchup .team-logo { margin-left: 3px; }
   .game-card .gc-weather { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.76rem; color: var(--text-muted); min-height: 1.1em; }
-  .game-card .gc-rank { font-size: 0.74rem; color: var(--text-muted); font-weight: 600; }
   .game-card .gc-pitchers { font-size: 0.74rem; color: var(--text-faint); }
   .game-card .gc-odds {
     font-family: var(--font-mono);
@@ -628,12 +630,15 @@
     font-size: 1.05rem;
     color: var(--accent-atmo);
     background: var(--accent-atmo-dim);
-    display: inline-block;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
     width: fit-content;
-    padding: 2px 9px;
+    padding: 4px 9px;
     border-radius: 6px;
     letter-spacing: 0.01em;
   }
+  .game-card .gc-odds-row { line-height: 1.3; }
   .game-card .gc-score { font-family: var(--font-mono); font-size: 0.76rem; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 5px; }
   .game-card .gc-score.final { color: var(--text-muted); font-weight: 600; }
   .game-card .gc-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-live); flex: none; }
@@ -1598,8 +1603,9 @@
   // spread/total (real line-movement arrows, see fetchCoversLines in weather-worker.js) when a
   // match was found for this game; falls back to ESPN's own single-snapshot odds (no movement
   // data available) when it wasn't -- same "degrade gracefully" pattern used everywhere in this
-  // app. Returns HTML (arrow spans), not plain text -- callers must use innerHTML, not textContent.
-  function oddsSummaryText(g) {
+  // app. Returns an array (spread first, then total) so callers can join or stack them as needed;
+  // each entry is HTML (a movement-arrow <span> may be embedded), not plain text.
+  function oddsParts(g) {
     if (g.coversSpread != null || g.coversOverUnder != null) {
       const parts = [];
       if (g.coversSpread != null) {
@@ -1612,18 +1618,27 @@
       if (g.coversOverUnder != null) {
         parts.push(`O/U ${g.coversOverUnder}${movementArrowHtml(g.totalDirection, g.previousOverUnder, "since open")}`);
       }
-      return parts.join(" · ");
+      return parts;
     }
-    if (!g.oddsDetails && g.oddsOverUnder == null) return "";
+    if (!g.oddsDetails && g.oddsOverUnder == null) return [];
     const parts = [];
     if (g.oddsDetails) parts.push(g.oddsDetails);
     if (g.oddsOverUnder != null) parts.push(`O/U ${g.oddsOverUnder}`);
-    return parts.join(" · ");
+    return parts;
   }
 
+  function oddsSummaryText(g) {
+    return oddsParts(g).join(" · ");
+  }
+
+  // Spread and total each get their own row (never joined onto one "·"-separated line) so every
+  // sport's odds badge follows the same fixed template: spread on top, total underneath. MLB has
+  // no spread, so its badge is just the one O/U row -- same box, same code path, one row instead
+  // of two.
   function oddsLineHtml(g) {
-    const text = oddsSummaryText(g);
-    return text ? `<div class="gc-odds">${text}</div>` : "";
+    const parts = oddsParts(g);
+    if (!parts.length) return "";
+    return `<div class="gc-odds">${parts.map((p) => `<div class="gc-odds-row">${p}</div>`).join("")}</div>`;
   }
 
   // Real spread/total + line-movement tracking for NFL/NCAAF (see fetchCoversLines in
@@ -1889,7 +1904,7 @@
         ? `<div class="gc-pitchers">${g.awayProbablePitcher?.name || "TBD"} vs ${g.homeProbablePitcher?.name || "TBD"}</div>`
         : "";
     const scoreLine = currentSport === "mlb" ? mlbScoreLine(g) : currentSport === "nfl" || currentSport === "ncaaf" ? footballScoreLine(g) : "";
-    const oddsLine = currentSport === "nfl" || currentSport === "ncaaf" ? oddsLineHtml(g) : "";
+    const oddsLine = oddsLineHtml(g);
     return `<button class="game-card" data-idx="${i}">
       <div class="gc-time">${date} &middot; ${time}</div>
       <div class="gc-matchup">${teamLogoHtml(currentSport, g, "away")}${awayRankPrefix}${g.awayAbbr || g.away}<em>@</em>${teamLogoHtml(currentSport, g, "home")}${homeRankPrefix}${g.homeAbbr || g.home}</div>
@@ -1977,6 +1992,11 @@
         const data = await res.json();
         if (data.error) throw new Error(data.error);
         games = data.games || [];
+        // O/U only, same badge template as NFL/NCAAF's spread+total (see oddsLineHtml) -- MLB has
+        // no spread concept, so the badge just renders the one row. fetchTotalLines (the route
+        // behind this) always scrapes *today's* RotoGrinders slate with no dayOffset support, so
+        // skip the merge for "tomorrow" rather than tag those games with today's lines.
+        if (currentDayOffset === 0) mergeCoversLines(games, await fetchCoversLinesForSlate("mlb"));
       }
       currentGames = games.filter((g) => g.venueKey);
       if (!currentGames.length) {

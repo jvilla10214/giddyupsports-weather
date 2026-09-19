@@ -37,6 +37,9 @@
  *                                                               same/new + previous value), scraped
  *                                                               from Covers.com -- see
  *                                                               fetchCoversLines. NFL/NCAAF only.
+ *                                                               sport=mlb reshapes fetchTotalLines'
+ *                                                               RotoGrinders slate (total only, no
+ *                                                               spread) into the same shape.
  *
  * NFL schedule is NOT fetched here — ESPN's scoreboard API blocks Cloudflare Worker IPs but
  * allows browser CORS requests, so the frontend fetches it client-side instead. See DECISIONS.md.
@@ -1753,7 +1756,25 @@ export default {
       // merges by away-home abbreviation key.
       if (url.pathname === "/api/lines") {
         const sport = url.searchParams.get("sport");
-        if (sport !== "nfl" && sport !== "ncaaf") return json({ error: "sport must be nfl or ncaaf" }, 400);
+        if (sport === "mlb") {
+          // fetchTotalLines already scrapes RotoGrinders' full day's slate (see its own comment) --
+          // it just wasn't exposed as its own route before, only folded into /api/game's per-game
+          // response. Reshaped from byVenueKey (keyed by home team, this function's own convention,
+          // used elsewhere by handleGame) to byAwayHomeKey so the response matches NFL/NCAAF's shape
+          // and the frontend's existing mergeCoversLines/fetchCoversLinesForSlate work unmodified.
+          try {
+            const lines = await fetchTotalLines(env);
+            const byAwayHomeKey = {};
+            for (const key in lines.byVenueKey) {
+              const l = lines.byVenueKey[key];
+              byAwayHomeKey[`${l.awayAbbr}-${l.homeAbbr}`] = { overUnder: l.marketLine, totalDirection: l.direction, previousOverUnder: l.previousLine };
+            }
+            return json({ date: lines.date, byAwayHomeKey, source: lines.source });
+          } catch (err) {
+            return json({ error: err.message }, 502);
+          }
+        }
+        if (sport !== "nfl" && sport !== "ncaaf") return json({ error: "sport must be mlb, nfl, or ncaaf" }, 400);
         try {
           return json(await fetchCoversLines(env, sport));
         } catch (err) {
