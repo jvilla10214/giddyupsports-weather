@@ -6,7 +6,7 @@
 <title>GiddyUpSports Weather Command Center</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Big+Shoulders+Display:wght@700;800;900&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=Anton&family=Barlow+Semi+Condensed:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Big+Shoulders+Display:wght@700;800;900&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=Anton&family=Barlow+Semi+Condensed:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Manrope:wght@400;500;600;700&family=Oswald:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&family=Roboto+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
   /* ---------- Base tokens ("Floodlight") — inert fallback, always overridden below ----------
@@ -272,6 +272,100 @@
     --shadow-soft: 0 10px 26px -18px rgba(20, 23, 27, 0.12);
   }
 
+  /* ---------- NCAAF theme: "Top 25 Watch" — poll sheet on a Saturday afternoon ----------
+     NCAAF used to fall through to the base ("Floodlight") theme along with Tennis/Golf/the
+     landing page -- a real second-class-citizen bug flagged in the design audit, worse now that
+     NCAAF has its own real computed Suggested Bet call (weather-only Game Environment Score, see
+     handleNcaafGame in weather-worker.js), not just a stub. Brick-red/poll-blue already exists as
+     this sport's approved identity on the landing tile (--tile-accent/--tile-accent-2, see
+     .landing-tile[data-sport="ncaaf"]) -- reused here as accent-ai/accent-atmo so the landing page
+     and the live product finally agree on what "Top 25 Watch" looks like. Light-default like MLB
+     (crisp fall Saturday, not NFL's under-the-lights night), with an ivory/parchment ground meant
+     to read like a poll ballot or game program rather than either MLB's cool instrument-panel grey
+     or NFL's cold steel. */
+  html[data-sport="ncaaf"] {
+    --bg: #f5f1ea;
+    --bg-elevated: #ffffff;
+    --bg-elevated-2: #ece5d8;
+    --bg-glass: rgba(255, 255, 255, 0.85);
+    --text: #1c1815;
+    --text-muted: #6b6155;
+    --text-faint: #a89b8a;
+    --line: #ddd3c2;
+    --line-strong: #c7b9a2;
+
+    --accent-atmo: #3e6b8f;
+    --accent-atmo-dim: #dbe4ea;
+    --accent-live: #4f7d43;
+    --accent-live-dim: #dde8d7;
+    --accent-ai: #8b2e2e;
+    --accent-ai-dim: #ecdcd8;
+    --accent-warn: #b5443a;
+    --accent-warn-dim: #f0dbd7;
+    --accent-move-up: #4f7d43;
+    --accent-move-down: #b5443a;
+
+    --shadow: 0 20px 50px -26px rgba(28, 24, 21, 0.16), 0 1px 2px rgba(28, 24, 21, 0.05);
+    --shadow-soft: 0 10px 26px -18px rgba(28, 24, 21, 0.12);
+
+    --font-display: "Oswald", sans-serif;
+    --font-body: "Public Sans", sans-serif;
+    --font-mono: "Roboto Mono", ui-monospace, "SF Mono", monospace;
+
+    --card-border-width: 1px;
+    --radius-lg: 10px;
+    --radius-md: 6px;
+    --insight-border-color: var(--accent-live);
+  }
+  @media (prefers-color-scheme: dark) {
+    /* :not([data-theme="light"]) mirrors the MLB/NFL guards above. */
+    html[data-sport="ncaaf"]:not([data-theme="light"]) {
+      --bg: #16130f;
+      --bg-elevated: #201c17;
+      --bg-elevated-2: #2a2520;
+      --bg-glass: rgba(32, 28, 23, 0.85);
+      --text: #f0ece4;
+      --text-muted: #a79b8c;
+      --text-faint: #786c5d;
+      --line: #362f27;
+      --line-strong: #4a4136;
+
+      --accent-atmo: #6f9bc0;
+      --accent-atmo-dim: #253442;
+      --accent-live: #6ea860;
+      --accent-live-dim: #263323;
+      --accent-ai: #c96b5a;
+      --accent-ai-dim: #3a281f;
+      --accent-warn: #d3726a;
+      --accent-warn-dim: #3a2622;
+      --accent-move-up: #6ea860;
+      --accent-move-down: #d3726a;
+    }
+  }
+  /* Explicit dark-mode toggle for NCAAF, same literal-duplicate reasoning as MLB's dark block. */
+  html[data-sport="ncaaf"][data-theme="dark"] {
+    --bg: #16130f;
+    --bg-elevated: #201c17;
+    --bg-elevated-2: #2a2520;
+    --bg-glass: rgba(32, 28, 23, 0.85);
+    --text: #f0ece4;
+    --text-muted: #a79b8c;
+    --text-faint: #786c5d;
+    --line: #362f27;
+    --line-strong: #4a4136;
+
+    --accent-atmo: #6f9bc0;
+    --accent-atmo-dim: #253442;
+    --accent-live: #6ea860;
+    --accent-live-dim: #263323;
+    --accent-ai: #c96b5a;
+    --accent-ai-dim: #3a281f;
+    --accent-warn: #d3726a;
+    --accent-warn-dim: #3a2622;
+    --accent-move-up: #6ea860;
+    --accent-move-down: #d3726a;
+  }
+
   * { box-sizing: border-box; }
   html, body { margin: 0; }
   body {
@@ -421,6 +515,24 @@
   .theme-toggle:hover { color: var(--text); border-color: var(--line-strong); }
   .theme-toggle[aria-pressed="true"] { background: var(--accent-live-dim); color: var(--accent-live); border-color: transparent; }
   .theme-toggle[aria-pressed="true"] svg { fill: currentColor; }
+
+  /* Mobile masthead (design audit, Mobile section): .masthead's own flex-wrap let the theme
+     toggle fall out of the header entirely once the row ran out of room, landing as an orphaned
+     circle below the sport toggle. Reordered so it always stays pinned next to the wordmark --
+     brand + toggle share a row, the sport toggle takes the full-width row below it instead of
+     wrapping unpredictably button-by-button. */
+  @media (max-width: 640px) {
+    .brand .kicker { display: none; }
+    .theme-toggle { order: 2; margin-left: auto; }
+    .sport-toggle {
+      order: 3;
+      flex-basis: 100%;
+      margin-left: 0;
+      flex-wrap: nowrap;
+      justify-content: space-between;
+    }
+    .sport-toggle button { padding: 8px 10px; }
+  }
 
   /* ---------- Landing: the suite's front door, shown before a sport is picked ----------
      Chrome (background/text) still reads from the currently-active html[data-sport] tokens, but
