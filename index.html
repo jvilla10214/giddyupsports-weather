@@ -600,6 +600,29 @@
     color: var(--text-faint);
   }
   .bet-box .sb-none { color: var(--text-muted); font-style: italic; }
+  /* Analyst Read (added 2026-09-19): deliberately its own card, separate from Bet Box -- that card
+     is the model's own honest signal (real data, backtested where possible); this one is curated
+     human commentary from named sources, paraphrased and attributed, never blended into the model's
+     numbers or labels. Dashed border (vs. Bet Box's solid one) is a small, real visual cue that
+     these two cards mean structurally different things, not just a color choice. */
+  .analyst-read {
+    background: var(--bg-elevated);
+    border: var(--card-border-width) dashed var(--line-strong);
+    border-radius: var(--radius-md);
+    padding: 14px 20px;
+    margin: 4px 0;
+  }
+  .analyst-read .ar-label {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--text-faint);
+    margin-bottom: 8px;
+  }
+  .analyst-read .ar-item { font-size: 0.86rem; line-height: 1.5; color: var(--text); margin-bottom: 8px; }
+  .analyst-read .ar-item:last-child { margin-bottom: 0; }
+  .analyst-read .ar-source { color: var(--text-muted); font-size: 0.78rem; font-style: italic; }
 
   /* ---------- Hero: a static, centered, non-interactive picture — nothing overlays it ---------- */
   .hero {
@@ -872,6 +895,8 @@
       <div class="suggested-bet" id="suggestedBet"></div>
     </div>
 
+    <div class="analyst-read" id="analystRead" style="display:none;"></div>
+
     <div class="hero" id="heroCard">
       <div id="map"></div>
       <canvas id="windFlowCanvas" class="wind-flow-canvas"></canvas>
@@ -970,6 +995,7 @@
   const venueTag = document.getElementById("venueTag");
   const oddsHero = document.getElementById("oddsHero");
   const suggestedBet = document.getElementById("suggestedBet");
+  const analystReadEl = document.getElementById("analystRead");
   const betBox = document.getElementById("betBox");
   // Hides the whole Bet Box only when NEITHER slot has anything to show (both are still in the DOM
   // either way -- .odds-hero:empty naturally collapses via CSS, .suggested-bet toggles its own
@@ -1445,6 +1471,95 @@
     }
     const [homeWatch, awayWatch] = await Promise.all([watchFor(homeAbbr, homeQb), watchFor(awayAbbr, awayQb)]);
     return homeWatch || awayWatch ? { home: homeWatch, away: awayWatch } : null;
+  }
+
+  // Analyst Read (added 2026-09-19): curated, attributed, paraphrased commentary from named human
+  // sources -- deliberately NOT reproduced verbatim (copyright) and deliberately NEVER blended into
+  // the AI Lean / Suggested Bet pill above (see renderSuggestedBet's comment and the .analyst-read
+  // CSS comment for why: that pill means "the deterministic model's honest signal," and mixing in
+  // human opinion would make its own caption a lie about what's actually driving it). Two sources
+  // for now: Ryan Reynolds' public Week 2 X preview, and the Deep Dive Podcast's Week 2 betting
+  // preview (both free public content -- a third source, a paid Establish The Run subscription
+  // product, was deliberately left out pending confirmation it's OK to redistribute). Keyed by
+  // "AWAY-HOME" to match this app's own awayAbbr/homeAbbr. Manually populated for Week 2 2026 --
+  // not yet an automated weekly pipeline (see chat: sources can't be reliably auto-polled, X and
+  // most podcasts block scraping the way Equibase/Racing Post do elsewhere in this project).
+  const ANALYST_READS = {
+    nfl: {
+      "DET-BUF": [
+        { source: "Deep Dive Podcast", note: "Drew laid Buffalo, citing Detroit's short-week O-line injuries (RT Blake Miller, LG Christian Mahogany both ruled out) against a Bills offense he calls ‘super, super good’ — the number moved up from an opening 3.5/52.5 to 5.5/54.5." },
+      ],
+      "CAR-ATL": [
+        { source: "Ryan Reynolds (@RyanReynoldsNFL)", note: "Expects this one to lead the whole slate in total running back touches between both teams." },
+        { source: "Deep Dive Podcast", note: "Played the over (43.5 vs. a 44 market at the time), expecting Carolina's offense to push close to 30 on its own." },
+      ],
+      "MIN-CHI": [
+        { source: "Ryan Reynolds (@RyanReynoldsNFL)", note: "Likes the Bears' offensive talent edge against Brian Flores' scaled-back-blitz approach, and says Carson Wentz's Week 1 relief outing was his best play in years." },
+        { source: "Deep Dive Podcast", note: "Took the points with Minnesota (+5.5) and is glad to see the market moving their way since; total sitting around 48." },
+      ],
+      "PHI-TEN": [
+        { source: "Ryan Reynolds (@RyanReynoldsNFL)", note: "Tennessee's stagnant offensive line draws a tough Eagles defense — a bad spot unless something changes fast." },
+        { source: "Deep Dive Podcast", note: "Total of 39 is low but rated as accurate; would still take the Titans straight-up over Cleveland or Miami right now, for what that's worth." },
+      ],
+      "PIT-NE": [
+        { source: "Ryan Reynolds (@RyanReynoldsNFL)", note: "Maye faces a Steelers defense he's struggled against before; Vrabel's D has the edge over a Steelers offense that let Cooper Rush's Falcons hang around all game." },
+        { source: "Deep Dive Podcast", note: "No play — fair total came in just above market and neither host found enough edge on either side." },
+      ],
+      "GB-NYJ": [
+        { source: "Deep Dive Podcast", note: "Small numeric edge on Green Bay (power rating: Jets -3 vs. market's -3.5/4) — Love's rough Week 1 is read as more about Minnesota's extreme blitz rate than Love himself." },
+      ],
+      "CLE-TB": [
+        { source: "Ryan Reynolds (@RyanReynoldsNFL)", note: "Watson faces a solid Buccaneers front behind a bad Browns line — called it a ‘show me’ spot if he has anything left." },
+        { source: "Deep Dive Podcast", note: "Leaning Tampa Bay as a season-long survivor-style pick; total viewed as more of a pass either way." },
+      ],
+      "NO-BAL": [
+        { source: "Deep Dive Podcast", note: "High on Baltimore even relative to the market's own number, largely on Ravens pass-rush strength — but no actual bet placed without Zay Flowers' receiving corps fully healthy." },
+      ],
+      "CIN-HOU": [
+        { source: "Ryan Reynolds (@RyanReynoldsNFL)", note: "Nico Collins' absence thins Houston's receiving corps against a beatable Bengals secondary — but Cincinnati's front, which played well vs. Tampa, could be the difference." },
+        { source: "Deep Dive Podcast", note: "Doubling down on the Bengals-Texans under (fair number ~44.5 vs. a 46.5 market), calling it an especially tough matchup for Cincinnati's offense." },
+      ],
+      "JAX-DEN": [
+        { source: "Ryan Reynolds (@RyanReynoldsNFL)", note: "Denver's O-line/pass-rush trench advantage could produce a sneaky good ground game; Trevor Lawrence is this matchup's X-factor." },
+        { source: "Deep Dive Podcast", note: "No bet — market holding firm at Denver -2.5, called 'an expensive 2.5' with not enough edge to play." },
+      ],
+      "LV-LAC": [
+        { source: "Ryan Reynolds (@RyanReynoldsNFL)", note: "The Chargers' interior O-line was 'off the charts bad' last week — how LA schemes around it early is the thing to watch." },
+        { source: "Deep Dive Podcast", note: "Downgraded the Chargers across the board (QB play, O-line, coaching) but still likes their pass rush; number has moved from 7.5 down toward 6.5." },
+      ],
+      "WSH-DAL": [
+        { source: "Ryan Reynolds (@RyanReynoldsNFL)", note: "Expects Dallas' offense to bounce back against a mediocre Commanders D, with Jayden Daniels' ceiling keeping this one high-scoring." },
+        { source: "Deep Dive Podcast", note: "Power numbers favor Dallas (+1.8) over Washington (-0.7); thinks Dallas' offense gets going here even though the total already looks high." },
+      ],
+      "SEA-ARI": [
+        { source: "Ryan Reynolds (@RyanReynoldsNFL)", note: "Close to a coin flip — likes Arizona's non-QB pieces, but calls Seattle's defense 'an enormous problem to solve.'" },
+        { source: "Deep Dive Podcast", note: "Second-guessing an earlier points-with-Arizona take now that Drew Lock is confirmed the starter, though still sees some remaining scope for the Cardinals." },
+      ],
+      "MIA-SF": [
+        { source: "Ryan Reynolds (@RyanReynoldsNFL)", note: "The 49ers are better at nearly every position group — says it would take a catastrophe for Miami to win." },
+        { source: "Deep Dive Podcast", note: "Fair number (13/46.5) lines up almost exactly with the market (13/45.5) — no real edge found either way." },
+      ],
+      "IND-KC": [
+        { source: "Ryan Reynolds (@RyanReynoldsNFL)", note: "Has Kansas City handling business here; the real question is whether Indianapolis can hang after last week's blowout loss." },
+        { source: "Deep Dive Podcast", note: "Called their 'best bet' of the week — well off market on the Chiefs, took the Colts +6.5 while still expecting Kansas City to win." },
+      ],
+      "NYG-LAR": [
+        { source: "Ryan Reynolds (@RyanReynoldsNFL)", note: "Stafford is coming off one of his worst games; if Dart keeps the Giants in it against a resurgent Rams defense, that's a real positive sign for New York." },
+        { source: "Deep Dive Podcast", note: "Think the Giants might be better than expected after Dart's showing, but call the Rams 'an absolute enigma' — no clean pick stated." },
+      ],
+    },
+  };
+
+  function renderAnalystRead(sport, game) {
+    const reads = ANALYST_READS[sport]?.[`${game?.awayAbbr}-${game?.homeAbbr}`];
+    if (!reads || !reads.length) {
+      analystReadEl.style.display = "none";
+      return;
+    }
+    analystReadEl.innerHTML =
+      `<div class="ar-label">Analyst Read</div>` +
+      reads.map((r) => `<div class="ar-item">${r.note}<br><span class="ar-source">— ${r.source}</span></div>`).join("");
+    analystReadEl.style.display = "block";
   }
 
   function renderQbWatchNote(watch) {
@@ -2136,6 +2251,8 @@
     if (sport === "nfl") {
       fetchNflQbWatch(game.homeAbbr, game.awayAbbr).then(renderQbWatchNote).catch(() => renderQbWatchNote(null));
     }
+    // Doesn't depend on the Worker fetch below either -- purely local, curated data.
+    renderAnalystRead(sport, game);
 
     try {
       const gameIdParam = game.gameId ? `&gameId=${encodeURIComponent(game.gameId)}` : "";
