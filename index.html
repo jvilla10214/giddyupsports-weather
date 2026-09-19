@@ -563,16 +563,54 @@
     color: var(--text-faint);
     margin-right: 7px;
   }
-  /* Bet Box (added 2026-09-19): its own standalone card, deliberately placed between the venue
-     heading and the hero/map card so it reads before the wind data and the AI write-up, not buried
-     inside either -- betting lines and our own suggested-bet read are the thing this dashboard leads
-     with now, not a footnote under the venue name. Same card recipe as .insight-panel for visual
-     consistency. Present for all three sports (see renderSuggestedBet/oddsSummaryText) -- MLB and
-     NFL always have real content once a game loads; NCAAF shows the market line when ESPN has one
-     plus an honest "not yet modeled" note rather than fabricating a lean.
-     updateBetBoxVisibility() (JS) hides the whole box only in the genuine edge case where NEITHER
-     the market line nor the suggested-bet slot has anything to show (e.g. a finished MLB game the
-     RotoGrinders scrape never covered). */
+  /* Pick Hero (redesigned 2026-09-20, design-audit item #1): the Suggested Bet call is now THE
+     product, not a footnote inside the market-line card -- so it gets its own card, first thing
+     under the venue heading, sized like a real headline instead of a small pill next to a label.
+     Background tint shifts with the call's own sentiment class (.good/.info/.neutral, same classes
+     pill-lean already uses) so the card itself reads as "this is what we think" at a glance, before
+     a viewer even reads the words. Hidden entirely when there's nothing to show yet (matches
+     renderSuggestedBet's null-state handling) rather than showing an empty shell. */
+  .pick-hero {
+    border-radius: var(--radius-md);
+    padding: 18px 22px;
+    box-shadow: var(--shadow-soft);
+    margin: 4px 0;
+    background: var(--bg-elevated-2);
+    border: var(--card-border-width) solid var(--insight-border-color);
+  }
+  .pick-hero.good { background: var(--accent-live-dim); border-color: var(--accent-live); }
+  .pick-hero.info { background: var(--accent-atmo-dim); border-color: var(--accent-atmo); }
+  .pick-hero-label {
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--text-faint);
+    margin-bottom: 6px;
+  }
+  .pick-hero-call {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(1.9rem, 5vw, 2.7rem);
+    line-height: 1.05;
+    letter-spacing: 0.01em;
+  }
+  .pick-hero.good .pick-hero-call { color: var(--accent-live); }
+  .pick-hero.info .pick-hero-call { color: var(--accent-atmo); }
+  .pick-hero.neutral .pick-hero-call { color: var(--text); }
+  .pick-hero-why {
+    font-family: var(--font-body);
+    font-size: 0.95rem;
+    color: var(--text-muted);
+    margin-top: 8px;
+    max-width: 60ch;
+  }
+  .pick-hero-none { font-style: italic; color: var(--text-muted); font-size: 1.1rem; }
+
+  /* Market Line (was "Betting Lines" -- renamed now that the call itself lives in Pick Hero above,
+     so this card is unambiguously "the book's own number," supporting evidence, not the headline).
+     Same card recipe as .insight-panel for visual consistency. Hidden when ESPN/Covers has no odds
+     for this game at all (final/live games, or none posted yet). */
   .bet-box {
     background: var(--bg-elevated);
     border: var(--card-border-width) solid var(--insight-border-color);
@@ -589,9 +627,9 @@
     color: var(--text-faint);
     margin-bottom: 8px;
   }
-  /* The market's own spread/O-U, deliberately the biggest, boldest thing in the box -- real
-     DraftKings-sourced data (see oddsSummaryText), not a computed signal. Empty when ESPN has no
-     odds for this game (final/live games, or none posted yet) -- :empty collapses it. */
+  /* The market's own spread/O-U -- real DraftKings/Covers-sourced data, not a computed signal.
+     Empty when there's no odds for this game (final/live games, or none posted yet) --
+     :empty collapses it. */
   .bet-box .odds-hero {
     font-family: var(--font-mono);
     font-weight: 800;
@@ -606,25 +644,6 @@
     margin: 2px 0;
   }
   .bet-box .odds-hero:empty { display: none; }
-  /* Suggested Bet: deliberately separate from odds-hero above -- that's the neutral market number,
-     this is our own system's read (a real lean for MLB, an honest "no edge" for NFL, "not yet
-     modeled" for NCAAF -- see renderSuggestedBet's comment). */
-  .bet-box .suggested-bet {
-    display: none;
-    align-items: center;
-    gap: 4px;
-    font-family: var(--font-mono);
-    font-size: 0.82rem;
-    margin: 6px 0 2px;
-  }
-  .bet-box .sb-label {
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: 0.68rem;
-    font-weight: 700;
-    color: var(--text-faint);
-  }
-  .bet-box .sb-none { color: var(--text-muted); font-style: italic; }
   /* Analyst Read (added 2026-09-19): deliberately its own card, separate from Bet Box -- that card
      is the model's own honest signal (real data, backtested where possible); this one is curated
      human commentary from named sources, paraphrased and attributed, never blended into the model's
@@ -918,10 +937,15 @@
       <div class="vh-pitchers" id="vhPitchers" style="display:none;"></div>
     </div>
 
+    <div class="pick-hero" id="pickHero" style="display:none;">
+      <div class="pick-hero-label">Suggested bet</div>
+      <div class="pick-hero-call" id="pickHeroCall"></div>
+      <div class="pick-hero-why" id="pickHeroWhy"></div>
+    </div>
+
     <div class="bet-box" id="betBox">
-      <div class="bet-box-label">Betting Lines</div>
+      <div class="bet-box-label">Market line</div>
       <div class="odds-hero" id="oddsHero"></div>
-      <div class="suggested-bet" id="suggestedBet"></div>
     </div>
 
     <div class="analyst-read" id="analystRead" style="display:none;"></div>
@@ -1026,17 +1050,16 @@
   const vhMatchup = document.getElementById("vhMatchup");
   const vhPitchers = document.getElementById("vhPitchers");
   const oddsHero = document.getElementById("oddsHero");
-  const suggestedBet = document.getElementById("suggestedBet");
+  const pickHero = document.getElementById("pickHero");
+  const pickHeroCall = document.getElementById("pickHeroCall");
+  const pickHeroWhy = document.getElementById("pickHeroWhy");
   const analystReadEl = document.getElementById("analystRead");
   const betBox = document.getElementById("betBox");
-  // Hides the whole Bet Box only when NEITHER slot has anything to show (both are still in the DOM
-  // either way -- .odds-hero:empty naturally collapses via CSS, .suggested-bet toggles its own
-  // display -- this just decides whether the outer card/label is worth showing at all). Called after
-  // every place either slot's content changes.
+  // Market Line card now only ever holds the raw odds-hero number (the Suggested Bet call moved
+  // into its own Pick Hero card, see renderSuggestedBet) -- so its visibility is just "does
+  // oddsHero have anything in it," no second slot to check anymore.
   function updateBetBoxVisibility() {
-    const hasOdds = oddsHero.textContent.trim() !== "";
-    const hasSuggestion = suggestedBet.style.display !== "none";
-    betBox.style.display = hasOdds || hasSuggestion ? "block" : "none";
+    betBox.style.display = oddsHero.textContent.trim() !== "" ? "block" : "none";
   }
   const gaugeCluster = document.getElementById("gaugeCluster");
   const statPairs = document.getElementById("statPairs");
@@ -2062,37 +2085,39 @@
   // our synthesized read of real data, not a guarantee -- sports betting carries real risk -- but it
   // is a genuine call, not a refusal to make one. NCAAF has no computed signal yet at all (not even
   // a "why" to attach), so it says that plainly rather than implying a check that didn't happen.
+  // Sets the Pick Hero card's sentiment class (drives its background tint + call color, see CSS),
+  // the call text itself, and the "why" line underneath. One shared setter so every sport renders
+  // through the exact same hero treatment rather than each sport styling its own card.
+  function setPickHero(cls, callText, note) {
+    pickHero.className = `pick-hero${cls ? " " + cls : ""}`;
+    pickHeroCall.textContent = callText;
+    pickHeroWhy.textContent = note || "";
+    pickHero.style.display = "block";
+  }
+
   function renderSuggestedBet(sport, totalCall, gameEnvironmentScore, runEnvironmentScore) {
     if (sport === "mlb") {
       if (!totalCall) {
-        suggestedBet.style.display = "none";
+        pickHero.style.display = "none";
       } else {
         const cls = totalCall.call === "Likely Over" ? "good" : totalCall.call === "Likely Under" ? "info" : "neutral";
-        const why = whyText(runEnvironmentScore?.contributions, MLB_WHY_PHRASES);
-        suggestedBet.innerHTML =
-          `<span class="sb-label">Suggested bet</span>` +
-          `<span class="pill-lean ${cls}" style="margin-left:8px; font-size:1em;">${totalCall.call}</span>` +
-          (why ? `<span style="margin-left:8px; color: var(--text-muted); font-size: 0.8em;">${why}</span>` : "");
-        suggestedBet.style.display = "flex";
+        setPickHero(cls, totalCall.call, whyText(runEnvironmentScore?.contributions, MLB_WHY_PHRASES));
       }
     } else if (sport === "nfl" || sport === "ncaaf") {
       // NCAAF's gameEnvironmentScore is weather-only (no team-tendency data exists for 130+ FBS
       // teams, see handleNcaafGame's comment) -- genuinely thinner than NFL's, but the same tier/
       // contributions shape, so it reuses the identical lean + why logic rather than a separate path.
       if (!gameEnvironmentScore) {
-        suggestedBet.style.display = "none";
+        pickHero.style.display = "none";
       } else {
         const lean = nflLeanFromTier(gameEnvironmentScore.tier);
-        const why = whyText(gameEnvironmentScore.contributions, NFL_WHY_PHRASES);
-        suggestedBet.innerHTML =
-          `<span class="sb-label">Suggested bet</span>` +
-          `<span class="pill-lean ${lean.cls}" style="margin-left:8px; font-size:1em;">${lean.label}</span>` +
-          (why ? `<span style="margin-left:8px; color: var(--text-muted); font-size: 0.8em;">${why}</span>` : "");
-        suggestedBet.style.display = "flex";
+        setPickHero(lean.cls, lean.label, whyText(gameEnvironmentScore.contributions, NFL_WHY_PHRASES));
       }
     } else {
-      suggestedBet.innerHTML = `<span class="sb-label">Suggested bet</span><span class="sb-none">Not yet modeled for this sport</span>`;
-      suggestedBet.style.display = "flex";
+      pickHero.className = "pick-hero";
+      pickHeroCall.innerHTML = `<span class="pick-hero-none">Not yet modeled for this sport</span>`;
+      pickHeroWhy.textContent = "";
+      pickHero.style.display = "block";
     }
     updateBetBoxVisibility();
   }
