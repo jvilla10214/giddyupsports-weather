@@ -1064,6 +1064,7 @@
   let currentGames = [];
   let currentSport = null; // null until a sport is picked from the landing page
   let currentDayOffset = 0; // Today/Tomorrow toggle (MLB only) -- 0=today, 1=tomorrow
+  let lineRefreshTimer = null; // NFL/NCAAF only -- see startLineAutoRefresh
   const dayToggle = document.getElementById("dayToggle");
   let lastWeather = null; // most recently rendered game's weather, for theme-change canvas redraws
 
@@ -1415,9 +1416,35 @@
   // where this data comes from). No gameState check needed: ESPN drops the odds field itself once
   // a game goes live/final, so absence alone is the gate, same "hide gracefully" pattern used
   // elsewhere in this file.
-  // Shared by the game-card badge and the detail view's odds hero -- see fetchNflScheduleClientSide's
-  // comment for where oddsDetails/oddsOverUnder come from.
+  // Small colored arrow (green up / red down) showing real line movement -- same convention as
+  // MLB's Total Runs Call arrow. "new" (first time tracked) and "same" (no movement since last
+  // check) show nothing, same as that one.
+  function movementArrowHtml(direction, previousValue) {
+    if (direction === "up") return `<span style="color: var(--accent-live); margin-left:2px;" title="Up from ${previousValue}">&#9650;</span>`;
+    if (direction === "down") return `<span style="color: var(--accent-warn); margin-left:2px;" title="Down from ${previousValue}">&#9660;</span>`;
+    return "";
+  }
+
+  // Shared by the game-card badge and the detail view's odds hero. Prefers Covers.com's tracked
+  // spread/total (real line-movement arrows, see fetchCoversLines in weather-worker.js) when a
+  // match was found for this game; falls back to ESPN's own single-snapshot odds (no movement
+  // data available) when it wasn't -- same "degrade gracefully" pattern used everywhere in this
+  // app. Returns HTML (arrow spans), not plain text -- callers must use innerHTML, not textContent.
   function oddsSummaryText(g) {
+    if (g.coversSpread != null || g.coversOverUnder != null) {
+      const parts = [];
+      if (g.coversSpread != null) {
+        // Covers' spread is signed from the HOME team's perspective (negative = home favored) --
+        // reformatted to name whichever side is actually favored, matching ESPN's own convention
+        // ("CAR -2.5") so the two sources read identically to a viewer.
+        const spreadText = g.coversSpread === 0 ? "PICK" : `${g.coversSpread < 0 ? g.homeAbbr : g.awayAbbr} ${g.coversSpread < 0 ? g.coversSpread : -g.coversSpread}`;
+        parts.push(spreadText + movementArrowHtml(g.spreadDirection, g.previousSpread));
+      }
+      if (g.coversOverUnder != null) {
+        parts.push(`O/U ${g.coversOverUnder}${movementArrowHtml(g.totalDirection, g.previousOverUnder)}`);
+      }
+      return parts.join(" · ");
+    }
     if (!g.oddsDetails && g.oddsOverUnder == null) return "";
     const parts = [];
     if (g.oddsDetails) parts.push(g.oddsDetails);
@@ -1428,6 +1455,60 @@
   function oddsLineHtml(g) {
     const text = oddsSummaryText(g);
     return text ? `<div class="gc-odds">${text}</div>` : "";
+  }
+
+  // Real spread/total + line-movement tracking for NFL/NCAAF (see fetchCoversLines in
+  // weather-worker.js). One call per slate load, after the schedule itself (already fetched
+  // client-side from ESPN, see fetchNflScheduleClientSide's comment) -- this just adds tracked
+  // lines on top by away-home abbreviation key. Failures degrade silently to an empty map, which
+  // leaves every game's ESPN-sourced oddsDetails/oddsOverUnder as the fallback (oddsSummaryText
+  // already prefers Covers' fields only when present) -- a scrape hiccup here should never break
+  // the schedule that already loaded successfully.
+  async function fetchCoversLinesForSlate(sport) {
+    try {
+      const res = await fetch(`${WORKER_BASE}/api/lines?sport=${sport}`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      return data.byAwayHomeKey || {};
+    } catch {
+      return {};
+    }
+  }
+
+  function mergeCoversLines(games, linesByKey) {
+    for (const g of games) {
+      const line = linesByKey[`${g.awayAbbr}-${g.homeAbbr}`];
+      if (!line) continue; // no Covers.com match for this game -- ESPN's own snapshot stays as-is
+      g.coversSpread = line.spread;
+      g.coversOverUnder = line.overUnder;
+      g.spreadDirection = line.spreadDirection;
+      g.totalDirection = line.totalDirection;
+      g.previousSpread = line.previousSpread;
+      g.previousOverUnder = line.previousOverUnder;
+    }
+  }
+
+  // Auto-refresh so an open game's line updates without a manual reload -- NFL/NCAAF only. This
+  // re-polls just the cheap Covers.com route (fetchCoversLinesForSlate), not MLB's /api/game, since
+  // MLB's own line already refreshes on every real page load and polling its full detail endpoint
+  // every 90s would re-trigger the AI narration call for no reason (real Workers AI cost for zero
+  // benefit -- the line itself is cached 15min server-side regardless of how often this polls).
+  // Whichever game is open when this fires gets re-merged and re-rendered in place.
+  function startLineAutoRefresh(sport, game) {
+    stopLineAutoRefresh();
+    if (sport !== "nfl" && sport !== "ncaaf") return;
+    lineRefreshTimer = setInterval(async () => {
+      const linesByKey = await fetchCoversLinesForSlate(sport);
+      mergeCoversLines([game], linesByKey);
+      oddsHero.innerHTML = oddsSummaryText(game);
+      updateBetBoxVisibility();
+    }, 90 * 1000);
+  }
+  function stopLineAutoRefresh() {
+    if (lineRefreshTimer) {
+      clearInterval(lineRefreshTimer);
+      lineRefreshTimer = null;
+    }
   }
 
   // QB Watch (added 2026-09-19, NFL only, detail view only -- see
@@ -1680,6 +1761,7 @@
   }
 
   async function loadSchedule(sport, dayOffset = 0) {
+    stopLineAutoRefresh(); // in case the sport toggle was clicked while a game's detail view was open
     currentSport = sport;
     currentDayOffset = sport === "mlb" ? dayOffset : 0; // toggle only exists for MLB -- always reset for other sports
     document.documentElement.dataset.sport = sport;
@@ -1703,8 +1785,10 @@
       let games;
       if (sport === "nfl") {
         games = await fetchNflScheduleClientSide();
+        mergeCoversLines(games, await fetchCoversLinesForSlate("nfl"));
       } else if (sport === "ncaaf") {
         games = await fetchNcaafScheduleClientSide();
+        mergeCoversLines(games, await fetchCoversLinesForSlate("ncaaf"));
       } else {
         // dayOffset, not a client-computed date -- the Worker computes the actual calendar date
         // itself (America/New_York), so the browser's own clock/timezone can never disagree with
@@ -1925,7 +2009,9 @@
     // text above -- this function only ever runs for MLB, so there's no cross-sport collision).
     // The actual call goes in the separately-labeled Suggested Bet slot below (renderSuggestedBet)
     // so "what the market says" and "what our model suggests" are never visually the same thing.
-    oddsHero.textContent = `O/U ${totalCall.marketLine}`;
+    // Real up/down arrow (see fetchTotalLines' KV-tracked line movement) -- previously only shown
+    // in the small detail row above, now on the big number too, per request.
+    oddsHero.innerHTML = `O/U ${totalCall.marketLine}${movementArrowHtml(totalCall.lineDirection, totalCall.previousLine)}`;
   }
 
   // NFL lean (added 2026-09-19): reuses the SAME Game Environment Score tier already shown as its
@@ -2247,6 +2333,7 @@
     gamesGrid.style.display = "none";
     dayToggle.style.display = "none"; // no "Today/Tomorrow" floating above a single game's detail view
     gameView.style.display = "flex";
+    startLineAutoRefresh(sport, game);
     renderGameStrip(currentGames.indexOf(game));
     venueTag.textContent = `${game.venue || "Venue"}…`;
     // Matchup sits next to the venue name (not buried in the small facts line below) -- both are
@@ -2264,7 +2351,8 @@
     }
     // Doesn't depend on the Worker fetch below, so it's set immediately and never waits on (or
     // disappears if) that call fails -- see the odds-hero CSS comment for the :empty collapse.
-    oddsHero.textContent = oddsSummaryText(game);
+    // innerHTML (not textContent) since oddsSummaryText can include a movement-arrow <span>.
+    oddsHero.innerHTML = oddsSummaryText(game);
     // Only NCAAF's "not yet modeled" message doesn't need the Worker fetch below -- MLB's real call
     // needs data.totalRunsCall and NFL's AI lean needs data.gameEnvironmentScore, so both wait for
     // the real call below (this early call just establishes the correct hidden state until then).
@@ -2380,6 +2468,7 @@
   });
 
   brandLogo.addEventListener("click", () => {
+    stopLineAutoRefresh();
     currentSport = null;
     currentDayOffset = 0;
     gameView.style.display = "none";
@@ -2428,6 +2517,7 @@
   });
 
   backBtn.addEventListener("click", () => {
+    stopLineAutoRefresh();
     gameView.style.display = "none";
     gamesGrid.style.display = "grid";
     if (currentSport === "mlb") dayToggle.style.display = "inline-flex";

@@ -31,6 +31,12 @@
  *                                                               sample, not just one game. MLB
  *                                                               only — no free historical box-score
  *                                                               API for NFL, see DECISIONS.md.
+ *   /api/lines?sport=nfl                                     -> spread + total per game (away-home
+ *                                                               abbreviation keyed), with real
+ *                                                               line-movement tracking (up/down/
+ *                                                               same/new + previous value), scraped
+ *                                                               from Covers.com -- see
+ *                                                               fetchCoversLines. NFL/NCAAF only.
  *
  * NFL schedule is NOT fetched here — ESPN's scoreboard API blocks Cloudflare Worker IPs but
  * allows browser CORS requests, so the frontend fetches it client-side instead. See DECISIONS.md.
@@ -281,6 +287,93 @@ async function fetchTotalLines(env) {
       byVenueKey[homeAbbr] = { awayAbbr, homeAbbr, marketLine: ou, direction, previousLine: prev?.line ?? null };
     }
     return { date, byVenueKey, source: "RotoGrinders MLB Weather" };
+  });
+}
+
+// ---- NFL/NCAAF spread + total lines with real line-movement tracking (Covers.com) ----
+//
+// NFL/NCAAF schedule can't be fetched server-side (ESPN blocks Worker IPs, see the file header
+// comment) -- which meant, until now, the frontend's client-side ESPN fetch was the only odds
+// source for these sports, a single snapshot with no history and no movement tracking, unlike
+// MLB's RotoGrinders-backed Total Runs Call above. Covers.com's public odds pages (confirmed live,
+// no auth, no bot-blocking) close that gap: they're server-rendered with FOUR separate tables
+// stacked in the same page (id="moneyline-table", "spread-table", "total-table",
+// "spread-total-table"), all sharing the exact same class names (opening-lines-div/away-cell/
+// home-cell) -- scoping to #spread-total-table by its unique id is what keeps this from silently
+// parsing moneyline numbers (e.g. -325) as if they were point spreads. Confirmed live against the
+// real page: away-cell holds the game's total ("o 39.5"/"u 41"), home-cell holds the home team's
+// spread ("+6.5"/"-7.5"). Covers.com HTML-entity-encodes "+" as `&#x2B;` rather than a literal
+// character -- decoded before the numeric regex runs, or a positive home spread parses as null.
+//
+// Team-code aliases: Covers' NFL codes match this app's own (ESPN-sourced) abbreviations except
+// these three -- confirmed against the full live team-code set. NCAAF has no such verified alias
+// table (100+ teams, far less standardized abbreviations) -- an NCAAF game whose Covers code
+// doesn't match ESPN's simply gets no line data, same "hide gracefully when absent" pattern used
+// everywhere else in this app, not a crash.
+const COVERS_ABBR_TO_KEY = { JAC: "JAX", LA: "LAR", WAS: "WSH" };
+const COVERS_URLS = {
+  nfl: "https://www.covers.com/sport/football/nfl/odds",
+  ncaaf: "https://www.covers.com/sport/football/ncaaf/odds",
+};
+
+async function fetchCoversLines(env, sport) {
+  const date = todayIso();
+  return cached(env, `covers-lines:${sport}:${date}`, 15 * 60, async () => {
+    const url = COVERS_URLS[sport];
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36" },
+    });
+    if (!res.ok) throw new Error(`Covers.com ${sport} odds ${res.status}`);
+    const html = await res.text();
+
+    const tableStart = html.indexOf('id="spread-total-table"');
+    if (tableStart === -1) throw new Error("Covers.com spread-total-table not found (page structure may have changed)");
+    const tableEnd = html.indexOf("</table>", tableStart);
+    const table = html.slice(tableStart, tableEnd);
+
+    const rowRe = /<tr[^>]*class="oddsGameRow"[\s\S]*?<\/tr>/g;
+    const byAwayHomeKey = {};
+    for (const rowMatch of table.matchAll(rowRe)) {
+      const row = rowMatch[0];
+      const teams = [...row.matchAll(/<strong>([A-Z]+)<\/strong>/g)].map((m) => m[1]);
+      if (teams.length < 2) continue;
+      const awayAbbr = COVERS_ABBR_TO_KEY[teams[0]] || teams[0];
+      const homeAbbr = COVERS_ABBR_TO_KEY[teams[1]] || teams[1];
+
+      const openIdx = row.indexOf("opening-lines-div");
+      if (openIdx === -1) continue;
+      const openBlock = row.slice(openIdx, openIdx + 1200).replace(/&#x2B;/gi, "+");
+      const totalMatch = /away-cell">\s*<span class="[^"]*__american"[^>]*>\s*([ou])\s*([\d.]+)/i.exec(openBlock);
+      const spreadMatch = /home-cell">\s*<span class="[^"]*__american"[^>]*>\s*([+-]?[\d.]+)/i.exec(openBlock);
+      const overUnder = totalMatch ? Number(totalMatch[2]) : null;
+      const spread = spreadMatch ? Number(spreadMatch[1]) : null;
+      if (overUnder == null && spread == null) continue;
+
+      // Line-movement tracking, same pattern as MLB's fetchTotalLines above -- persists across the
+      // 15min cache refreshes, only writes KV when something actually changed (real KV-write-volume
+      // discipline, see that function's comment), and tracks spread/total as two independent values
+      // since either can move without the other.
+      const gameKey = `${sport}:${date}:${awayAbbr}-${homeAbbr}`;
+      const historyKey = `covers-line-last:${gameKey}`;
+      const prev = await env.WEATHER_KV.get(historyKey, "json");
+      const spreadDirection = spread == null || prev?.spread == null ? (prev ? "same" : "new") : spread > prev.spread ? "up" : spread < prev.spread ? "down" : "same";
+      const totalDirection = overUnder == null || prev?.overUnder == null ? (prev ? "same" : "new") : overUnder > prev.overUnder ? "up" : overUnder < prev.overUnder ? "down" : "same";
+      if (spreadDirection !== "same" || totalDirection !== "same" || !prev) {
+        await env.WEATHER_KV.put(historyKey, JSON.stringify({ spread, overUnder }), { expirationTtl: 24 * 60 * 60 });
+      }
+
+      byAwayHomeKey[`${awayAbbr}-${homeAbbr}`] = {
+        awayAbbr,
+        homeAbbr,
+        spread,
+        overUnder,
+        spreadDirection,
+        totalDirection,
+        previousSpread: prev?.spread ?? null,
+        previousOverUnder: prev?.overUnder ?? null,
+      };
+    }
+    return { date, byAwayHomeKey, source: "Covers.com" };
   });
 }
 
@@ -1596,6 +1689,21 @@ export default {
           return json({ error: `${sport.toUpperCase()} schedule is fetched client-side (ESPN blocks Worker IPs) — see index.html and DECISIONS.md` }, 400);
         }
         return json({ error: "sport must be mlb, nfl, or ncaaf" }, 400);
+      }
+
+      // Spread/total lines + real line-movement tracking for NFL/NCAAF (see fetchCoversLines'
+      // comment) -- a separate route rather than folded into /api/schedule since the schedule
+      // itself still can't be fetched here (ESPN blocks Worker IPs); the frontend calls this once
+      // per slate load, after it already has the schedule from its own client-side ESPN fetch, and
+      // merges by away-home abbreviation key.
+      if (url.pathname === "/api/lines") {
+        const sport = url.searchParams.get("sport");
+        if (sport !== "nfl" && sport !== "ncaaf") return json({ error: "sport must be nfl or ncaaf" }, 400);
+        try {
+          return json(await fetchCoversLines(env, sport));
+        } catch (err) {
+          return json({ error: err.message }, 502);
+        }
       }
 
       if (url.pathname === "/api/game") {
