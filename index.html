@@ -6,7 +6,7 @@
 <title>GiddyUpSports Weather Command Center</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Big+Shoulders+Display:wght@700;800;900&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=Anton&family=Barlow+Semi+Condensed:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Manrope:wght@400;500;600;700&family=Oswald:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&family=Roboto+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Big+Shoulders+Display:wght@600;700;800;900&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=Anton&family=Barlow+Semi+Condensed:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Manrope:wght@400;500;600;700&family=Oswald:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&family=Roboto+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
   /* ---------- Base tokens ("Floodlight") — inert fallback, always overridden below ----------
@@ -43,6 +43,9 @@
     --font-display: "Big Shoulders Display", system-ui, sans-serif;
     --font-body: "Manrope", system-ui, -apple-system, sans-serif;
     --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+    --font-display-w1: 700;
+    --font-display-w0: 600;
+    --font-display-w2: 800;
 
     --card-border-width: 1px;
     --radius-lg: 22px;
@@ -114,6 +117,9 @@
     --font-display: "Big Shoulders Display", sans-serif;
     --font-body: "IBM Plex Sans", sans-serif;
     --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+    --font-display-w1: 700;
+    --font-display-w0: 600;
+    --font-display-w2: 800;
 
     --card-border-width: 1px;
     --radius-lg: 6px;
@@ -209,6 +215,9 @@
     --font-display: "Anton", sans-serif;
     --font-body: "Barlow Semi Condensed", sans-serif;
     --font-mono: "Space Mono", ui-monospace, "SF Mono", monospace;
+    --font-display-w1: 400;
+    --font-display-w0: 400;
+    --font-display-w2: 400;
 
     --card-border-width: 1px;
     --radius-lg: 6px;
@@ -311,6 +320,9 @@
     --font-display: "Oswald", sans-serif;
     --font-body: "Public Sans", sans-serif;
     --font-mono: "Roboto Mono", ui-monospace, "SF Mono", monospace;
+    --font-display-w1: 700;
+    --font-display-w0: 600;
+    --font-display-w2: 700;
 
     --card-border-width: 1px;
     --radius-lg: 10px;
@@ -430,7 +442,7 @@
   .brand-logo::after { bottom: 3px; }
   .brand-logo .wordmark {
     font-family: var(--font-display);
-    font-weight: 800;
+    font-weight: var(--font-display-w2);
     font-size: 1.3rem;
     letter-spacing: 0.01em;
     text-transform: uppercase;
@@ -541,7 +553,7 @@
      for either yet, see DECISIONS.md), so this is the lightest way to preview their identity
      without standing up CSS token blocks for pages that don't exist. */
   .landing { display: flex; flex-direction: column; gap: 26px; padding: 8px 0 40px; }
-  .landing-intro h1 { font-family: var(--font-display); font-weight: 800; font-size: clamp(1.7rem, 3.6vw, 2.4rem); text-transform: uppercase; letter-spacing: 0.01em; margin: 0 0 8px; text-wrap: balance; }
+  .landing-intro h1 { font-family: var(--font-display); font-weight: var(--font-display-w2); font-size: clamp(1.7rem, 3.6vw, 2.4rem); text-transform: uppercase; letter-spacing: 0.01em; margin: 0 0 8px; text-wrap: balance; }
   .landing-intro p { color: var(--text-muted); max-width: 62ch; font-size: 0.92rem; line-height: 1.6; margin: 0; }
   .landing-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
   .landing-tile {
@@ -559,7 +571,7 @@
   button.landing-tile { cursor: pointer; }
   button.landing-tile:hover { transform: translateY(-3px); border-color: var(--tile-accent); }
   .landing-tile.soon { opacity: 0.78; }
-  .lt-name { font-family: var(--font-display); font-size: 1.5rem; font-weight: 800; color: var(--tile-accent); line-height: 1.05; }
+  .lt-name { font-family: var(--font-display); font-size: 1.5rem; font-weight: var(--font-display-w2); color: var(--tile-accent); line-height: 1.05; }
   .lt-sport { font-family: var(--font-mono); font-size: 0.64rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--text-faint); }
   .lt-desc { font-size: 0.82rem; color: var(--text-muted); line-height: 1.5; margin-top: 2px; }
   .lt-status {
@@ -603,7 +615,7 @@
     font-family: var(--font-mono); font-size: 0.66rem; text-transform: uppercase;
     letter-spacing: 0.06em; color: var(--text-faint);
   }
-  .game-card .gc-matchup { font-family: var(--font-display); font-weight: 700; font-size: 1.2rem; letter-spacing: 0.01em; }
+  .game-card .gc-matchup { font-family: var(--font-display); font-weight: var(--font-display-w0); font-size: 1.2rem; letter-spacing: 0.01em; }
   .game-card .gc-matchup em { font-style: normal; color: var(--text-faint); font-weight: 400; font-family: var(--font-body); margin: 0 4px; }
   .team-logo { width: 20px; height: 20px; object-fit: contain; vertical-align: -5px; margin-right: 5px; }
   .vh-matchup .team-logo { margin-left: 3px; }
@@ -663,7 +675,7 @@
   .vh-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .venue-heading .name {
     font-family: var(--font-display);
-    font-weight: 700;
+    font-weight: var(--font-display-w1);
     font-size: clamp(1.4rem, 2.6vw, 2rem);
     text-transform: uppercase;
     letter-spacing: 0.01em;
@@ -723,7 +735,7 @@
   }
   .pick-hero-call {
     font-family: var(--font-display);
-    font-weight: 700;
+    font-weight: var(--font-display-w1);
     font-size: clamp(1.9rem, 5vw, 2.7rem);
     line-height: 1.05;
     letter-spacing: 0.01em;
@@ -947,7 +959,7 @@
   .almanac-body { font-size: 0.9rem; color: var(--text-muted); }
   .almanac-summary { display: flex; gap: 28px; margin-bottom: 10px; }
   .almanac-stat { display: flex; flex-direction: column; }
-  .almanac-stat .v { font-family: var(--font-display); font-weight: 700; font-size: 1.7rem; color: var(--text); line-height: 1; }
+  .almanac-stat .v { font-family: var(--font-display); font-weight: var(--font-display-w1); font-size: 1.7rem; color: var(--text); line-height: 1; }
   .almanac-stat .l { font-family: var(--font-mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); margin-top: 4px; }
   .almanac-note { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 10px; }
   .almanac-games { display: flex; flex-direction: column; gap: 5px; border-top: var(--card-border-width) solid var(--line); padding-top: 9px; }
@@ -1484,12 +1496,6 @@
     return byTeamId;
   }
 
-  // AP poll only (Coaches poll dropped per request) -- no "AP" prefix, just the number.
-  function ncaafRankTag(rank, label) {
-    if (!rank?.ap) return null;
-    return `${label}: #${rank.ap}`;
-  }
-
   async function fetchNcaafScheduleClientSide() {
     const [schedRes, rankedTeamLookup] = await Promise.all([fetch(NCAAF_SCOREBOARD_URL), fetchNcaafRankedTeamLookup()]);
     if (!schedRes.ok) throw new Error(`ESPN scoreboard API ${schedRes.status}`);
@@ -1525,8 +1531,6 @@
         awayScore: state !== "pre" ? Number(away?.score) : null,
         homeScore: state !== "pre" ? Number(home?.score) : null,
         statusDetail: ev.status?.type?.shortDetail || null,
-        rankTagAway: ncaafRankTag(awayRank, away?.team?.abbreviation || away?.team?.displayName),
-        rankTagHome: ncaafRankTag(homeRank, home?.team?.abbreviation || home?.team?.displayName),
         apRankAway: awayRank?.ap ?? null,
         apRankHome: homeRank?.ap ?? null,
         oddsDetails: oddsData?.details || null,
@@ -1870,12 +1874,11 @@
     const d = new Date(g.startTimeUtc);
     const date = d.toLocaleDateString([], { weekday: "short", month: "numeric", day: "numeric" });
     const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-    // NCAAF rank tag(s) -- Stage 1 only has this + matchup/time/venue, no weather dot yet (see
-    // loadSchedule's ncaaf branch, which skips loadGridPreviews entirely for this sport for now).
-    const rankLine =
-      g.rankTagAway || g.rankTagHome
-        ? `<div class="gc-rank">${[g.rankTagAway, g.rankTagHome].filter(Boolean).join(" · ")}</div>`
-        : "";
+    // AP rank, inline in the matchup line itself (between each team's logo and name, same
+    // placement as the detail view's vh-matchup) rather than a separate summary line below --
+    // one real position for "how ranked is this team," not two redundant ones.
+    const awayRankPrefix = g.apRankAway ? `#${g.apRankAway} ` : "";
+    const homeRankPrefix = g.apRankHome ? `#${g.apRankHome} ` : "";
     // MLB starting pitchers -- this data was already fetched (fetchMlbSchedule hydrates
     // probablePitcher) and used internally for the Run Environment Score's pitcher signals, but
     // never actually shown to the user until now. "TBD" per side rather than hiding the row
@@ -1889,9 +1892,8 @@
     const oddsLine = currentSport === "nfl" || currentSport === "ncaaf" ? oddsLineHtml(g) : "";
     return `<button class="game-card" data-idx="${i}">
       <div class="gc-time">${date} &middot; ${time}</div>
-      <div class="gc-matchup">${teamLogoHtml(currentSport, g, "away")}${g.awayAbbr || g.away}<em>@</em>${teamLogoHtml(currentSport, g, "home")}${g.homeAbbr || g.home}</div>
+      <div class="gc-matchup">${teamLogoHtml(currentSport, g, "away")}${awayRankPrefix}${g.awayAbbr || g.away}<em>@</em>${teamLogoHtml(currentSport, g, "home")}${homeRankPrefix}${g.homeAbbr || g.home}</div>
       ${oddsLine}
-      ${rankLine}
       ${pitchersLine}
       ${scoreLine}
       <div class="gc-weather" id="gcw-${i}"><span class="gc-dot"></span>…</div>
