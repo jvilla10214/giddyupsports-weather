@@ -1417,11 +1417,13 @@
   // a game goes live/final, so absence alone is the gate, same "hide gracefully" pattern used
   // elsewhere in this file.
   // Small colored arrow (green up / red down) showing real line movement -- same convention as
-  // MLB's Total Runs Call arrow. "new" (first time tracked) and "same" (no movement since last
-  // check) show nothing, same as that one.
-  function movementArrowHtml(direction, previousValue) {
-    if (direction === "up") return `<span style="color: var(--accent-live); margin-left:2px;" title="Up from ${previousValue}">&#9650;</span>`;
-    if (direction === "down") return `<span style="color: var(--accent-warn); margin-left:2px;" title="Down from ${previousValue}">&#9660;</span>`;
+  // MLB's Total Runs Call arrow. "same" (no movement) shows nothing. fromLabel distinguishes MLB's
+  // meaning (previousValue = last time this was polled, ~15min ago) from NFL/NCAAF's (previousValue
+  // = the real Open line, compared directly to a live sportsbook's current number -- see
+  // fetchCoversLines in weather-worker.js) since the two aren't the same kind of "previous."
+  function movementArrowHtml(direction, previousValue, fromLabel = "from") {
+    if (direction === "up") return `<span style="color: var(--accent-live); margin-left:2px;" title="Up ${fromLabel} ${previousValue}">&#9650;</span>`;
+    if (direction === "down") return `<span style="color: var(--accent-warn); margin-left:2px;" title="Down ${fromLabel} ${previousValue}">&#9660;</span>`;
     return "";
   }
 
@@ -1438,10 +1440,10 @@
         // reformatted to name whichever side is actually favored, matching ESPN's own convention
         // ("CAR -2.5") so the two sources read identically to a viewer.
         const spreadText = g.coversSpread === 0 ? "PICK" : `${g.coversSpread < 0 ? g.homeAbbr : g.awayAbbr} ${g.coversSpread < 0 ? g.coversSpread : -g.coversSpread}`;
-        parts.push(spreadText + movementArrowHtml(g.spreadDirection, g.previousSpread));
+        parts.push(spreadText + movementArrowHtml(g.spreadDirection, g.previousSpread, "since open"));
       }
       if (g.coversOverUnder != null) {
-        parts.push(`O/U ${g.coversOverUnder}${movementArrowHtml(g.totalDirection, g.previousOverUnder)}`);
+        parts.push(`O/U ${g.coversOverUnder}${movementArrowHtml(g.totalDirection, g.previousOverUnder, "since open")}`);
       }
       return parts.join(" · ");
     }

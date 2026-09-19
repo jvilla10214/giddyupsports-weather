@@ -290,31 +290,61 @@ async function fetchTotalLines(env) {
   });
 }
 
-// ---- NFL/NCAAF spread + total lines with real line-movement tracking (Covers.com) ----
+// ---- NFL/NCAAF spread + total lines, Open vs. Live (Covers.com) ----
 //
 // NFL/NCAAF schedule can't be fetched server-side (ESPN blocks Worker IPs, see the file header
 // comment) -- which meant, until now, the frontend's client-side ESPN fetch was the only odds
-// source for these sports, a single snapshot with no history and no movement tracking, unlike
-// MLB's RotoGrinders-backed Total Runs Call above. Covers.com's public odds pages (confirmed live,
-// no auth, no bot-blocking) close that gap: they're server-rendered with FOUR separate tables
-// stacked in the same page (id="moneyline-table", "spread-table", "total-table",
-// "spread-total-table"), all sharing the exact same class names (opening-lines-div/away-cell/
-// home-cell) -- scoping to #spread-total-table by its unique id is what keeps this from silently
-// parsing moneyline numbers (e.g. -325) as if they were point spreads. Confirmed live against the
-// real page: away-cell holds the game's total ("o 39.5"/"u 41"), home-cell holds the home team's
-// spread ("+6.5"/"-7.5"). Covers.com HTML-entity-encodes "+" as `&#x2B;` rather than a literal
-// character -- decoded before the numeric regex runs, or a positive home spread parses as null.
+// source for these sports, a single snapshot with no sense of movement at all, unlike MLB's
+// RotoGrinders-backed Total Runs Call above. Covers.com's public odds pages (confirmed live, no
+// auth, no bot-blocking) close that gap, AND -- unlike the first version of this function, which
+// polled its own KV history every 15min and only ever compared "now" to "15 minutes ago" -- this
+// gets the real thing the user actually asked for: how far the line has moved from where it OPENED,
+// in a single fetch, no polling history needed at all for that comparison.
+//
+// Real structure, confirmed live against saved HTML (not guessed): Covers embeds FOUR separate
+// tables in the same page (id="moneyline-table", "spread-table", "total-table",
+// "spread-total-table"), all sharing the exact same class names -- scoping to #spread-total-table
+// by its unique id is what keeps this from parsing moneyline numbers (e.g. -325) as point spreads.
+// Within that table, each game has:
+//   - an "opening-lines-div" holding the OPEN line -- reliably away-cell=total ("o 39.5"), home-
+//     cell=home-team spread ("+6.5"/"-7.5"), zero exceptions across every real game checked.
+//   - one <td data-book="X"> cell per sportsbook holding that book's LIVE/current line. IMPORTANT,
+//     found the hard way: data-type="spread" on these cells is NOT a reliable content indicator --
+//     it's the same generic attribute value reused across all four tables, including ones showing
+//     moneyline odds -- and unlike the opening block, a book's away-cell/home-cell pair can hold
+//     EITHER the spread OR the total in EITHER position; it flips game to game. So the live side is
+//     classified by the VALUE's own shape (an "o "/"u " prefix means total; a bare signed number
+//     means spread for whichever team that cell belongs to), never by position. An earlier
+//     position-based attempt produced silently wrong numbers (e.g. spreads of -40) on some games
+//     while looking fine on others -- exactly the kind of bug that's dangerous specifically because
+//     it doesn't fail loudly.
+// Covers.com HTML-entity-encodes "+" as `&#x2B;` rather than a literal character -- decoded before
+// any numeric regex runs, or a positive spread parses as null.
+//
+// DraftKings is the one consistent book tracked for "live" -- present for the large majority of
+// games (confirmed: 15/15 real NFL games, 73/76 real NCAAF games; the handful of gaps are small-
+// conference games DraftKings simply doesn't post a line for, not a parsing failure) and a single
+// fixed reference avoids the noise of averaging across books that don't all update in the same
+// moment. A game with no DraftKings line just shows its Open line with no Live comparison -- same
+// "hide gracefully when absent" pattern used everywhere else in this app.
 //
 // Team-code aliases: Covers' NFL codes match this app's own (ESPN-sourced) abbreviations except
 // these three -- confirmed against the full live team-code set. NCAAF has no such verified alias
 // table (100+ teams, far less standardized abbreviations) -- an NCAAF game whose Covers code
-// doesn't match ESPN's simply gets no line data, same "hide gracefully when absent" pattern used
-// everywhere else in this app, not a crash.
+// doesn't match ESPN's simply gets no line data.
 const COVERS_ABBR_TO_KEY = { JAC: "JAX", LA: "LAR", WAS: "WSH" };
 const COVERS_URLS = {
   nfl: "https://www.covers.com/sport/football/nfl/odds",
   ncaaf: "https://www.covers.com/sport/football/ncaaf/odds",
 };
+const COVERS_LIVE_BOOK = "DraftKings";
+
+function classifyCoversValue(raw) {
+  if (raw == null) return { type: null, value: null };
+  const totalMatch = /^([ou])\s*([\d.]+)$/i.exec(raw.trim());
+  if (totalMatch) return { type: "total", value: Number(totalMatch[2]) };
+  return { type: "spread", value: Number(raw.trim()) };
+}
 
 async function fetchCoversLines(env, sport) {
   const date = todayIso();
@@ -341,39 +371,44 @@ async function fetchCoversLines(env, sport) {
       const homeAbbr = COVERS_ABBR_TO_KEY[teams[1]] || teams[1];
 
       const openIdx = row.indexOf("opening-lines-div");
-      if (openIdx === -1) continue;
-      const openBlock = row.slice(openIdx, openIdx + 1200).replace(/&#x2B;/gi, "+");
-      const totalMatch = /away-cell">\s*<span class="[^"]*__american"[^>]*>\s*([ou])\s*([\d.]+)/i.exec(openBlock);
-      const spreadMatch = /home-cell">\s*<span class="[^"]*__american"[^>]*>\s*([+-]?[\d.]+)/i.exec(openBlock);
-      const overUnder = totalMatch ? Number(totalMatch[2]) : null;
-      const spread = spreadMatch ? Number(spreadMatch[1]) : null;
-      if (overUnder == null && spread == null) continue;
+      const openBlock = openIdx === -1 ? "" : row.slice(openIdx, openIdx + 1200).replace(/&#x2B;/gi, "+");
+      const openTotalMatch = /away-cell">\s*<span class="[^"]*__american"[^>]*>\s*([ou])\s*([\d.]+)/i.exec(openBlock);
+      const openSpreadMatch = /home-cell">\s*<span class="[^"]*__american"[^>]*>\s*([+-]?[\d.]+)/i.exec(openBlock);
+      const openOverUnder = openTotalMatch ? Number(openTotalMatch[2]) : null;
+      const openSpread = openSpreadMatch ? Number(openSpreadMatch[1]) : null;
 
-      // Line-movement tracking, same pattern as MLB's fetchTotalLines above -- persists across the
-      // 15min cache refreshes, only writes KV when something actually changed (real KV-write-volume
-      // discipline, see that function's comment), and tracks spread/total as two independent values
-      // since either can move without the other.
-      const gameKey = `${sport}:${date}:${awayAbbr}-${homeAbbr}`;
-      const historyKey = `covers-line-last:${gameKey}`;
-      const prev = await env.WEATHER_KV.get(historyKey, "json");
-      const spreadDirection = spread == null || prev?.spread == null ? (prev ? "same" : "new") : spread > prev.spread ? "up" : spread < prev.spread ? "down" : "same";
-      const totalDirection = overUnder == null || prev?.overUnder == null ? (prev ? "same" : "new") : overUnder > prev.overUnder ? "up" : overUnder < prev.overUnder ? "down" : "same";
-      if (spreadDirection !== "same" || totalDirection !== "same" || !prev) {
-        await env.WEATHER_KV.put(historyKey, JSON.stringify({ spread, overUnder }), { expirationTtl: 24 * 60 * 60 });
-      }
+      // Skip the ENTIRE <a ...> opening tag via [^>]* (correctly spans arbitrarily long attribute
+      // soup -- data-fallback-url, data-betslip-legs JSON, etc. -- by matching everything that
+      // isn't a literal ">") rather than a fixed character-count window, which silently grabbed
+      // digits out of those attributes on some rows and not others during testing.
+      const bookIdx = row.indexOf(`data-book="${COVERS_LIVE_BOOK}"`);
+      const bookBlock = bookIdx === -1 ? "" : row.slice(bookIdx, bookIdx + 3000).replace(/&#x2B;/gi, "+");
+      const awayCellMatch = /away-cell">\s*<a[^>]*>\s*([ou]\s*[\d.]+|[+-]?[\d.]+)&nbsp;/i.exec(bookBlock);
+      const homeCellMatch = /home-cell">\s*<a[^>]*>\s*([ou]\s*[\d.]+|[+-]?[\d.]+)&nbsp;/i.exec(bookBlock);
+      const awayCell = classifyCoversValue(awayCellMatch?.[1]);
+      const homeCell = classifyCoversValue(homeCellMatch?.[1]);
+      const liveOverUnder = awayCell.type === "total" ? awayCell.value : homeCell.type === "total" ? homeCell.value : null;
+      // Whichever cell held the spread is that TEAM's own signed number -- normalize to home-team
+      // perspective (negate an away-cell spread) so it's directly comparable to openSpread.
+      const liveSpread = awayCell.type === "spread" ? -awayCell.value : homeCell.type === "spread" ? homeCell.value : null;
+
+      if (openOverUnder == null && openSpread == null && liveOverUnder == null && liveSpread == null) continue;
+
+      const spreadDirection = openSpread == null || liveSpread == null ? "same" : liveSpread > openSpread ? "up" : liveSpread < openSpread ? "down" : "same";
+      const totalDirection = openOverUnder == null || liveOverUnder == null ? "same" : liveOverUnder > openOverUnder ? "up" : liveOverUnder < openOverUnder ? "down" : "same";
 
       byAwayHomeKey[`${awayAbbr}-${homeAbbr}`] = {
         awayAbbr,
         homeAbbr,
-        spread,
-        overUnder,
+        spread: liveSpread ?? openSpread,
+        overUnder: liveOverUnder ?? openOverUnder,
         spreadDirection,
         totalDirection,
-        previousSpread: prev?.spread ?? null,
-        previousOverUnder: prev?.overUnder ?? null,
+        previousSpread: openSpread,
+        previousOverUnder: openOverUnder,
       };
     }
-    return { date, byAwayHomeKey, source: "Covers.com" };
+    return { date, byAwayHomeKey, source: `Covers.com (live: ${COVERS_LIVE_BOOK})` };
   });
 }
 
