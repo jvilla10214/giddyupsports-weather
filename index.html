@@ -480,6 +480,7 @@
   .game-card .gc-weather { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.76rem; color: var(--text-muted); min-height: 1.1em; }
   .game-card .gc-rank { font-size: 0.74rem; color: var(--text-muted); font-weight: 600; }
   .game-card .gc-pitchers { font-size: 0.74rem; color: var(--text-faint); }
+  .game-card .gc-odds { font-family: var(--font-mono); font-size: 0.74rem; color: var(--text-muted); }
   .game-card .gc-score { font-family: var(--font-mono); font-size: 0.76rem; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 5px; }
   .game-card .gc-score.final { color: var(--text-muted); font-weight: 600; }
   .game-card .gc-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-live); flex: none; animation: gcLivePulse 1.6s ease-in-out infinite; }
@@ -1128,6 +1129,11 @@
       // the real gate). shortDetail is ESPN's own pre-formatted clock+quarter string ("2:00 - 4th",
       // "Final") -- no need to build quarter/clock formatting by hand the way MLB's inning label was.
       const state = ev.status?.type?.state;
+      // Odds (added 2026-09-19): ESPN's scoreboard already carries a DraftKings-sourced odds
+      // object per game -- confirmed live, no new fetch/data source needed (see DECISIONS.md's
+      // free/keyless rule). The field is naturally absent once a game goes live/final (the book
+      // pulls the line), so no extra gameState check is needed -- presence alone gates display.
+      const oddsData = comp?.odds?.[0];
       return {
         gameId: ev.id,
         startTimeUtc: ev.date,
@@ -1142,6 +1148,8 @@
         awayScore: state !== "pre" ? Number(away?.score) : null,
         homeScore: state !== "pre" ? Number(home?.score) : null,
         statusDetail: ev.status?.type?.shortDetail || null,
+        oddsDetails: oddsData?.details || null,
+        oddsOverUnder: oddsData?.overUnder ?? null,
       };
     });
   }
@@ -1188,6 +1196,8 @@
       if (!homeRank && !awayRank) continue; // keep only games with at least one ranked team, either poll
       // Live score fields -- same shape/reasoning as fetchNflScheduleClientSide above.
       const state = ev.status?.type?.state;
+      // Odds -- same already-present ESPN field as NFL above, see that function's comment.
+      const oddsData = comp?.odds?.[0];
       games.push({
         gameId: ev.id,
         startTimeUtc: ev.date,
@@ -1207,6 +1217,8 @@
         statusDetail: ev.status?.type?.shortDetail || null,
         rankTagAway: ncaafRankTag(awayRank, away?.team?.abbreviation || away?.team?.displayName),
         rankTagHome: ncaafRankTag(homeRank, home?.team?.abbreviation || home?.team?.displayName),
+        oddsDetails: oddsData?.details || null,
+        oddsOverUnder: oddsData?.overUnder ?? null,
       });
     }
     // Kickoff time, earliest first -- ESPN's own scoreboard order isn't guaranteed chronological
@@ -1251,6 +1263,18 @@
     return ""; // pre-game -- no score yet, the scheduled time above already covers it
   }
 
+  // Odds line (added 2026-09-19, NFL/NCAAF only -- see fetchNflScheduleClientSide's comment for
+  // where this data comes from). No gameState check needed: ESPN drops the odds field itself once
+  // a game goes live/final, so absence alone is the gate, same "hide gracefully" pattern used
+  // elsewhere in this file.
+  function oddsLineHtml(g) {
+    if (!g.oddsDetails && g.oddsOverUnder == null) return "";
+    const parts = [];
+    if (g.oddsDetails) parts.push(g.oddsDetails);
+    if (g.oddsOverUnder != null) parts.push(`O/U ${g.oddsOverUnder}`);
+    return `<div class="gc-odds">${parts.join(" &middot; ")}</div>`;
+  }
+
   function gameCardHtml(g, i) {
     const d = new Date(g.startTimeUtc);
     const date = d.toLocaleDateString([], { weekday: "short", month: "numeric", day: "numeric" });
@@ -1271,12 +1295,14 @@
         ? `<div class="gc-pitchers">${g.awayProbablePitcher?.name || "TBD"} vs ${g.homeProbablePitcher?.name || "TBD"}</div>`
         : "";
     const scoreLine = currentSport === "mlb" ? mlbScoreLine(g) : currentSport === "nfl" || currentSport === "ncaaf" ? footballScoreLine(g) : "";
+    const oddsLine = currentSport === "nfl" || currentSport === "ncaaf" ? oddsLineHtml(g) : "";
     return `<button class="game-card" data-idx="${i}">
       <div class="gc-time">${date} &middot; ${time}</div>
       <div class="gc-matchup">${g.awayAbbr || g.away}<em>@</em>${g.homeAbbr || g.home}</div>
       ${rankLine}
       ${pitchersLine}
       ${scoreLine}
+      ${oddsLine}
       <div class="gc-weather" id="gcw-${i}"><span class="gc-dot"></span>…</div>
     </button>`;
   }
@@ -1829,6 +1855,18 @@
     }
   }
 
+  // Odds summary for the detail view's venueMeta line (NFL/NCAAF only, see oddsLineHtml above for
+  // where the data comes from) -- plain text since venueMeta is .textContent, not innerHTML. Set
+  // both before and after the Worker fetch below, since odds don't depend on that call at all and
+  // shouldn't wait on (or disappear if) it fails.
+  function oddsSummaryText(g) {
+    if (!g.oddsDetails && g.oddsOverUnder == null) return "";
+    const parts = [];
+    if (g.oddsDetails) parts.push(g.oddsDetails);
+    if (g.oddsOverUnder != null) parts.push(`O/U ${g.oddsOverUnder}`);
+    return ` · ${parts.join(" · ")}`;
+  }
+
   async function showDetail(sport, game) {
     emptyState.style.display = "none";
     gamesGrid.style.display = "none";
@@ -1836,7 +1874,7 @@
     gameView.style.display = "flex";
     renderGameStrip(currentGames.indexOf(game));
     venueTag.textContent = `${game.venue || "Venue"}…`;
-    venueMeta.textContent = `${game.away} @ ${game.home}`;
+    venueMeta.textContent = `${game.away} @ ${game.home}${oddsSummaryText(game)}`;
     insightText.textContent = "Loading AI read…";
     insightTop.innerHTML = "";
     fieldCarryEl.style.display = "none";
@@ -1891,7 +1929,7 @@
               : (sport === "nfl" || sport === "ncaaf") && game.gameState === "post"
                 ? ` · FINAL ${game.awayScore}-${game.homeScore}`
                 : "";
-      venueMeta.textContent = `${game.away} @ ${game.home} · ${suffix}${forecastNote}${pitchersNote}${scoreNote}`;
+      venueMeta.textContent = `${game.away} @ ${game.home} · ${suffix}${forecastNote}${pitchersNote}${scoreNote}${oddsSummaryText(game)}`;
       lastWeather = data.weather;
       renderInstrumentCluster(data.weather, data.score);
       renderStatPairs(sport, data.venue, data.score, data.parkFactor);
