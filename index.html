@@ -6,7 +6,7 @@
 <title>GiddyUpSports Weather Command Center</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Big+Shoulders+Display:wght@700;800;900&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=Anton&family=Barlow+Semi+Condensed:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Big+Shoulders+Display:wght@700;800;900&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=Anton&family=Barlow+Semi+Condensed:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
   /* ---------- Base tokens ("Floodlight") — inert fallback, always overridden below ----------
@@ -34,6 +34,8 @@
     --accent-ai-dim: #4a3418;
     --accent-warn: #ff6b5b;      /* unfavorable / severe */
     --accent-warn-dim: #4a2119;
+    --accent-move-up: #3ecf82;
+    --accent-move-down: #ff6b5b;
 
     --shadow: 0 20px 60px -22px rgba(0, 0, 0, 0.65);
     --shadow-soft: 0 12px 32px -18px rgba(0, 0, 0, 0.55);
@@ -68,6 +70,8 @@
       --accent-ai-dim: #fbe8cf;
       --accent-warn: #c8392b;
       --accent-warn-dim: #fbe0dd;
+      --accent-move-up: #1f8a52;
+      --accent-move-down: #c8392b;
 
       --shadow: 0 20px 50px -26px rgba(15, 30, 46, 0.22);
       --shadow-soft: 0 10px 26px -18px rgba(15, 30, 46, 0.16);
@@ -101,6 +105,8 @@
     --accent-ai-dim: #e4ded6;
     --accent-warn: #a8433d;
     --accent-warn-dim: #e4d9da;
+    --accent-move-up: #2e7d4f;
+    --accent-move-down: #a8433d;
 
     --shadow: 0 20px 50px -26px rgba(18, 24, 31, 0.16), 0 1px 2px rgba(18, 24, 31, 0.05);
     --shadow-soft: 0 10px 26px -18px rgba(18, 24, 31, 0.12);
@@ -138,6 +144,8 @@
       --accent-ai-dim: #352b1c;
       --accent-warn: #d3726b;
       --accent-warn-dim: #342325;
+      --accent-move-up: #5fa86a;
+      --accent-move-down: #d3726b;
     }
   }
   /* Explicit dark-mode toggle, wins regardless of system preference (see themeToggle in the
@@ -163,6 +171,8 @@
     --accent-ai-dim: #352b1c;
     --accent-warn: #d3726b;
     --accent-warn-dim: #342325;
+    --accent-move-up: #5fa86a;
+    --accent-move-down: #d3726b;
   }
 
   /* ---------- NFL theme: "Gridiron Pressure" — frozen turf under floodlight ----------
@@ -190,6 +200,8 @@
     --accent-ai-dim: #362d14;
     --accent-warn: #d3726b;
     --accent-warn-dim: #352425;
+    --accent-move-up: #5fa86a;
+    --accent-move-down: #d3726b;
 
     --shadow: 0 20px 60px -22px rgba(0, 0, 0, 0.6);
     --shadow-soft: 0 12px 32px -18px rgba(0, 0, 0, 0.5);
@@ -225,6 +237,8 @@
       --accent-ai-dim: #e1ddd2;
       --accent-warn: #a8433d;
       --accent-warn-dim: #e3d6d7;
+      --accent-move-up: #2e7d4f;
+      --accent-move-down: #a8433d;
 
       --shadow: 0 20px 50px -26px rgba(20, 23, 27, 0.16), 0 1px 2px rgba(20, 23, 27, 0.05);
       --shadow-soft: 0 10px 26px -18px rgba(20, 23, 27, 0.12);
@@ -251,6 +265,8 @@
     --accent-ai-dim: #e1ddd2;
     --accent-warn: #a8433d;
     --accent-warn-dim: #e3d6d7;
+    --accent-move-up: #2e7d4f;
+    --accent-move-down: #a8433d;
 
     --shadow: 0 20px 50px -26px rgba(20, 23, 27, 0.16), 0 1px 2px rgba(20, 23, 27, 0.05);
     --shadow-soft: 0 10px 26px -18px rgba(20, 23, 27, 0.12);
@@ -494,7 +510,10 @@
   }
   .game-card .gc-score { font-family: var(--font-mono); font-size: 0.76rem; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 5px; }
   .game-card .gc-score.final { color: var(--text-muted); font-weight: 600; }
-  .game-card .gc-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-live); flex: none; animation: gcLivePulse 1.6s ease-in-out infinite; }
+  .game-card .gc-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-live); flex: none; }
+  @media (prefers-reduced-motion: no-preference) {
+    .game-card .gc-live-dot { animation: gcLivePulse 1.6s ease-in-out infinite; }
+  }
   @keyframes gcLivePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
   .game-card .gc-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); flex: none; }
   .game-card .gc-dot.good { background: var(--accent-live); }
@@ -1448,8 +1467,8 @@
   // = the real Open line, compared directly to a live sportsbook's current number -- see
   // fetchCoversLines in weather-worker.js) since the two aren't the same kind of "previous."
   function movementArrowHtml(direction, previousValue, fromLabel = "from") {
-    if (direction === "up") return `<span style="color: var(--accent-live); margin-left:2px;" title="Up ${fromLabel} ${previousValue}">&#9650;</span>`;
-    if (direction === "down") return `<span style="color: var(--accent-warn); margin-left:2px;" title="Down ${fromLabel} ${previousValue}">&#9660;</span>`;
+    if (direction === "up") return `<span style="color: var(--accent-move-up); margin-left:2px;" title="Up ${fromLabel} ${previousValue}">&#9650;</span>`;
+    if (direction === "down") return `<span style="color: var(--accent-move-down); margin-left:2px;" title="Down ${fromLabel} ${previousValue}">&#9660;</span>`;
     return "";
   }
 
@@ -2019,14 +2038,15 @@
     // Line-movement arrow (see fetchTotalLines' line-movement tracking in weather-worker.js):
     // green up / red down reads as a market-odds convention (a rising total is "up", independent of
     // whether that happens to favor our own Over/Under call), not this app's usual hitter/pitcher
-    // color language -- deliberately reuses --accent-live/--accent-warn rather than the good/info
-    // pill classes above so the two color systems don't collide on the same line. "new" (first time
-    // seen today) and "same" (no movement since last check) show no arrow at all.
+    // color language -- uses the dedicated --accent-move-up/--accent-move-down tokens rather than
+    // --accent-live/--accent-warn so "the line moved" never gets mixed up with "our model likes
+    // this," which those two are actually reserved for. "new" (first time seen today) and "same"
+    // (no movement since last check) show no arrow at all.
     const arrow =
       totalCall.lineDirection === "up"
-        ? `<span style="color: var(--accent-live); margin-left:4px;" title="Up from ${totalCall.previousLine}">&#9650;</span>`
+        ? `<span style="color: var(--accent-move-up); margin-left:4px;" title="Up from ${totalCall.previousLine}">&#9650;</span>`
         : totalCall.lineDirection === "down"
-          ? `<span style="color: var(--accent-warn); margin-left:4px;" title="Down from ${totalCall.previousLine}">&#9660;</span>`
+          ? `<span style="color: var(--accent-move-down); margin-left:4px;" title="Down from ${totalCall.previousLine}">&#9660;</span>`
           : "";
     totalCallNoteEl.innerHTML =
       `<span class="hn-dot"></span>Total (${totalCall.marketLine}${arrow} O/U):` +
