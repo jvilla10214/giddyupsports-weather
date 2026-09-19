@@ -1366,6 +1366,8 @@
         statusDetail: ev.status?.type?.shortDetail || null,
         rankTagAway: ncaafRankTag(awayRank, away?.team?.abbreviation || away?.team?.displayName),
         rankTagHome: ncaafRankTag(homeRank, home?.team?.abbreviation || home?.team?.displayName),
+        apRankAway: awayRank?.ap ?? null,
+        apRankHome: homeRank?.ap ?? null,
         oddsDetails: oddsData?.details || null,
         oddsOverUnder: oddsData?.overUnder ?? null,
       });
@@ -2339,8 +2341,12 @@
     renderGameStrip(currentGames.indexOf(game));
     venueTag.textContent = `${game.venue || "Venue"}…`;
     // Matchup sits next to the venue name (not buried in the small facts line below) -- both are
-    // already known from the schedule, no need to wait on the Worker fetch.
-    vhMatchup.textContent = `${game.away} vs. ${game.home}`;
+    // already known from the schedule, no need to wait on the Worker fetch. NCAAF prefixes a
+    // ranked team's name with its real AP poll number (apRankAway/apRankHome, see
+    // fetchNcaafScheduleClientSide) -- MLB/NFL games have no rank data so this is a no-op for them.
+    const awayName = game.apRankAway ? `#${game.apRankAway} ${game.away}` : game.away;
+    const homeName = game.apRankHome ? `#${game.apRankHome} ${game.home}` : game.home;
+    vhMatchup.textContent = `${awayName} vs. ${homeName}`;
     venueMeta.textContent = "";
     // Starting pitchers are already on the schedule object (MLB Stats API's hydrate=probablePitcher,
     // fetched well before this view opens) -- shown immediately, its own line, rather than waiting
