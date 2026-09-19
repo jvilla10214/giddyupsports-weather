@@ -524,7 +524,10 @@
   .game-strip .gs-pill.active .gs-time { color: var(--bg); opacity: 0.75; }
 
   /* ---------- Venue heading ---------- */
-  .venue-heading { display: flex; flex-direction: column; gap: 2px; }
+  .venue-heading { display: flex; flex-direction: column; gap: 4px; }
+  /* Venue name stays the big anchor; the matchup sits right next to it (not buried in the small
+     meta line below) since that's the second thing a viewer actually wants at a glance. */
+  .vh-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .venue-heading .name {
     font-family: var(--font-display);
     font-weight: 700;
@@ -533,10 +536,32 @@
     letter-spacing: 0.01em;
     text-wrap: balance;
   }
+  .vh-matchup {
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 1.02rem;
+    color: var(--text);
+  }
   .venue-heading .meta {
     font-family: var(--font-mono);
     font-size: 0.78rem;
     color: var(--text-muted);
+  }
+  /* Starting pitchers: its own line under the facts row, not folded into that muted sentence --
+     real matchup content deserves more visual weight than "10 ft elevation" does. */
+  .vh-pitchers {
+    font-family: var(--font-body);
+    font-size: 0.88rem;
+    color: var(--text);
+    margin-top: 2px;
+  }
+  .vh-pitchers .vhp-label {
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    margin-right: 7px;
   }
   /* Bet Box (added 2026-09-19): its own standalone card, deliberately placed between the venue
      heading and the hero/map card so it reads before the wind data and the AI write-up, not buried
@@ -885,8 +910,12 @@
     <div class="game-strip" id="gameStrip"></div>
 
     <div class="venue-heading">
-      <div class="name" id="venueTag">Loading venue…</div>
+      <div class="vh-top">
+        <div class="name" id="venueTag">Loading venue…</div>
+        <div class="vh-matchup" id="vhMatchup"></div>
+      </div>
       <div class="meta" id="venueMeta"></div>
+      <div class="vh-pitchers" id="vhPitchers" style="display:none;"></div>
     </div>
 
     <div class="bet-box" id="betBox">
@@ -993,6 +1022,8 @@
   const backBtn = document.getElementById("backBtn");
   const gameStrip = document.getElementById("gameStrip");
   const venueTag = document.getElementById("venueTag");
+  const vhMatchup = document.getElementById("vhMatchup");
+  const vhPitchers = document.getElementById("vhPitchers");
   const oddsHero = document.getElementById("oddsHero");
   const suggestedBet = document.getElementById("suggestedBet");
   const analystReadEl = document.getElementById("analystRead");
@@ -1293,12 +1324,10 @@
     return byTeamId;
   }
 
+  // AP poll only (Coaches poll dropped per request) -- no "AP" prefix, just the number.
   function ncaafRankTag(rank, label) {
-    if (!rank) return null;
-    const parts = [];
-    if (rank.ap) parts.push(`AP #${rank.ap}`);
-    if (rank.coaches) parts.push(`Coaches #${rank.coaches}`);
-    return `${label}: ${parts.join(", ")}`;
+    if (!rank?.ap) return null;
+    return `${label}: #${rank.ap}`;
   }
 
   async function fetchNcaafScheduleClientSide() {
@@ -2220,7 +2249,19 @@
     gameView.style.display = "flex";
     renderGameStrip(currentGames.indexOf(game));
     venueTag.textContent = `${game.venue || "Venue"}…`;
-    venueMeta.textContent = `${game.away} @ ${game.home}`;
+    // Matchup sits next to the venue name (not buried in the small facts line below) -- both are
+    // already known from the schedule, no need to wait on the Worker fetch.
+    vhMatchup.textContent = `${game.away} vs. ${game.home}`;
+    venueMeta.textContent = "";
+    // Starting pitchers are already on the schedule object (MLB Stats API's hydrate=probablePitcher,
+    // fetched well before this view opens) -- shown immediately, its own line, rather than waiting
+    // on the Worker fetch just to fold it into a sentence.
+    if (sport === "mlb") {
+      vhPitchers.innerHTML = `<span class="vhp-label">Starters</span>${game.awayProbablePitcher?.name || "TBD"} vs. ${game.homeProbablePitcher?.name || "TBD"}`;
+      vhPitchers.style.display = "block";
+    } else {
+      vhPitchers.style.display = "none";
+    }
     // Doesn't depend on the Worker fetch below, so it's set immediately and never waits on (or
     // disappears if) that call fails -- see the odds-hero CSS comment for the :empty collapse.
     oddsHero.textContent = oddsSummaryText(game);
@@ -2271,26 +2312,30 @@
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       ensureMap(data.venue.lat, data.venue.lon, STADIUM_HALF_EXTENT_M[sport]);
-      const suffix =
-        sport === "mlb"
-          ? `${data.venue.altitudeFt} ft elevation${data.venue.roofType !== "open" ? ` · ${data.venue.roofType} roof` : ""}`
-          : `${data.venue.roofType} roof`;
       venueTag.textContent = data.venue.venue;
-      const forecastNote = data.weather.isForecast
-        ? ` · conditions forecast for ${new Date(data.weather.forecastForIso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} (game time)`
-        : "";
-      const pitchersNote = sport === "mlb" ? ` · ${game.awayProbablePitcher?.name || "TBD"} vs ${game.homeProbablePitcher?.name || "TBD"}` : "";
-      const scoreNote =
+      // Facts row, in the order requested: roof status, then kickoff/first-pitch time, then
+      // elevation (MLB only) -- real STATUS (closed/open), not just the static roof type, since
+      // that's what actually matters for today's weather effects. "(assumed)" carries over the
+      // same honest confirmed-vs-assumed distinction the retractable-roof note always had.
+      const roofFact =
+        data.venue.roofType === "open"
+          ? null
+          : `Roof ${data.score.roofClosed ? "closed" : "open"}${data.score.roofStatusConfirmed ? "" : " (assumed)"}`;
+      const kickoffLabel = sport === "mlb" ? "First pitch" : "Kickoff";
+      const kickoffTime = new Date(game.startTimeUtc).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      const forecastTag = data.weather.isForecast ? " (forecast)" : "";
+      const elevationFact = sport === "mlb" ? `${data.venue.altitudeFt} ft elevation` : null;
+      const scoreFact =
         sport === "mlb" && game.abstractState === "Live"
-          ? ` · LIVE ${inningLabel(game.inningState, game.currentInning)}, ${game.awayScore}-${game.homeScore}`
+          ? `LIVE ${inningLabel(game.inningState, game.currentInning)}, ${game.awayScore}-${game.homeScore}`
           : sport === "mlb" && game.abstractState === "Final"
-            ? ` · FINAL ${game.awayScore}-${game.homeScore}`
+            ? `FINAL ${game.awayScore}-${game.homeScore}`
             : (sport === "nfl" || sport === "ncaaf") && game.gameState === "in"
-              ? ` · LIVE ${game.statusDetail || ""}, ${game.awayScore}-${game.homeScore}`
+              ? `LIVE ${game.statusDetail || ""}, ${game.awayScore}-${game.homeScore}`
               : (sport === "nfl" || sport === "ncaaf") && game.gameState === "post"
-                ? ` · FINAL ${game.awayScore}-${game.homeScore}`
-                : "";
-      venueMeta.textContent = `${game.away} @ ${game.home} · ${suffix}${forecastNote}${pitchersNote}${scoreNote}`;
+                ? `FINAL ${game.awayScore}-${game.homeScore}`
+                : null;
+      venueMeta.textContent = [roofFact, `${kickoffLabel} ${kickoffTime}${forecastTag}`, elevationFact, scoreFact].filter(Boolean).join(" · ");
       lastWeather = data.weather;
       renderInstrumentCluster(data.weather, data.score);
       renderStatPairs(sport, data.venue, data.score, data.parkFactor);
