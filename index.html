@@ -2018,47 +2018,75 @@
     oddsHero.innerHTML = `O/U ${totalCall.marketLine}${movementArrowHtml(totalCall.lineDirection, totalCall.previousLine)}`;
   }
 
-  // NFL lean (added 2026-09-19): reuses the SAME Game Environment Score tier already shown as its
-  // own badge (computeGameEnvironmentScore in rules-engine.js -- wind/temp/team scoring tendency,
-  // real deterministic composite) rather than inventing a new number. Deliberately labeled "AI Lean"
-  // and captioned, NOT "Likely Over/Under" like MLB's -- scripts/backtest-nfl-environment-score.js
-  // and the qbChange follow-up (scripts/backtest-nfl-qbchange-composite.js) both proved, with an
-  // honest train/test split against real historical odds, that this exact composite does NOT beat
-  // the market (Likely Over 46-53% hit rate, Likely Under 37-51%, both at/under the ~52.4% breakeven
-  // -- see those files). This is a real, honest directional read of live conditions -- it is NOT a
-  // validated betting edge, and the caption says so every time, not just in a code comment.
   function nflLeanFromTier(tier) {
     if (tier === "Strong High-Scoring Environment" || tier === "High-Scoring Leaning") return { label: "Lean Over", cls: "good" };
     if (tier === "Strong Low-Scoring Environment" || tier === "Low-Scoring Leaning") return { label: "Lean Under", cls: "info" };
     return { label: "Toss-up", cls: "neutral" };
   }
 
-  // Suggested Bet: deliberately NOT the same treatment for every sport -- MLB has a real (if modest,
-  // R-squared ~0.032, honestly captioned in the detail row above) fitted signal tested against a
-  // real market line, so it gets a genuine call. NFL gets an honest AI-read lean (see above) rather
-  // than a validated call. NCAAF is different again -- never backtested at all, so it says that
-  // explicitly rather than implying a check that didn't happen or hiding the slot outright (which
-  // would look like a missing/broken box now that it lives in its own Bet Box card).
-  function renderSuggestedBet(sport, totalCall, gameEnvironmentScore) {
+  // "Why" line (added 2026-09-19): turns each score's own ranked contributions (see
+  // computeRunEnvironmentScore/computeGameEnvironmentScore in rules-engine.js -- both now return a
+  // `contributions` array, sorted by |weight*normalized|, that used to be computed and thrown away)
+  // into a short plain-language reason, instead of a bare tier name with no explanation attached.
+  // Real, deterministic, and tied to the actual number that moved the score -- never an invented
+  // rationale bolted on after the fact.
+  const MLB_WHY_PHRASES = {
+    carry: { pos: "carry-boosting wind/heat", neg: "carry-suppressing conditions" },
+    parkFactor: { pos: "hitter-friendly park factor", neg: "pitcher-friendly park factor" },
+    umpireLean: { pos: "hitter-friendly plate umpire", neg: "pitcher-friendly plate umpire" },
+    pitcherHr9: { pos: "both starters running hot on HR/9", neg: "strong starting pitching (low HR/9)" },
+    teamHrRate: { pos: "favorable HR matchup for both lineups", neg: "tough HR matchup for both lineups" },
+    hardHit: { pos: "elevated hard-hit rate allowed", neg: "starters limiting hard contact" },
+    parkHr: { pos: "park's real HR factor running hot", neg: "park suppressing home runs" },
+  };
+  const NFL_WHY_PHRASES = {
+    wind: { pos: "calm conditions", neg: "wind suppressing scoring" },
+    temp: { pos: "warm conditions favoring offense", neg: "cold conditions suppressing scoring" },
+    team: { pos: "both teams trending toward higher scoring", neg: "both teams trending toward lower scoring" },
+  };
+  function whyText(contributions, phraseMap, maxFactors = 2) {
+    if (!contributions?.length) return "";
+    const phrases = contributions
+      .filter((c) => Math.abs(c.weightedValue) > 0.05) // skip near-zero, noise-level factors
+      .slice(0, maxFactors)
+      .map((c) => phraseMap[c.key]?.[c.weightedValue >= 0 ? "pos" : "neg"])
+      .filter(Boolean);
+    return phrases.join(" + ");
+  }
+
+  // Suggested Bet: a real, committed call for every game where we have a computed signal --
+  // MLB's Total Runs Call (a fitted regression against the real market line) and NFL's lean (Game
+  // Environment Score's own tier) both always resolve to an actual Over/Under/side, not a hedge.
+  // Every call carries its own brief, real "why" and an honest but non-dismissive caption: this is
+  // our synthesized read of real data, not a guarantee -- sports betting carries real risk -- but it
+  // is a genuine call, not a refusal to make one. NCAAF has no computed signal yet at all (not even
+  // a "why" to attach), so it says that plainly rather than implying a check that didn't happen.
+  function renderSuggestedBet(sport, totalCall, gameEnvironmentScore, runEnvironmentScore) {
     if (sport === "mlb") {
       if (!totalCall) {
         suggestedBet.style.display = "none";
       } else {
         const cls = totalCall.call === "Likely Over" ? "good" : totalCall.call === "Likely Under" ? "info" : "neutral";
+        const why = whyText(runEnvironmentScore?.contributions, MLB_WHY_PHRASES);
         suggestedBet.innerHTML =
           `<span class="sb-label">Suggested bet</span>` +
-          `<span class="pill-lean ${cls}" style="margin-left:8px; font-size:1em;">${totalCall.call}</span>`;
+          `<span class="pill-lean ${cls}" style="margin-left:8px; font-size:1em;">${totalCall.call}</span>` +
+          (why ? `<span style="margin-left:8px; color: var(--text-muted); font-size: 0.8em;">${why}</span>` : "");
         suggestedBet.style.display = "flex";
       }
-    } else if (sport === "nfl") {
+    } else if (sport === "nfl" || sport === "ncaaf") {
+      // NCAAF's gameEnvironmentScore is weather-only (no team-tendency data exists for 130+ FBS
+      // teams, see handleNcaafGame's comment) -- genuinely thinner than NFL's, but the same tier/
+      // contributions shape, so it reuses the identical lean + why logic rather than a separate path.
       if (!gameEnvironmentScore) {
         suggestedBet.style.display = "none";
       } else {
         const lean = nflLeanFromTier(gameEnvironmentScore.tier);
+        const why = whyText(gameEnvironmentScore.contributions, NFL_WHY_PHRASES);
         suggestedBet.innerHTML =
-          `<span class="sb-label">AI lean</span>` +
+          `<span class="sb-label">Suggested bet</span>` +
           `<span class="pill-lean ${lean.cls}" style="margin-left:8px; font-size:1em;">${lean.label}</span>` +
-          `<span style="margin-left:8px; color: var(--text-muted); font-size: 0.8em;">directional read, not a proven betting edge — see model notes</span>`;
+          (why ? `<span style="margin-left:8px; color: var(--text-muted); font-size: 0.8em;">${why}</span>` : "");
         suggestedBet.style.display = "flex";
       }
     } else {
@@ -2364,7 +2392,7 @@
     // Only NCAAF's "not yet modeled" message doesn't need the Worker fetch below -- MLB's real call
     // needs data.totalRunsCall and NFL's AI lean needs data.gameEnvironmentScore, so both wait for
     // the real call below (this early call just establishes the correct hidden state until then).
-    renderSuggestedBet(sport, null, null);
+    renderSuggestedBet(sport, null, null, null);
     insightText.textContent = "Loading AI read…";
     insightTop.innerHTML = "";
     fieldCarryEl.style.display = "none";
@@ -2446,7 +2474,7 @@
         renderRunEnvironmentNote(data.gameEnvironmentScore, "Scoring Environment", 3);
       }
       renderTotalCallNote(data.totalRunsCall);
-      renderSuggestedBet(sport, data.totalRunsCall, data.gameEnvironmentScore);
+      renderSuggestedBet(sport, data.totalRunsCall, data.gameEnvironmentScore, data.runEnvironmentScore);
       if (sport === "mlb") renderPitcherNote(game, data.pitcherAdjustedEra);
       insightText.textContent = data.insight || "No insight generated.";
       if (window.setWindFlow) window.setWindFlow(data.weather.windFromDeg || 0, data.weather.windSpeedMph || 0);

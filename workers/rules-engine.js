@@ -448,7 +448,14 @@ function computeRunEnvironmentScore(inputs) {
   const weightTotal = contributions.reduce((sum, c) => sum + c.weight, 0);
   const score = Math.round((weightedSum / weightTotal) * 100) / 100;
 
-  return { score, tier: runEnvironmentTier(score), inputsUsed: contributions.map((c) => c.key) };
+  // Ranked by |weight*normalized| -- lets a caller name the actual top driver(s) of the score (e.g.
+  // "wind + hitter-friendly park factor") instead of just reporting the final number. Added for the
+  // Suggested Bet "why" line -- previously computed internally and thrown away.
+  const rankedContributions = contributions
+    .map((c) => ({ key: c.key, weightedValue: c.weight * c.normalized }))
+    .sort((a, b) => Math.abs(b.weightedValue) - Math.abs(a.weightedValue));
+
+  return { score, tier: runEnvironmentTier(score), inputsUsed: contributions.map((c) => c.key), contributions: rankedContributions };
 }
 
 // ---- Total Runs Call (Run Environment Score vs. the real market O/U line) ----
@@ -629,7 +636,12 @@ function computeGameEnvironmentScore(inputs) {
   const weightTotal = contributions.reduce((sum, c) => sum + c.weight, 0);
   const score = Math.round((weightedSum / weightTotal) * 100) / 100;
 
-  return { score, tier: nflGameEnvironmentTier(score), inputsUsed: contributions.map((c) => c.key) };
+  // See computeRunEnvironmentScore's identical comment -- same "why" purpose.
+  const rankedContributions = contributions
+    .map((c) => ({ key: c.key, weightedValue: c.weight * c.normalized }))
+    .sort((a, b) => Math.abs(b.weightedValue) - Math.abs(a.weightedValue));
+
+  return { score, tier: nflGameEnvironmentTier(score), inputsUsed: contributions.map((c) => c.key), contributions: rankedContributions };
 }
 
 export {

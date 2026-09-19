@@ -818,10 +818,30 @@ async function handleNcaafGame(env, params) {
   const venue = { venue: venueName, roofType: indoor ? "dome" : "open", lat: geo.lat, lon: geo.lon };
   const score = scoreNflGame(weather, venue);
 
-  if (preview) return json({ sport: "ncaaf", venue, weather, score, insight: null });
+  // Game Environment Score (added 2026-09-19): weather-only version of the same composite NFL
+  // uses -- no team-scoring-tendency infrastructure exists for NCAAF (no nflverse-equivalent free
+  // dataset covering 130+ FBS teams' game-by-game results), so teamScoringDelta is always null here
+  // and the composite falls back to wind+temp alone (same graceful "only present inputs count"
+  // behavior computeGameEnvironmentScore already has for NFL games missing team data early in a
+  // season). Real and deterministic as far as it goes -- genuinely weaker than NFL's version, which
+  // itself already has no proven betting edge (see scripts/backtest-nfl-environment-score.js) -- but
+  // per product direction, a real weather-based read beats no read at all.
+  let gameEnvironmentScore = null;
+  try {
+    gameEnvironmentScore = computeGameEnvironmentScore({
+      windMph: weather.windSpeedMph,
+      tempF: weather.tempF,
+      roofClosed: score.roofClosed,
+      teamScoringDelta: null,
+    });
+  } catch (err) {
+    gameEnvironmentScore = null;
+  }
+
+  if (preview) return json({ sport: "ncaaf", venue, weather, score, gameEnvironmentScore, insight: null });
 
   const insight = await narrate(env, "ncaaf", score, weather, venue, null, null, null, null, null);
-  return json({ sport: "ncaaf", venue, weather, score, insight: insight.text });
+  return json({ sport: "ncaaf", venue, weather, score, gameEnvironmentScore, insight: insight.text });
 }
 
 // ---- Weather ----
