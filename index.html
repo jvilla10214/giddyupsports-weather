@@ -480,7 +480,18 @@
   .game-card .gc-weather { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.76rem; color: var(--text-muted); min-height: 1.1em; }
   .game-card .gc-rank { font-size: 0.74rem; color: var(--text-muted); font-weight: 600; }
   .game-card .gc-pitchers { font-size: 0.74rem; color: var(--text-faint); }
-  .game-card .gc-odds { font-family: var(--font-mono); font-size: 0.74rem; color: var(--text-muted); }
+  .game-card .gc-odds {
+    font-family: var(--font-mono);
+    font-weight: 800;
+    font-size: 1.05rem;
+    color: var(--accent-atmo);
+    background: var(--accent-atmo-dim);
+    display: inline-block;
+    width: fit-content;
+    padding: 2px 9px;
+    border-radius: 6px;
+    letter-spacing: 0.01em;
+  }
   .game-card .gc-score { font-family: var(--font-mono); font-size: 0.76rem; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 5px; }
   .game-card .gc-score.final { color: var(--text-muted); font-weight: 600; }
   .game-card .gc-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-live); flex: none; animation: gcLivePulse 1.6s ease-in-out infinite; }
@@ -527,6 +538,45 @@
     font-size: 0.78rem;
     color: var(--text-muted);
   }
+  /* Odds hero (added 2026-09-19): the market's own spread/O-U, deliberately the biggest, boldest
+     thing under the venue name -- this is real DraftKings-sourced data (see oddsSummaryText), not
+     a computed signal, so it gets its own visual weight rather than living inside the muted .meta
+     line. Empty when ESPN has no odds for this game (final/live games, or none posted yet) --
+     :empty collapses it with no JS visibility toggling needed. */
+  .venue-heading .odds-hero {
+    font-family: var(--font-mono);
+    font-weight: 800;
+    font-size: clamp(1.3rem, 2.8vw, 1.9rem);
+    color: var(--accent-atmo);
+    background: var(--accent-atmo-dim);
+    display: inline-block;
+    width: fit-content;
+    padding: 4px 14px;
+    border-radius: 8px;
+    letter-spacing: 0.01em;
+    margin: 2px 0;
+  }
+  .venue-heading .odds-hero:empty { display: none; }
+  /* Suggested Bet (added 2026-09-19): deliberately separate from odds-hero above -- that's the
+     neutral market number, this is our own system's lean (MLB only -- see renderSuggestedBet's
+     comment for why NFL gets an honest "no edge" state instead of a fabricated one, and NCAAF is
+     hidden entirely as not-yet-modeled rather than implying a checked-and-empty result). */
+  .venue-heading .suggested-bet {
+    display: none;
+    align-items: center;
+    gap: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    margin: 2px 0 4px;
+  }
+  .venue-heading .sb-label {
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--text-faint);
+  }
+  .venue-heading .sb-none { color: var(--text-muted); font-style: italic; }
 
   /* ---------- Hero: a static, centered, non-interactive picture — nothing overlays it ---------- */
   .hero {
@@ -790,6 +840,8 @@
 
     <div class="venue-heading">
       <div class="name" id="venueTag">Loading venue…</div>
+      <div class="odds-hero" id="oddsHero"></div>
+      <div class="suggested-bet" id="suggestedBet"></div>
       <div class="meta" id="venueMeta"></div>
     </div>
 
@@ -829,6 +881,7 @@
           <div class="handed-note" id="handedNote" style="display:none;"></div>
           <div class="handed-note" id="umpireNote" style="display:none;"></div>
           <div class="handed-note" id="runEnvNote" style="display:none;"></div>
+          <div class="handed-note" id="qbWatchNote" style="display:none;"></div>
           <div class="handed-note" id="totalCallNote" style="display:none;"></div>
           <div class="handed-note" id="pitcherNote" style="display:none;"></div>
           <div class="insight-text" id="insightText">Loading AI read…</div>
@@ -888,6 +941,8 @@
   const backBtn = document.getElementById("backBtn");
   const gameStrip = document.getElementById("gameStrip");
   const venueTag = document.getElementById("venueTag");
+  const oddsHero = document.getElementById("oddsHero");
+  const suggestedBet = document.getElementById("suggestedBet");
   const gaugeCluster = document.getElementById("gaugeCluster");
   const statPairs = document.getElementById("statPairs");
   const insightText = document.getElementById("insightText");
@@ -897,6 +952,7 @@
   const handedNoteEl = document.getElementById("handedNote");
   const umpireNoteEl = document.getElementById("umpireNote");
   const runEnvNoteEl = document.getElementById("runEnvNote");
+  const qbWatchNoteEl = document.getElementById("qbWatchNote");
   const pitcherNoteEl = document.getElementById("pitcherNote");
   const totalCallNoteEl = document.getElementById("totalCallNote");
   const almanacCard = document.getElementById("almanacCard");
@@ -1267,12 +1323,107 @@
   // where this data comes from). No gameState check needed: ESPN drops the odds field itself once
   // a game goes live/final, so absence alone is the gate, same "hide gracefully" pattern used
   // elsewhere in this file.
-  function oddsLineHtml(g) {
+  // Shared by the game-card badge and the detail view's odds hero -- see fetchNflScheduleClientSide's
+  // comment for where oddsDetails/oddsOverUnder come from.
+  function oddsSummaryText(g) {
     if (!g.oddsDetails && g.oddsOverUnder == null) return "";
     const parts = [];
     if (g.oddsDetails) parts.push(g.oddsDetails);
     if (g.oddsOverUnder != null) parts.push(`O/U ${g.oddsOverUnder}`);
-    return `<div class="gc-odds">${parts.join(" &middot; ")}</div>`;
+    return parts.join(" · ");
+  }
+
+  function oddsLineHtml(g) {
+    const text = oddsSummaryText(g);
+    return text ? `<div class="gc-odds">${text}</div>` : "";
+  }
+
+  // QB Watch (added 2026-09-19, NFL only, detail view only -- see
+  // scripts/backtest-nfl-qbchange-composite.js for why this is descriptive-only, never a call: the
+  // signal is real in-sample (r=-0.1239, ~3.5pt gap in actual game totals) but did NOT survive an
+  // honest train/2020-23-test/2024-25 split -- the market already prices a QB change in by kickoff,
+  // so there's no residual betting edge, just real context worth surfacing.
+  //
+  // Two free, CORS-open ESPN endpoints not used anywhere else in this app yet, confirmed live:
+  //   /teams/{abbr}/depthcharts -- each team's currently-listed QB order (some formation group
+  //     always has a "qb" position; the group's NAME varies by team's base offensive personnel, so
+  //     this searches every group rather than assuming e.g. "Offense").
+  //   sports.core.api.espn.com/.../teams/{id}/injuries?limit=200 -- actually returns the full
+  //     LEAGUE injury list regardless of the team id in the path (confirmed live) but is small
+  //     enough (~58 entries) that client-side filtering by athlete id is simpler and just as
+  //     correct as trusting server-side team filtering that may not really be happening.
+  // Only "Out"/"Doubtful" trigger the flag -- "Questionable" QBs usually still play, so treating
+  // that as a change would flag far more games than actually see one.
+  // NOTE (found live while testing, 2026-09-19): the depth chart's #2 QB slot is NOT reliable
+  // enough to name as "the likely replacement" -- confirmed live, Atlanta's chart listed Tua
+  // Tagovailoa (Miami's own QB) as their backup, when the real replacement (per ESPN's own injury
+  // report text) was Cooper Rush, not even on this team's top-2 QB depth chart at all. Depth chart
+  // is used ONLY to identify the current QB1 (who to check injury status for) -- see watchFor below,
+  // which quotes ESPN's own injury shortComment for the "who's actually playing" answer instead of
+  // trusting the depth chart's backup slot.
+  async function fetchNflStartingQb(teamAbbr) {
+    const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/${teamAbbr.toLowerCase()}/depthcharts`);
+    if (!res.ok) throw new Error(`ESPN depth chart ${res.status}`);
+    const data = await res.json();
+    for (const group of data.depthchart || []) {
+      const qb = group.positions?.qb;
+      if (qb?.athletes?.length) {
+        return { starter: qb.athletes[0] };
+      }
+    }
+    return null;
+  }
+
+  async function fetchNflInjuredAthleteStatus() {
+    const res = await fetch("https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/teams/1/injuries?limit=200");
+    if (!res.ok) throw new Error(`ESPN injuries ${res.status}`);
+    const data = await res.json();
+    const statusByAthleteId = {};
+    for (const item of data.items || []) {
+      const m = /\/athletes\/(\d+)\/injuries\/(-?\d+)/.exec(item.$ref || "");
+      if (m) statusByAthleteId[m[1]] = { injuryRef: item.$ref, athleteId: m[1] };
+    }
+    // Resolve status only for the (small) set actually matched below -- not all ~58 league-wide.
+    return statusByAthleteId;
+  }
+
+  async function fetchNflQbWatch(homeAbbr, awayAbbr) {
+    if (!homeAbbr || !awayAbbr) return null;
+    const [homeQb, awayQb, injuredIndex] = await Promise.all([
+      fetchNflStartingQb(homeAbbr).catch(() => null),
+      fetchNflStartingQb(awayAbbr).catch(() => null),
+      fetchNflInjuredAthleteStatus().catch(() => ({})),
+    ]);
+    async function watchFor(abbr, qb) {
+      if (!qb?.starter) return null;
+      const match = injuredIndex[qb.starter.id];
+      if (!match) return null;
+      // ESPN's own $ref comes back as plain http:// -- force https so a page served over https
+      // (GitHub Pages) doesn't have this blocked as mixed content.
+      const statusRes = await fetch(match.injuryRef.replace(/^http:/, "https:"));
+      if (!statusRes.ok) return null;
+      const injury = await statusRes.json();
+      if (injury.status !== "Out" && injury.status !== "Doubtful") return null;
+      return { team: abbr, starterName: qb.starter.displayName, status: injury.status, note: injury.shortComment || null };
+    }
+    const [homeWatch, awayWatch] = await Promise.all([watchFor(homeAbbr, homeQb), watchFor(awayAbbr, awayQb)]);
+    return homeWatch || awayWatch ? { home: homeWatch, away: awayWatch } : null;
+  }
+
+  function renderQbWatchNote(watch) {
+    if (!watch || (!watch.home && !watch.away)) {
+      qbWatchNoteEl.style.display = "none";
+      return;
+    }
+    // Quotes ESPN's own injury-report text (see fetchNflStartingQb's comment) rather than naming a
+    // specific replacement ourselves -- that's the one part of this ESPN data that's actually
+    // reliable, unlike the depth chart's backup slot.
+    const parts = [watch.home, watch.away]
+      .filter(Boolean)
+      .map((w) => `${w.starterName} (${w.status})${w.note ? ` — ${w.note}` : ""}`);
+    qbWatchNoteEl.innerHTML = `<span class="hn-dot"></span>QB Watch: ${parts.join(" · ")}` +
+      `<span style="margin-left:8px; color: var(--text-muted); font-size: 0.85em;">real effect, no betting edge (see model notes)</span>`;
+    qbWatchNoteEl.style.display = "flex";
   }
 
   function gameCardHtml(g, i) {
@@ -1299,10 +1450,10 @@
     return `<button class="game-card" data-idx="${i}">
       <div class="gc-time">${date} &middot; ${time}</div>
       <div class="gc-matchup">${g.awayAbbr || g.away}<em>@</em>${g.homeAbbr || g.home}</div>
+      ${oddsLine}
       ${rankLine}
       ${pitchersLine}
       ${scoreLine}
-      ${oddsLine}
       <div class="gc-weather" id="gcw-${i}"><span class="gc-dot"></span>…</div>
     </button>`;
   }
@@ -1589,6 +1740,40 @@
       `<span class="pill-lean ${cls}" style="margin-left:6px;">${totalCall.call}</span>` +
       `<span style="margin-left:8px; color: var(--text-muted); font-size: 0.85em;">model implies ${totalCall.impliedTotal}</span>`;
     totalCallNoteEl.style.display = "flex";
+    // Odds hero shows the NEUTRAL market number only (same meaning as NFL/NCAAF's client-side-set
+    // text above -- this function only ever runs for MLB, so there's no cross-sport collision).
+    // The actual call goes in the separately-labeled Suggested Bet slot below (renderSuggestedBet)
+    // so "what the market says" and "what our model suggests" are never visually the same thing.
+    oddsHero.textContent = `O/U ${totalCall.marketLine}`;
+  }
+
+  // Suggested Bet (added 2026-09-19): deliberately NOT the same treatment for every sport --
+  // MLB has a real (if modest, R-squared ~0.032, honestly captioned in the detail row above) fitted
+  // signal, so it gets an actual lean. NFL does not: scripts/backtest-nfl-environment-score.js and
+  // the qbChange follow-up (scripts/backtest-nfl-qbchange-composite.js) both tested the real call
+  // logic against real historical odds with an honest train/test split, and neither survived --
+  // Likely Over came back at 46-53% hit rate (at/under the ~52.4% breakeven against standard vig)
+  // and Likely Under was worse (37-51%) in every version tried. Shipping a confident NFL lean here
+  // would mean asserting something concretely disproven by this app's own backtesting, so NFL always
+  // shows the honest "no edge" state instead of fabricating one. NCAAF is different again -- never
+  // backtested at all, so it says that, not "no edge", to avoid implying a check that didn't happen.
+  function renderSuggestedBet(sport, totalCall) {
+    if (sport === "mlb") {
+      if (!totalCall) {
+        suggestedBet.style.display = "none";
+        return;
+      }
+      const cls = totalCall.call === "Likely Over" ? "good" : totalCall.call === "Likely Under" ? "info" : "neutral";
+      suggestedBet.innerHTML =
+        `<span class="sb-label">Suggested bet</span>` +
+        `<span class="pill-lean ${cls}" style="margin-left:8px; font-size:1em;">${totalCall.call}</span>`;
+      suggestedBet.style.display = "flex";
+    } else if (sport === "nfl") {
+      suggestedBet.innerHTML = `<span class="sb-label">Suggested bet</span><span class="sb-none">No confident lean — backtested, no edge found</span>`;
+      suggestedBet.style.display = "flex";
+    } else {
+      suggestedBet.style.display = "none"; // NCAAF etc. -- not modeled at all yet, say nothing rather than imply a checked-and-empty result
+    }
   }
 
   // Starting pitchers: clickable link-through (Baseball Savant's player page -- confirmed live that
@@ -1855,18 +2040,6 @@
     }
   }
 
-  // Odds summary for the detail view's venueMeta line (NFL/NCAAF only, see oddsLineHtml above for
-  // where the data comes from) -- plain text since venueMeta is .textContent, not innerHTML. Set
-  // both before and after the Worker fetch below, since odds don't depend on that call at all and
-  // shouldn't wait on (or disappear if) it fails.
-  function oddsSummaryText(g) {
-    if (!g.oddsDetails && g.oddsOverUnder == null) return "";
-    const parts = [];
-    if (g.oddsDetails) parts.push(g.oddsDetails);
-    if (g.oddsOverUnder != null) parts.push(`O/U ${g.oddsOverUnder}`);
-    return ` · ${parts.join(" · ")}`;
-  }
-
   async function showDetail(sport, game) {
     emptyState.style.display = "none";
     gamesGrid.style.display = "none";
@@ -1874,7 +2047,16 @@
     gameView.style.display = "flex";
     renderGameStrip(currentGames.indexOf(game));
     venueTag.textContent = `${game.venue || "Venue"}…`;
-    venueMeta.textContent = `${game.away} @ ${game.home}${oddsSummaryText(game)}`;
+    venueMeta.textContent = `${game.away} @ ${game.home}`;
+    // Doesn't depend on the Worker fetch below, so it's set immediately and never waits on (or
+    // disappears if) that call fails -- see the odds-hero CSS comment for the :empty collapse.
+    oddsHero.textContent = oddsSummaryText(game);
+    // NFL's "no confident lean" is a fixed message that doesn't need the Worker fetch below either
+    // -- set immediately so it doesn't sit blank while conditions load. MLB's real call still has to
+    // wait for data.totalRunsCall, so the call after that fetch resolves (below) is what matters
+    // there; this early call is a harmless no-op for MLB (renderSuggestedBet("mlb", null) hides it,
+    // same as its initial state) and NCAAF (always hidden -- not modeled yet).
+    renderSuggestedBet(sport, null);
     insightText.textContent = "Loading AI read…";
     insightTop.innerHTML = "";
     fieldCarryEl.style.display = "none";
@@ -1882,6 +2064,7 @@
     handedNoteEl.style.display = "none";
     umpireNoteEl.style.display = "none";
     runEnvNoteEl.style.display = "none";
+    qbWatchNoteEl.style.display = "none";
     totalCallNoteEl.style.display = "none";
     pitcherNoteEl.style.display = "none";
     almanacCard.style.display = "none";
@@ -1892,6 +2075,11 @@
     windRoseDir.textContent = "mph";
     setStatus("Fetching conditions…");
     loadAlmanac(sport, game); // fire-and-forget, doesn't block the main view; already a no-op for non-MLB sports
+    // Fire-and-forget, same reasoning as loadAlmanac above -- several ESPN calls chained together,
+    // shouldn't hold up the rest of the detail view. NFL only (see fetchNflQbWatch's comment).
+    if (sport === "nfl") {
+      fetchNflQbWatch(game.homeAbbr, game.awayAbbr).then(renderQbWatchNote).catch(() => renderQbWatchNote(null));
+    }
 
     try {
       const gameIdParam = game.gameId ? `&gameId=${encodeURIComponent(game.gameId)}` : "";
@@ -1929,7 +2117,7 @@
               : (sport === "nfl" || sport === "ncaaf") && game.gameState === "post"
                 ? ` · FINAL ${game.awayScore}-${game.homeScore}`
                 : "";
-      venueMeta.textContent = `${game.away} @ ${game.home} · ${suffix}${forecastNote}${pitchersNote}${scoreNote}${oddsSummaryText(game)}`;
+      venueMeta.textContent = `${game.away} @ ${game.home} · ${suffix}${forecastNote}${pitchersNote}${scoreNote}`;
       lastWeather = data.weather;
       renderInstrumentCluster(data.weather, data.score);
       renderStatPairs(sport, data.venue, data.score, data.parkFactor);
@@ -1944,6 +2132,7 @@
         renderRunEnvironmentNote(data.gameEnvironmentScore, "Scoring Environment", 3);
       }
       renderTotalCallNote(data.totalRunsCall);
+      renderSuggestedBet(sport, data.totalRunsCall);
       if (sport === "mlb") renderPitcherNote(game, data.pitcherAdjustedEra);
       insightText.textContent = data.insight || "No insight generated.";
       if (window.setWindFlow) window.setWindFlow(data.weather.windFromDeg || 0, data.weather.windSpeedMph || 0);
