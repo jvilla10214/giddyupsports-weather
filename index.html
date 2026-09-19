@@ -538,12 +538,36 @@
     font-size: 0.78rem;
     color: var(--text-muted);
   }
-  /* Odds hero (added 2026-09-19): the market's own spread/O-U, deliberately the biggest, boldest
-     thing under the venue name -- this is real DraftKings-sourced data (see oddsSummaryText), not
-     a computed signal, so it gets its own visual weight rather than living inside the muted .meta
-     line. Empty when ESPN has no odds for this game (final/live games, or none posted yet) --
-     :empty collapses it with no JS visibility toggling needed. */
-  .venue-heading .odds-hero {
+  /* Bet Box (added 2026-09-19): its own standalone card, deliberately placed between the venue
+     heading and the hero/map card so it reads before the wind data and the AI write-up, not buried
+     inside either -- betting lines and our own suggested-bet read are the thing this dashboard leads
+     with now, not a footnote under the venue name. Same card recipe as .insight-panel for visual
+     consistency. Present for all three sports (see renderSuggestedBet/oddsSummaryText) -- MLB and
+     NFL always have real content once a game loads; NCAAF shows the market line when ESPN has one
+     plus an honest "not yet modeled" note rather than fabricating a lean.
+     updateBetBoxVisibility() (JS) hides the whole box only in the genuine edge case where NEITHER
+     the market line nor the suggested-bet slot has anything to show (e.g. a finished MLB game the
+     RotoGrinders scrape never covered). */
+  .bet-box {
+    background: var(--bg-elevated);
+    border: var(--card-border-width) solid var(--insight-border-color);
+    border-radius: var(--radius-md);
+    padding: 14px 20px;
+    box-shadow: var(--shadow-soft);
+    margin: 4px 0;
+  }
+  .bet-box-label {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--text-faint);
+    margin-bottom: 8px;
+  }
+  /* The market's own spread/O-U, deliberately the biggest, boldest thing in the box -- real
+     DraftKings-sourced data (see oddsSummaryText), not a computed signal. Empty when ESPN has no
+     odds for this game (final/live games, or none posted yet) -- :empty collapses it. */
+  .bet-box .odds-hero {
     font-family: var(--font-mono);
     font-weight: 800;
     font-size: clamp(1.3rem, 2.8vw, 1.9rem);
@@ -556,27 +580,26 @@
     letter-spacing: 0.01em;
     margin: 2px 0;
   }
-  .venue-heading .odds-hero:empty { display: none; }
-  /* Suggested Bet (added 2026-09-19): deliberately separate from odds-hero above -- that's the
-     neutral market number, this is our own system's lean (MLB only -- see renderSuggestedBet's
-     comment for why NFL gets an honest "no edge" state instead of a fabricated one, and NCAAF is
-     hidden entirely as not-yet-modeled rather than implying a checked-and-empty result). */
-  .venue-heading .suggested-bet {
+  .bet-box .odds-hero:empty { display: none; }
+  /* Suggested Bet: deliberately separate from odds-hero above -- that's the neutral market number,
+     this is our own system's read (a real lean for MLB, an honest "no edge" for NFL, "not yet
+     modeled" for NCAAF -- see renderSuggestedBet's comment). */
+  .bet-box .suggested-bet {
     display: none;
     align-items: center;
     gap: 4px;
     font-family: var(--font-mono);
     font-size: 0.82rem;
-    margin: 2px 0 4px;
+    margin: 6px 0 2px;
   }
-  .venue-heading .sb-label {
+  .bet-box .sb-label {
     text-transform: uppercase;
     letter-spacing: 0.06em;
     font-size: 0.68rem;
     font-weight: 700;
     color: var(--text-faint);
   }
-  .venue-heading .sb-none { color: var(--text-muted); font-style: italic; }
+  .bet-box .sb-none { color: var(--text-muted); font-style: italic; }
 
   /* ---------- Hero: a static, centered, non-interactive picture — nothing overlays it ---------- */
   .hero {
@@ -840,9 +863,13 @@
 
     <div class="venue-heading">
       <div class="name" id="venueTag">Loading venue…</div>
+      <div class="meta" id="venueMeta"></div>
+    </div>
+
+    <div class="bet-box" id="betBox">
+      <div class="bet-box-label">Betting Lines</div>
       <div class="odds-hero" id="oddsHero"></div>
       <div class="suggested-bet" id="suggestedBet"></div>
-      <div class="meta" id="venueMeta"></div>
     </div>
 
     <div class="hero" id="heroCard">
@@ -943,6 +970,16 @@
   const venueTag = document.getElementById("venueTag");
   const oddsHero = document.getElementById("oddsHero");
   const suggestedBet = document.getElementById("suggestedBet");
+  const betBox = document.getElementById("betBox");
+  // Hides the whole Bet Box only when NEITHER slot has anything to show (both are still in the DOM
+  // either way -- .odds-hero:empty naturally collapses via CSS, .suggested-bet toggles its own
+  // display -- this just decides whether the outer card/label is worth showing at all). Called after
+  // every place either slot's content changes.
+  function updateBetBoxVisibility() {
+    const hasOdds = oddsHero.textContent.trim() !== "";
+    const hasSuggestion = suggestedBet.style.display !== "none";
+    betBox.style.display = hasOdds || hasSuggestion ? "block" : "none";
+  }
   const gaugeCluster = document.getElementById("gaugeCluster");
   const statPairs = document.getElementById("statPairs");
   const insightText = document.getElementById("insightText");
@@ -1756,24 +1793,28 @@
   // and Likely Under was worse (37-51%) in every version tried. Shipping a confident NFL lean here
   // would mean asserting something concretely disproven by this app's own backtesting, so NFL always
   // shows the honest "no edge" state instead of fabricating one. NCAAF is different again -- never
-  // backtested at all, so it says that, not "no edge", to avoid implying a check that didn't happen.
+  // backtested at all, so it says that explicitly rather than "no edge" (a check that did happen)
+  // or hiding the slot (which would look like a missing/broken box now that it lives in its own
+  // Bet Box card alongside MLB and NFL's real content).
   function renderSuggestedBet(sport, totalCall) {
     if (sport === "mlb") {
       if (!totalCall) {
         suggestedBet.style.display = "none";
-        return;
+      } else {
+        const cls = totalCall.call === "Likely Over" ? "good" : totalCall.call === "Likely Under" ? "info" : "neutral";
+        suggestedBet.innerHTML =
+          `<span class="sb-label">Suggested bet</span>` +
+          `<span class="pill-lean ${cls}" style="margin-left:8px; font-size:1em;">${totalCall.call}</span>`;
+        suggestedBet.style.display = "flex";
       }
-      const cls = totalCall.call === "Likely Over" ? "good" : totalCall.call === "Likely Under" ? "info" : "neutral";
-      suggestedBet.innerHTML =
-        `<span class="sb-label">Suggested bet</span>` +
-        `<span class="pill-lean ${cls}" style="margin-left:8px; font-size:1em;">${totalCall.call}</span>`;
-      suggestedBet.style.display = "flex";
     } else if (sport === "nfl") {
       suggestedBet.innerHTML = `<span class="sb-label">Suggested bet</span><span class="sb-none">No confident lean — backtested, no edge found</span>`;
       suggestedBet.style.display = "flex";
     } else {
-      suggestedBet.style.display = "none"; // NCAAF etc. -- not modeled at all yet, say nothing rather than imply a checked-and-empty result
+      suggestedBet.innerHTML = `<span class="sb-label">Suggested bet</span><span class="sb-none">Not yet modeled for this sport</span>`;
+      suggestedBet.style.display = "flex";
     }
+    updateBetBoxVisibility();
   }
 
   // Starting pitchers: clickable link-through (Baseball Savant's player page -- confirmed live that
