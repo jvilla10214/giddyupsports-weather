@@ -1739,10 +1739,19 @@
   // meaning (previousValue = last time this was polled, ~15min ago) from NFL/NCAAF's (previousValue
   // = the real Open line, compared directly to a live sportsbook's current number -- see
   // fetchCoversLines in weather-worker.js) since the two aren't the same kind of "previous."
-  function movementArrowHtml(direction, previousValue, fromLabel = "from") {
-    if (direction === "up") return `<span style="color: var(--accent-move-up); margin-left:2px;" title="Up ${fromLabel} ${previousValue}">&#9650;</span>`;
-    if (direction === "down") return `<span style="color: var(--accent-move-down); margin-left:2px;" title="Down ${fromLabel} ${previousValue}">&#9660;</span>`;
-    return "";
+  // Redesigned 2026-09-20: the old &#9650;/&#9660; unicode triangles rendered inconsistently across
+  // platforms (oversized, misaligned baseline, chunky at small sizes -- exactly what "ugly" was
+  // pointing at). A small purpose-built SVG triangle renders identically everywhere and aligns
+  // cleanly inline with text. `showOpen` appends the real open value as visible text next to the
+  // arrow (not just a hover title) -- used in the roomier detail view; the compact grid-card badge
+  // stays hover-only (title attribute) since there isn't room to spell it out there.
+  function movementArrowHtml(direction, previousValue, fromLabel = "from", showOpen = false) {
+    if (direction !== "up" && direction !== "down") return "";
+    const color = direction === "up" ? "var(--accent-move-up)" : "var(--accent-move-down)";
+    const points = direction === "up" ? "5,1.5 9,8.5 1,8.5" : "5,8.5 1,1.5 9,1.5";
+    const icon = `<svg width="9" height="9" viewBox="0 0 10 10" style="vertical-align:1px; margin-left:3px;"><polygon points="${points}" fill="${color}"/></svg>`;
+    const openText = showOpen ? `<span style="color: var(--text-faint); font-size: 0.78em; font-weight: 400; margin-left:5px;">opened ${previousValue}</span>` : "";
+    return `<span title="${direction === "up" ? "Up" : "Down"} ${fromLabel} ${previousValue}">${icon}</span>${openText}`;
   }
 
   // Shared by the game-card badge and the detail view's odds hero. Prefers Covers.com's tracked
@@ -1750,8 +1759,10 @@
   // match was found for this game; falls back to ESPN's own single-snapshot odds (no movement
   // data available) when it wasn't -- same "degrade gracefully" pattern used everywhere in this
   // app. Returns an array (spread first, then total) so callers can join or stack them as needed;
-  // each entry is HTML (a movement-arrow <span> may be embedded), not plain text.
-  function oddsParts(g) {
+  // each entry is HTML (a movement-arrow <span> may be embedded), not plain text. `showOpen` spells
+  // out the real open line as visible text next to the arrow instead of a hover-only title -- pass
+  // true from the roomier detail view, leave false for the compact grid-card badge.
+  function oddsParts(g, showOpen = false) {
     if (g.coversSpread != null || g.coversOverUnder != null) {
       const parts = [];
       if (g.coversSpread != null) {
@@ -1759,10 +1770,10 @@
         // reformatted to name whichever side is actually favored, matching ESPN's own convention
         // ("CAR -2.5") so the two sources read identically to a viewer.
         const spreadText = g.coversSpread === 0 ? "PICK" : `${g.coversSpread < 0 ? g.homeAbbr : g.awayAbbr} ${g.coversSpread < 0 ? g.coversSpread : -g.coversSpread}`;
-        parts.push(spreadText + movementArrowHtml(g.spreadDirection, g.previousSpread, "since open"));
+        parts.push(spreadText + movementArrowHtml(g.spreadDirection, g.previousSpread, "since open", showOpen));
       }
       if (g.coversOverUnder != null) {
-        parts.push(`O/U ${g.coversOverUnder}${movementArrowHtml(g.totalDirection, g.previousOverUnder, "since open")}`);
+        parts.push(`O/U ${g.coversOverUnder}${movementArrowHtml(g.totalDirection, g.previousOverUnder, "since open", showOpen)}`);
       }
       return parts;
     }
@@ -1774,7 +1785,7 @@
   }
 
   function oddsSummaryText(g) {
-    return oddsParts(g).join(" · ");
+    return oddsParts(g, true).join(" · ");
   }
 
   // Spread and total each get their own row (never joined onto one "·"-separated line) so every
@@ -2343,19 +2354,12 @@
       return;
     }
     const cls = totalCall.call.includes("Over") ? "good" : "info"; // always one or the other now, see computeTotalRunsCall's own comment
-    // Line-movement arrow (see fetchTotalLines' line-movement tracking in weather-worker.js):
-    // green up / red down reads as a market-odds convention (a rising total is "up", independent of
-    // whether that happens to favor our own Over/Under call), not this app's usual hitter/pitcher
-    // color language -- uses the dedicated --accent-move-up/--accent-move-down tokens rather than
-    // --accent-live/--accent-warn so "the line moved" never gets mixed up with "our model likes
-    // this," which those two are actually reserved for. "new" (first time seen today) and "same"
-    // (no movement since last check) show no arrow at all.
-    const arrow =
-      totalCall.lineDirection === "up"
-        ? `<span style="color: var(--accent-move-up); margin-left:4px;" title="Up from ${totalCall.previousLine}">&#9650;</span>`
-        : totalCall.lineDirection === "down"
-          ? `<span style="color: var(--accent-move-down); margin-left:4px;" title="Down from ${totalCall.previousLine}">&#9660;</span>`
-          : "";
+    // Line-movement arrow (see fetchTotalLines' line-movement tracking in weather-worker.js) --
+    // shares the same movementArrowHtml every other sport's odds display uses (same reasoning
+    // there for the dedicated --accent-move-up/--accent-move-down tokens: "the line moved" should
+    // never get mixed up with "our model likes this"). "new" (first time seen today) and "same" (no
+    // movement since last check) show no arrow at all.
+    const arrow = movementArrowHtml(totalCall.lineDirection, totalCall.previousLine, "from", true);
     totalCallNoteEl.innerHTML =
       `<span class="hn-dot"></span>Total (${totalCall.marketLine}${arrow} O/U):` +
       `<span class="pill-lean ${cls}" style="margin-left:6px;">${totalCall.call}</span>` +
@@ -2366,8 +2370,10 @@
     // The actual call goes in the separately-labeled Suggested Bet slot below (renderSuggestedBet)
     // so "what the market says" and "what our model suggests" are never visually the same thing.
     // Real up/down arrow (see fetchTotalLines' KV-tracked line movement) -- previously only shown
-    // in the small detail row above, now on the big number too, per request.
-    oddsHero.innerHTML = `O/U ${totalCall.marketLine}${movementArrowHtml(totalCall.lineDirection, totalCall.previousLine)}`;
+    // in the small detail row above, now on the big number too, per request. showOpen=true spells
+    // out the real open line next to it (per request 2026-09-20) rather than hiding it in a hover
+    // title -- this card's whole job is "what the market says," so the open line belongs here.
+    oddsHero.innerHTML = `O/U ${totalCall.marketLine}${movementArrowHtml(totalCall.lineDirection, totalCall.previousLine, "from", true)}`;
   }
 
   // Always directional (changed 2026-09-20) -- "Toss-up" used to fire for the whole Neutral tier,
