@@ -703,9 +703,14 @@
   .game-card:hover, .game-card:focus-visible { transform: translateY(-2px); border-color: var(--accent-atmo); }
   .game-card:active { transform: translateY(0) scale(0.98); border-color: var(--accent-atmo); box-shadow: none; }
 
-  .gc-glow { position: absolute; width: 150px; height: 150px; border-radius: 50%; filter: blur(36px); opacity: 0.16; pointer-events: none; }
+  .gc-glow { position: absolute; width: 150px; height: 150px; border-radius: 50%; filter: blur(36px); opacity: 0.16; pointer-events: none; transition: opacity 0.15s ease; }
   .gc-glow.away { top: -40px; left: -30px; background: var(--away-color, var(--accent-atmo)); }
   .gc-glow.home { bottom: -50px; right: -30px; background: var(--home-color, var(--accent-atmo)); }
+  /* Final games dim their team-color glow -- real user feedback: the muted odds pill (see
+     .gc-odds-pill.muted) looked arbitrary on its own, disconnected from anything else on the card.
+     Pairing it with a quieter glow and a real chip around FINAL (below) makes "this game is over"
+     one consistent visual language instead of one isolated color change nobody could explain. */
+  .game-card.is-final .gc-glow { opacity: 0.07; }
 
   .gc-top { display: flex; align-items: center; justify-content: space-between; z-index: 1; }
   .game-card .gc-time {
@@ -713,7 +718,10 @@
     letter-spacing: 0.07em; color: var(--text-faint);
   }
   .gc-live-badge { display: flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 0.62rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--accent-live); }
-  .gc-final-badge { font-family: var(--font-mono); font-size: 0.62rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-faint); }
+  .gc-final-badge {
+    font-family: var(--font-mono); font-size: 0.6rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
+    color: var(--text-faint); background: var(--bg-elevated-2); padding: 2px 7px; border-radius: 100px;
+  }
 
   /* Teams stacked vertically (logo above code) rather than side-by-side -- a horizontal chip+text
      row left each team sharing a cramped slice of the row with the big score in the middle, and
@@ -2197,7 +2205,7 @@
       ? `<div class="gc-score-center"><span class="gc-score-num${awayLead ? " lead" : ""}">${g.awayScore}</span><span class="gc-score-sep">&ndash;</span><span class="gc-score-num${homeLead ? " lead" : ""}">${g.homeScore}</span></div>`
       : `<div class="gc-score-center"><span class="gc-vs">VS</span></div>`;
 
-    return `<button class="game-card" data-idx="${i}" style="${glowStyle}">
+    return `<button class="game-card${state === "final" ? " is-final" : ""}" data-idx="${i}" style="${glowStyle}">
       <div class="gc-glow away"></div>
       <div class="gc-glow home"></div>
       <div class="gc-top">
