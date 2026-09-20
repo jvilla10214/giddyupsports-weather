@@ -804,7 +804,6 @@
   }
   .pick-hero.good .pick-hero-call { color: var(--accent-live); }
   .pick-hero.info .pick-hero-call { color: var(--accent-atmo); }
-  .pick-hero.neutral .pick-hero-call { color: var(--text); }
   .pick-hero-why {
     font-family: var(--font-body);
     font-size: 0.95rem;
@@ -812,6 +811,20 @@
     margin-top: 8px;
     max-width: 60ch;
   }
+  /* Strength modifiers (added 2026-09-20, alongside removing "Toss-up" -- every call is now
+     directional, see nflLeanFromScore/computeTotalRunsCall's own comments). These grade how UNUSUAL
+     a reading is, not how likely it is to be right -- checked against real historical outcomes for
+     both sports, and score magnitude does not predict real hit rate (flat ~47-51% across every
+     bucket, see project memory). ".lean" (the middle tier) intentionally gets no modifier at all --
+     it's the existing .good/.info look above, unchanged, since it's the median case. */
+  .pick-hero.strong { border-width: 2px; }
+  .pick-hero.slight {
+    background: color-mix(in srgb, var(--bg-elevated-2) 55%, var(--bg-elevated));
+    border-style: dashed;
+  }
+  .pick-hero.slight.good { border-color: color-mix(in srgb, var(--accent-live) 45%, var(--line)); }
+  .pick-hero.slight.info { border-color: color-mix(in srgb, var(--accent-atmo) 45%, var(--line)); }
+  .pick-hero.slight .pick-hero-call { opacity: 0.82; }
   .pick-hero-none { font-style: italic; color: var(--text-muted); font-size: 1.1rem; }
 
   /* Market Line (was "Betting Lines" -- renamed now that the call itself lives in Pick Hero above,
@@ -2329,7 +2342,7 @@
       totalCallNoteEl.style.display = "none";
       return;
     }
-    const cls = totalCall.call === "Likely Over" ? "good" : totalCall.call === "Likely Under" ? "info" : "neutral";
+    const cls = totalCall.call.includes("Over") ? "good" : "info"; // always one or the other now, see computeTotalRunsCall's own comment
     // Line-movement arrow (see fetchTotalLines' line-movement tracking in weather-worker.js):
     // green up / red down reads as a market-odds convention (a rising total is "up", independent of
     // whether that happens to favor our own Over/Under call), not this app's usual hitter/pitcher
@@ -2357,10 +2370,27 @@
     oddsHero.innerHTML = `O/U ${totalCall.marketLine}${movementArrowHtml(totalCall.lineDirection, totalCall.previousLine)}`;
   }
 
-  function nflLeanFromTier(tier) {
-    if (tier === "Strong High-Scoring Environment" || tier === "High-Scoring Leaning") return { label: "Lean Over", cls: "good" };
-    if (tier === "Strong Low-Scoring Environment" || tier === "Low-Scoring Leaning") return { label: "Lean Under", cls: "info" };
-    return { label: "Toss-up", cls: "neutral" };
+  // Always directional (changed 2026-09-20) -- "Toss-up" used to fire for the whole Neutral tier,
+  // which meant refusing to answer on exactly the games where the score's own sign (even if small)
+  // is still the best real information available. Needs the raw score, not just the tier label,
+  // since Neutral spans both slightly-positive and slightly-negative real values (see
+  // ncaafGameEnvironmentTier/nflGameEnvironmentTier's own thresholds in rules-engine.js) -- the tier
+  // alone can't tell you which side of zero a Neutral-tier game actually falls on.
+  //
+  // `strength` grades how UNUSUAL the reading is (a real, checkable fact about the score itself),
+  // not how likely the call is to be right -- that was checked against real historical outcomes for
+  // both sports and score magnitude does not predict real hit rate (flat ~47-51% across every
+  // bucket, see project memory). The UI's "Strong Lean"/"Lean"/"Slight Lean" wording is deliberate:
+  // never "confident"/"uncertain", which would claim a calibration this model doesn't have.
+  function nflLeanFromScore(score, tier) {
+    const isOver = score >= 0;
+    if (tier === "Strong High-Scoring Environment" || tier === "Strong Low-Scoring Environment") {
+      return { label: isOver ? "Strong Lean Over" : "Strong Lean Under", cls: isOver ? "good" : "info", strength: "strong" };
+    }
+    if (tier === "High-Scoring Leaning" || tier === "Low-Scoring Leaning") {
+      return { label: isOver ? "Lean Over" : "Lean Under", cls: isOver ? "good" : "info", strength: "lean" };
+    }
+    return { label: isOver ? "Slight Lean Over" : "Slight Lean Under", cls: isOver ? "good" : "info", strength: "slight" };
   }
 
   // "Why" line (added 2026-09-19): turns each score's own ranked contributions (see
@@ -2397,18 +2427,18 @@
     return phrases.join(" + ");
   }
 
-  // Suggested Bet: a real, committed call for every game where we have a computed signal --
-  // MLB's Total Runs Call (a fitted regression against the real market line) and NFL's lean (Game
-  // Environment Score's own tier) both always resolve to an actual Over/Under/side, not a hedge.
-  // Every call carries its own brief, real "why" and an honest but non-dismissive caption: this is
-  // our synthesized read of real data, not a guarantee -- sports betting carries real risk -- but it
-  // is a genuine call, not a refusal to make one. NCAAF has no computed signal yet at all (not even
-  // a "why" to attach), so it says that plainly rather than implying a check that didn't happen.
-  // Sets the Pick Hero card's sentiment class (drives its background tint + call color, see CSS),
-  // the call text itself, and the "why" line underneath. One shared setter so every sport renders
-  // through the exact same hero treatment rather than each sport styling its own card.
-  function setPickHero(cls, callText, note) {
-    pickHero.className = `pick-hero${cls ? " " + cls : ""}`;
+  // Suggested Bet: a real, committed call for every game where we have a computed signal -- MLB's
+  // Total Runs Call and NFL/NCAAF's lean (Game Environment Score's own score+tier) always resolve
+  // to an actual Over/Under/side, never "Toss-up" (removed 2026-09-20 -- see computeTotalRunsCall
+  // and nflLeanFromScore's own comments for why). Every call carries its own brief, real "why" and
+  // an honest but non-dismissive caption: this is our synthesized read of real data, not a
+  // guarantee -- sports betting carries real risk -- but it is a genuine call, not a refusal to
+  // make one. Sets the Pick Hero card's sentiment class (drives its background tint + call color)
+  // and a strength class (drives visual intensity -- see CSS for why this grades how UNUSUAL the
+  // reading is, not how likely it is to be right). One shared setter so every sport renders through
+  // the exact same hero treatment rather than each sport styling its own card.
+  function setPickHero(cls, callText, note, strength) {
+    pickHero.className = `pick-hero${cls ? " " + cls : ""}${strength ? " " + strength : ""}`;
     pickHeroCall.textContent = callText;
     pickHeroWhy.textContent = note || "";
     pickHero.style.display = "block";
@@ -2419,18 +2449,19 @@
       if (!totalCall) {
         pickHero.style.display = "none";
       } else {
-        const cls = totalCall.call === "Likely Over" ? "good" : totalCall.call === "Likely Under" ? "info" : "neutral";
-        setPickHero(cls, totalCall.call, whyText(runEnvironmentScore?.contributions, MLB_WHY_PHRASES));
+        const cls = totalCall.call.includes("Over") ? "good" : "info";
+        const strength = totalCall.call.startsWith("Likely") ? "strong" : "lean"; // MLB only has these two real tiers, no "slight"
+        setPickHero(cls, totalCall.call, whyText(runEnvironmentScore?.contributions, MLB_WHY_PHRASES), strength);
       }
     } else if (sport === "nfl" || sport === "ncaaf") {
-      // NCAAF's gameEnvironmentScore is weather-only (no team-tendency data exists for 130+ FBS
-      // teams, see handleNcaafGame's comment) -- genuinely thinner than NFL's, but the same tier/
-      // contributions shape, so it reuses the identical lean + why logic rather than a separate path.
+      // NCAAF's gameEnvironmentScore now includes a real team signal too (added 2026-09-20, see
+      // fetchNcaafTeamScoringDelta in weather-worker.js) -- same tier/contributions shape as NFL's,
+      // so it reuses the identical lean + why logic rather than a separate path.
       if (!gameEnvironmentScore) {
         pickHero.style.display = "none";
       } else {
-        const lean = nflLeanFromTier(gameEnvironmentScore.tier);
-        setPickHero(lean.cls, lean.label, whyText(gameEnvironmentScore.contributions, NFL_WHY_PHRASES));
+        const lean = nflLeanFromScore(gameEnvironmentScore.score, gameEnvironmentScore.tier);
+        setPickHero(lean.cls, lean.label, whyText(gameEnvironmentScore.contributions, NFL_WHY_PHRASES), lean.strength);
       }
     } else {
       pickHero.className = "pick-hero";

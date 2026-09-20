@@ -492,16 +492,23 @@ function computeRunEnvironmentScore(inputs) {
 // before applies: this is a real, correctly-signed signal, not a strong predictor of any one game.
 //
 // TOTAL_CALL_MARGIN below is deliberately wide (not tuned against real historical odds, which this
-// project doesn't have -- RotoGrinders only exposes today's live line, not a historical archive)
-// specifically so the call only fires "Likely Over/Under" on a genuinely large gap between our
-// implied total and the market line, and reads "Toss-up" otherwise -- consistent with the honest,
-// unconfident framing the residual std dev demands; left unchanged since residStd barely moved.
-// Revisit both the regression and the margin together whenever resScore's composition changes
-// again, and once real historical market-line outcomes can be collected to actually backtest this
-// call's hit rate, the same way every other constant in this file has been.
+// project doesn't have -- RotoGrinders only exposes today's live line, not a historical archive) --
+// a genuinely large gap between our implied total and the market line earns the confident "Likely"
+// wording; anything smaller still gets a real "Lean" call in the same direction rather than a
+// non-answer (changed 2026-09-20 -- see computeTotalRunsCall's own comment for why "Toss-up" was
+// removed). Revisit both the regression and the margin together whenever resScore's composition
+// changes again, and once real historical market-line outcomes can be collected to actually
+// backtest this call's hit rate, the same way every other constant in this file has been.
 const TOTAL_RUNS_REGRESSION = { intercept: 8.841, slope: 1.739 };
-const TOTAL_CALL_MARGIN = 1.0; // runs of gap between implied total and market line before calling a lean at all
+const TOTAL_CALL_MARGIN = 1.0; // runs of gap between implied total and market line before "Likely" (vs. just "Lean")
 
+// Always directional (changed 2026-09-20) -- "Toss-up" used to fire for any |delta| under
+// TOTAL_CALL_MARGIN, which meant refusing to answer on exactly the games where the sign of delta
+// (even if small) is still the best real information available. A checked alternative -- grading
+// confidence by delta's own magnitude -- was tested against real historical outcomes and found not
+// to predict real hit rate at all (flat ~47-51% regardless of bucket, see project memory), so
+// "Lean" vs "Likely" here is honestly a "how big is the gap" label, not a "how likely to be right"
+// one, and the product copy should never imply otherwise.
 /**
  * @param {number} resScore - Run Environment Score's `score` (not the tier label)
  * @param {number} marketLine - the real O/U line for this game (e.g. from RotoGrinders)
@@ -510,7 +517,7 @@ const TOTAL_CALL_MARGIN = 1.0; // runs of gap between implied total and market l
 function computeTotalRunsCall(resScore, marketLine) {
   const impliedTotal = Math.round((TOTAL_RUNS_REGRESSION.intercept + TOTAL_RUNS_REGRESSION.slope * resScore) * 100) / 100;
   const delta = Math.round((impliedTotal - marketLine) * 100) / 100;
-  const call = delta >= TOTAL_CALL_MARGIN ? "Likely Over" : delta <= -TOTAL_CALL_MARGIN ? "Likely Under" : "Toss-up";
+  const call = delta >= 0 ? (delta >= TOTAL_CALL_MARGIN ? "Likely Over" : "Lean Over") : delta <= -TOTAL_CALL_MARGIN ? "Likely Under" : "Lean Under";
   return { impliedTotal, marketLine, delta, call };
 }
 

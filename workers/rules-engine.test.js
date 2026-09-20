@@ -215,12 +215,13 @@ const underCall = computeTotalRunsCall(0, 11);
 console.log("Total call vs a high market line:", underCall);
 assert(underCall.call === "Likely Under", "A market line well above our implied total should call Likely Under");
 
-// Market line very close to our implied total -> Toss-up, not a false-confidence lean either way.
-// This is the common case given the regression's real residual std dev (4.52 runs) -- most real
-// market lines should land inside the margin, not outside it.
-const tossUp = computeTotalRunsCall(0, 8.5);
-console.log("Total call vs a close market line:", tossUp);
-assert(tossUp.call === "Toss-up", "A market line within TOTAL_CALL_MARGIN of our implied total should be a Toss-up, not a confident lean");
+// Market line very close to our implied total -> a real directional Lean, not a non-answer. This is
+// the common case given the regression's real residual std dev (4.52 runs) -- most real market
+// lines should land inside TOTAL_CALL_MARGIN, not outside it (changed 2026-09-20 -- "Toss-up" was
+// removed, see computeTotalRunsCall's own comment).
+const closeCall = computeTotalRunsCall(0, 8.5);
+console.log("Total call vs a close market line:", closeCall);
+assert(closeCall.call === "Lean Over", "A market line just below our implied total, inside TOTAL_CALL_MARGIN, should still call Lean Over, not refuse to answer");
 
 // delta should be signed correctly: impliedTotal - marketLine, positive means we lean Over.
 assert(overCall.delta > 0, "A Likely Over call should have a positive delta (implied above market)");
