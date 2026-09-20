@@ -1649,6 +1649,12 @@
         startTimeUtc: ev.date,
         away: away?.team?.displayName,
         home: home?.team?.displayName,
+        // School name only (no mascot, e.g. "Ohio State" not "Ohio State Buckeyes") -- confirmed
+        // live to match CollegeFootballData's own team-name convention directly for every real FBS
+        // matchup (see fetchNcaafSpPlusTendency in weather-worker.js); used only for that lookup,
+        // never displayed.
+        awayLocation: away?.team?.location || null,
+        homeLocation: home?.team?.location || null,
         awayAbbr: away?.team?.abbreviation || null,
         homeAbbr: home?.team?.abbreviation || null,
         awayLogo: away?.team?.logo || null,
@@ -2061,7 +2067,7 @@
           // city/state/indoor/name ride along from the client's own ESPN-sourced schedule.
           const ncaafParams =
             sport === "ncaaf"
-              ? `&city=${encodeURIComponent(g.venueCity || "")}&state=${encodeURIComponent(g.venueState || "")}&indoor=${g.venueIndoor ? "1" : "0"}&venueName=${encodeURIComponent(g.venue || "")}`
+              ? `&city=${encodeURIComponent(g.venueCity || "")}&state=${encodeURIComponent(g.venueState || "")}&indoor=${g.venueIndoor ? "1" : "0"}&venueName=${encodeURIComponent(g.venue || "")}&awayLocation=${encodeURIComponent(g.awayLocation || "")}&homeLocation=${encodeURIComponent(g.homeLocation || "")}`
               : "";
           const res = await fetch(`${WORKER_BASE}/api/game?sport=${sport}&venueKey=${g.venueKey}&preview=1&startTimeUtc=${encodeURIComponent(g.startTimeUtc)}${ncaafParams}`);
           const data = await res.json();
@@ -2766,7 +2772,7 @@
       // passed through so the Worker can geocode+score without a lookup table (see Stage 2 plan).
       const ncaafParams =
         sport === "ncaaf"
-          ? `&city=${encodeURIComponent(game.venueCity || "")}&state=${encodeURIComponent(game.venueState || "")}&indoor=${game.venueIndoor ? "1" : "0"}&venueName=${encodeURIComponent(game.venue || "")}`
+          ? `&city=${encodeURIComponent(game.venueCity || "")}&state=${encodeURIComponent(game.venueState || "")}&indoor=${game.venueIndoor ? "1" : "0"}&venueName=${encodeURIComponent(game.venue || "")}&awayLocation=${encodeURIComponent(game.awayLocation || "")}&homeLocation=${encodeURIComponent(game.homeLocation || "")}`
           : "";
       const res = await fetch(`${WORKER_BASE}/api/game?sport=${sport}&venueKey=${game.venueKey}&startTimeUtc=${encodeURIComponent(game.startTimeUtc)}${gameIdParam}${awayAbbrParam}${ncaafParams}`);
       const data = await res.json();

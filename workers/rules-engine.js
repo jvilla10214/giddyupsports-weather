@@ -587,6 +587,19 @@ const NFL_GES_SCALE = {
   teamScoringDelta: 4.3, // real p75 of |value|, point-in-time corrected -- was 3.29 -- see comment above
 };
 
+// NCAAF's own team-strength scale (added 2026-09-20, see scripts/backtest-ncaaf-sp-plus-signal.js).
+// Built from CollegeFootballData's SP+ ratings (offense.rating + defense.rating, both real
+// points-per-game-equivalent efficiency numbers, NOT nflverse's raw scored/allowed points) --
+// genuinely different units from NFL_GES_SCALE.teamScoringDelta, so it needs its own scale rather
+// than reusing NFL's 4.3. combinedScoringTendency = (homeOff-leagueAvgOff)+(awayOff-leagueAvgOff)
+// +(homeDef-leagueAvgDef)+(awayDef-leagueAvgDef), using season (S-1)'s FINAL SP+ rating to predict
+// season S's games -- CFBD's historical ratings endpoint only returns each season's final rating
+// (no true point-in-time weekly snapshot for past seasons), so prior-year-final is the honest,
+// look-ahead-free stand-in backtested here. Real result: r=0.175 standalone across 4,174 FBS-v-FBS
+// games (2020-2025), r=0.183 on the held-out 2024-2025 test seasons -- stronger than NFL's own
+// teamScoringDelta (r=0.145) and, unlike it, didn't degrade out-of-sample.
+const NCAAF_TEAM_SCALE = 14.49; // real p75 of |combinedScoringTendency| across the same 4,174 games
+
 // Gates team scoring tendency out entirely below this many games of season-to-date data -- same
 // small-sample reasoning as MIN_PITCHER_IP above; early in a season a team's average is mostly noise.
 const MIN_TEAM_GAMES_FOR_TENDENCY = 3;
@@ -614,17 +627,23 @@ function nflGameEnvironmentTier(score) {
  *   windMph: number|null - ignored when roofClosed (matches scoreNflGame's own wind/precip gate)
  *   tempF: number|null - ignored when roofClosed
  *   roofClosed: boolean
- *   teamScoringDelta: number|null - combined home+away scoring "involvement" (own points scored +
- *     allowed, averaged) minus league average, from real season-to-date data (see
+ *   teamScoringDelta: number|null - NFL: combined home+away scoring "involvement" (own points scored
+ *     + allowed, averaged) minus league average, from real season-to-date data (see
  *     fetchNflTeamScoringTendency in weather-worker.js), null if either team has fewer than
- *     MIN_TEAM_GAMES_FOR_TENDENCY games played yet this season
+ *     MIN_TEAM_GAMES_FOR_TENDENCY games played yet this season. NCAAF: combinedScoringTendency from
+ *     SP+ ratings (see fetchNcaafSpPlusTendency), same shape/meaning, different real-world units.
+ *   teamScale: number - normalization scale for teamScoringDelta; defaults to NFL's own
+ *     (NFL_GES_SCALE.teamScoringDelta) for backward compatibility -- NCAAF callers must pass
+ *     NCAAF_TEAM_SCALE explicitly, since SP+ ratings are not on the same scale as nflverse's raw
+ *     scored/allowed points.
  * @returns {{score: number, tier: string, inputsUsed: string[]}|null} null only if every input is missing
  */
-function computeGameEnvironmentScore(inputs) {
+function computeGameEnvironmentScore(inputs, teamScale = NFL_GES_SCALE.teamScoringDelta) {
   const contributions = [];
   const add = (key, raw, scaleKey) => {
     if (raw == null || !Number.isFinite(raw)) return;
-    contributions.push({ key, weight: NFL_GES_WEIGHTS[key], normalized: raw / NFL_GES_SCALE[scaleKey] });
+    const scale = scaleKey === "teamScoringDelta" ? teamScale : NFL_GES_SCALE[scaleKey];
+    contributions.push({ key, weight: NFL_GES_WEIGHTS[key], normalized: raw / scale });
   };
   add("wind", inputs.roofClosed ? null : inputs.windMph != null ? -inputs.windMph : null, "windMph");
   add("temp", inputs.roofClosed || inputs.tempF == null ? null : inputs.tempF - 60, "tempFDeltaFrom60");
@@ -657,4 +676,5 @@ export {
   computeConditionsAdjustedEra,
   computeGameEnvironmentScore,
   MIN_TEAM_GAMES_FOR_TENDENCY,
+  NCAAF_TEAM_SCALE,
 };

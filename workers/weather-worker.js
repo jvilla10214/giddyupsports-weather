@@ -8,6 +8,9 @@
  * (declared in wrangler.toml):
  *   - KV namespace bound as `WEATHER_KV`
  *   - Workers AI bound as `AI` (no API key needed — it's a native Cloudflare binding)
+ *   - Secret `CFBD_API_KEY` (free tier, collegefootballdata.com/key -- email signup, no card) for
+ *     NCAAF's SP+ team-strength signal, see fetchNcaafSpPlusTendency. This Worker's first real
+ *     external API secret -- set via `wrangler secret put CFBD_API_KEY`, not wrangler.toml.
  *
  * Routes (all GET, all CORS-open for the GitHub Pages frontend):
  *   /api/schedule?sport=mlb                                 -> today's MLB games (includes both
@@ -49,7 +52,7 @@
  */
 
 import { MLB_STADIUMS, NFL_STADIUMS, MLB_TEAM_ID_TO_KEY, MLB_KEY_TO_TEAM_ID } from "../data/stadiums.js";
-import { scoreMlbGame, scoreNflGame, windCompassOrVariable, computeRunEnvironmentScore, MIN_PITCHER_IP, MIN_PITCHER_BATTED_BALLS, computeTotalRunsCall, computeConditionsAdjustedEra, computeGameEnvironmentScore, MIN_TEAM_GAMES_FOR_TENDENCY } from "./rules-engine.js";
+import { scoreMlbGame, scoreNflGame, windCompassOrVariable, computeRunEnvironmentScore, MIN_PITCHER_IP, MIN_PITCHER_BATTED_BALLS, computeTotalRunsCall, computeConditionsAdjustedEra, computeGameEnvironmentScore, MIN_TEAM_GAMES_FOR_TENDENCY, NCAAF_TEAM_SCALE } from "./rules-engine.js";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -796,6 +799,53 @@ async function fetchNcaafVenueGeo(env, venueId, city, state) {
   });
 }
 
+// ---- NCAAF team strength (CollegeFootballData.com SP+) ----
+//
+// Closes a real gap: NCAAF's Game Environment Score was weather-only (no nflverse-equivalent free
+// dataset exists covering all 130+ FBS teams' game-by-game results). SP+ (Bill Connelly's
+// predictive power rating) gives every FBS team a real offense/defense efficiency rating each
+// season, free tier, one API key (email signup, no card). See scripts/backtest-ncaaf-sp-plus-signal.js
+// for the real backtest this is built from: r=0.175 vs actual total points across 4,174 FBS-v-FBS
+// games (2020-2025), r=0.183 on held-out 2024-2025 test seasons -- stronger than NFL's own shipped
+// teamScoringDelta (r=0.145), and unlike it, didn't degrade out-of-sample.
+//
+// IMPORTANT: CFBD's /ratings/sp endpoint for a past season only ever returns that season's FINAL
+// rating (confirmed live -- a `week` param does not return an earlier in-season snapshot for a
+// completed season), so using the CURRENT season's own in-progress rating mid-season would be an
+// untested methodology, not what was actually backtested. This uses the PRIOR season's final
+// rating, exactly as backtested, for every week of the current season -- a known, honest limitation
+// (a team with an offseason coaching change or major roster turnover won't show up until next
+// year's rating), not an oversight. One real fetch per day covers every game (the ratings table for
+// an entire season is a single request), cached generously since SP+ doesn't change intra-day.
+async function fetchNcaafSpPlusTendency(env, awayLocation, homeLocation) {
+  const priorSeason = new Date().getUTCFullYear() - 1;
+  const ratings = await cached(env, `cfbd-sp:${priorSeason}`, 24 * 60 * 60, async () => {
+    if (!env.CFBD_API_KEY) throw new Error("CFBD_API_KEY not configured");
+    const res = await fetch(`https://api.collegefootballdata.com/ratings/sp?year=${priorSeason}`, {
+      headers: { Authorization: `Bearer ${env.CFBD_API_KEY}`, accept: "application/json" },
+    });
+    if (!res.ok) throw new Error(`CFBD ratings/sp ${res.status}`);
+    const data = await res.json();
+    const byTeam = {};
+    for (const t of data) if (t.offense?.rating != null && t.defense?.rating != null) byTeam[t.team] = { off: t.offense.rating, def: t.defense.rating };
+    const offs = Object.values(byTeam).map((t) => t.off);
+    const defs = Object.values(byTeam).map((t) => t.def);
+    const leagueAvgOff = offs.reduce((a, b) => a + b, 0) / offs.length;
+    const leagueAvgDef = defs.reduce((a, b) => a + b, 0) / defs.length;
+    return { byTeam, leagueAvgOff, leagueAvgDef };
+  });
+
+  // ESPN's team.location (school name only, e.g. "Ohio State") matches CFBD's team-name convention
+  // directly -- confirmed live against a full current-week slate, including every FCS/Group-of-Five
+  // cupcake mismatch (those teams are never AP-ranked and never rated by SP+ anyway, so a miss here
+  // just falls through to the existing null/graceful-degradation path below, same as any other
+  // missing-data case in this file).
+  const home = ratings.byTeam[homeLocation];
+  const away = ratings.byTeam[awayLocation];
+  if (!home || !away) return null;
+  return home.off - ratings.leagueAvgOff + (away.off - ratings.leagueAvgOff) + (home.def - ratings.leagueAvgDef) + (away.def - ratings.leagueAvgDef);
+}
+
 async function handleNcaafGame(env, params) {
   const venueId = params.get("venueKey");
   const city = params.get("city");
@@ -804,6 +854,8 @@ async function handleNcaafGame(env, params) {
   const venueName = params.get("venueName") || "Venue";
   const preview = params.get("preview") === "1";
   const startTimeUtc = params.get("startTimeUtc");
+  const awayLocation = params.get("awayLocation");
+  const homeLocation = params.get("homeLocation");
   if (!venueId || !city || !state) return json({ error: "ncaaf requires venueKey, city, and state" }, 400);
 
   let geo;
@@ -821,22 +873,32 @@ async function handleNcaafGame(env, params) {
   const venue = { venue: venueName, roofType: indoor ? "dome" : "open", lat: geo.lat, lon: geo.lon };
   const score = scoreNflGame(weather, venue);
 
-  // Game Environment Score (added 2026-09-19): weather-only version of the same composite NFL
-  // uses -- no team-scoring-tendency infrastructure exists for NCAAF (no nflverse-equivalent free
-  // dataset covering 130+ FBS teams' game-by-game results), so teamScoringDelta is always null here
-  // and the composite falls back to wind+temp alone (same graceful "only present inputs count"
-  // behavior computeGameEnvironmentScore already has for NFL games missing team data early in a
-  // season). Real and deterministic as far as it goes -- genuinely weaker than NFL's version, which
-  // itself already has no proven betting edge (see scripts/backtest-nfl-environment-score.js) -- but
-  // per product direction, a real weather-based read beats no read at all.
+  // Game Environment Score: weather + real team strength (added 2026-09-20, see
+  // fetchNcaafSpPlusTendency above) -- previously weather-only, since no nflverse-equivalent free
+  // dataset existed covering all 130+ FBS teams' game-by-game results. SP+ closes that gap. Falls
+  // back to null (wind+temp only, same graceful "only present inputs count" behavior
+  // computeGameEnvironmentScore already has for NFL games missing team data early in a season) for
+  // any game where either team can't be matched to a rating -- a non-FBS opponent, a name-matching
+  // miss, or the CFBD fetch itself failing -- never a hard error for the whole request.
+  let teamScoringDelta = null;
+  if (awayLocation && homeLocation) {
+    try {
+      teamScoringDelta = await fetchNcaafSpPlusTendency(env, awayLocation, homeLocation);
+    } catch (err) {
+      teamScoringDelta = null;
+    }
+  }
   let gameEnvironmentScore = null;
   try {
-    gameEnvironmentScore = computeGameEnvironmentScore({
-      windMph: weather.windSpeedMph,
-      tempF: weather.tempF,
-      roofClosed: score.roofClosed,
-      teamScoringDelta: null,
-    });
+    gameEnvironmentScore = computeGameEnvironmentScore(
+      {
+        windMph: weather.windSpeedMph,
+        tempF: weather.tempF,
+        roofClosed: score.roofClosed,
+        teamScoringDelta,
+      },
+      NCAAF_TEAM_SCALE
+    );
   } catch (err) {
     gameEnvironmentScore = null;
   }
