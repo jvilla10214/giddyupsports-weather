@@ -587,18 +587,24 @@ const NFL_GES_SCALE = {
   teamScoringDelta: 4.3, // real p75 of |value|, point-in-time corrected -- was 3.29 -- see comment above
 };
 
-// NCAAF's own team-strength scale (added 2026-09-20, see scripts/backtest-ncaaf-sp-plus-signal.js).
-// Built from CollegeFootballData's SP+ ratings (offense.rating + defense.rating, both real
-// points-per-game-equivalent efficiency numbers, NOT nflverse's raw scored/allowed points) --
-// genuinely different units from NFL_GES_SCALE.teamScoringDelta, so it needs its own scale rather
-// than reusing NFL's 4.3. combinedScoringTendency = (homeOff-leagueAvgOff)+(awayOff-leagueAvgOff)
-// +(homeDef-leagueAvgDef)+(awayDef-leagueAvgDef), using season (S-1)'s FINAL SP+ rating to predict
-// season S's games -- CFBD's historical ratings endpoint only returns each season's final rating
-// (no true point-in-time weekly snapshot for past seasons), so prior-year-final is the honest,
-// look-ahead-free stand-in backtested here. Real result: r=0.175 standalone across 4,174 FBS-v-FBS
-// games (2020-2025), r=0.183 on the held-out 2024-2025 test seasons -- stronger than NFL's own
-// teamScoringDelta (r=0.145) and, unlike it, didn't degrade out-of-sample.
-const NCAAF_TEAM_SCALE = 14.49; // real p75 of |combinedScoringTendency| across the same 4,174 games
+// NCAAF's team-strength signal is a BLEND of two real components (added 2026-09-20, see
+// scripts/backtest-ncaaf-blend-signal.js): prior-year-final SP+ (combinedScoringTendency, shipped
+// first -- see backtest-ncaaf-sp-plus-signal.js, r=0.175/0.183) and a genuine IN-SEASON,
+// point-in-time signal using the exact same formula as NFL's own shipped teamScoringDelta (combined
+// scored+allowed per game vs. league average, real CFBD game-by-game NCAAF scores, gated at
+// MIN_TEAM_GAMES_FOR_TENDENCY). The in-season signal alone tested STRONGER than SP+ alone (r=0.30 vs
+// r=0.18) -- makes sense, since prior-year SP+ can't see a coaching change or roster turnover that
+// real in-season results already reflect. A weighted blend beat either alone: real held-out test
+// correlation peaked at 25% SP+ / 75% in-season (r=0.27), a weight-sweep from 100% SP+ down to 0%
+// confirming this wasn't a cherry-picked split (train and test both peaked at the same weight).
+// Each raw component is normalized by its own real p75-of-|value| BEFORE blending (so "25/75" means
+// equal-footing weight on two comparably-scaled numbers, not on two differently-scaled raw ones);
+// NCAAF_TEAM_SCALE then re-normalizes the blended result itself to p75=1, keeping it on the same
+// footing as wind/temp's own contributions in the composite formula.
+const NCAAF_SP_SCALE = 14.49; // real p75 of |combinedScoringTendency| (SP+ component alone)
+const NCAAF_IN_SEASON_SCALE = 7.28; // real p75 of |inSeasonScoringTendency| (in-season component alone)
+const NCAAF_BLEND_WEIGHT_SP = 0.25; // share of weight on the SP+ component; the rest goes to in-season
+const NCAAF_TEAM_SCALE = 0.8565; // real p75 of |blended value| -- pass this as computeGameEnvironmentScore's teamScale
 
 // Gates team scoring tendency out entirely below this many games of season-to-date data -- same
 // small-sample reasoning as MIN_PITCHER_IP above; early in a season a team's average is mostly noise.
@@ -622,22 +628,21 @@ function nflGameEnvironmentTier(score) {
   return "Strong Low-Scoring Environment";
 }
 
-// NCAAF's own tier thresholds (added 2026-09-20, see scripts/backtest-ncaaf-tier-calibration.js) --
-// NCAAF used to just reuse nflGameEnvironmentTier wholesale, a reasonable stand-in when its score
-// was weather-only (wind/temp scales are shared real physics, no reason to think outdoor football
-// weather effects differ by division), but wrong now that a real team signal is in the mix: NCAAF's
-// composite genuinely skews lower than NFL's (bootstrap median -0.30 vs NFL's near-zero), so
-// reusing NFL's thresholds as-is would mislabel a real chunk of NCAAF games. No free source has real
-// historical weather joined to NCAAF's real historical scores at nflverse's scale, so these
-// percentiles come from a bootstrap: real NCAAF team-signal values (CFBD, 4,174 games) each paired
-// with a randomly-resampled REAL NFL outdoor wind/temp pair (independence assumption -- weather and
-// team strength aren't meaningfully correlated with each other in either sport), not real joint
-// NCAAF game-by-game data. Real p10/p25/p50/p75/p90 of that bootstrap: -0.87/-0.59/-0.30/-0.03/0.20.
+// NCAAF's own tier thresholds -- re-derived 2026-09-20 (see
+// scripts/backtest-ncaaf-blend-tier-calibration.js) against the new blended team signal above.
+// Same bootstrap methodology as the original SP+-only calibration (no free source joins real
+// historical weather to NCAAF's real historical scores, so real team-signal values are paired with
+// a randomly-resampled real NFL outdoor wind/temp pair, run through this exact production formula),
+// just with the stronger blended signal in place of SP+ alone. Result barely moved despite the
+// underlying signal's accuracy improving a lot (r=0.18 -> r=0.27 held-out) -- expected, since both
+// components are independently normalized to p75=1 before blending, so the composite's overall
+// SHAPE stays similar even as its real predictive power improves. Real p10/p25/p50/p75/p90:
+// -0.86/-0.60/-0.31/-0.03/0.21.
 function ncaafGameEnvironmentTier(score) {
-  if (score >= 0.2) return "Strong High-Scoring Environment";
+  if (score >= 0.21) return "Strong High-Scoring Environment";
   if (score >= -0.03) return "High-Scoring Leaning";
-  if (score > -0.59) return "Neutral";
-  if (score > -0.87) return "Low-Scoring Leaning";
+  if (score > -0.6) return "Neutral";
+  if (score > -0.86) return "Low-Scoring Leaning";
   return "Strong Low-Scoring Environment";
 }
 
@@ -700,5 +705,8 @@ export {
   computeGameEnvironmentScore,
   MIN_TEAM_GAMES_FOR_TENDENCY,
   NCAAF_TEAM_SCALE,
+  NCAAF_SP_SCALE,
+  NCAAF_IN_SEASON_SCALE,
+  NCAAF_BLEND_WEIGHT_SP,
   ncaafGameEnvironmentTier,
 };

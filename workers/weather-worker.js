@@ -52,7 +52,7 @@
  */
 
 import { MLB_STADIUMS, NFL_STADIUMS, MLB_TEAM_ID_TO_KEY, MLB_KEY_TO_TEAM_ID } from "../data/stadiums.js";
-import { scoreMlbGame, scoreNflGame, windCompassOrVariable, computeRunEnvironmentScore, MIN_PITCHER_IP, MIN_PITCHER_BATTED_BALLS, computeTotalRunsCall, computeConditionsAdjustedEra, computeGameEnvironmentScore, MIN_TEAM_GAMES_FOR_TENDENCY, NCAAF_TEAM_SCALE, ncaafGameEnvironmentTier } from "./rules-engine.js";
+import { scoreMlbGame, scoreNflGame, windCompassOrVariable, computeRunEnvironmentScore, MIN_PITCHER_IP, MIN_PITCHER_BATTED_BALLS, computeTotalRunsCall, computeConditionsAdjustedEra, computeGameEnvironmentScore, MIN_TEAM_GAMES_FOR_TENDENCY, NCAAF_TEAM_SCALE, NCAAF_SP_SCALE, NCAAF_IN_SEASON_SCALE, NCAAF_BLEND_WEIGHT_SP, ncaafGameEnvironmentTier } from "./rules-engine.js";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -846,6 +846,70 @@ async function fetchNcaafSpPlusTendency(env, awayLocation, homeLocation) {
   return home.off - ratings.leagueAvgOff + (away.off - ratings.leagueAvgOff) + (home.def - ratings.leagueAvgDef) + (away.def - ratings.leagueAvgDef);
 }
 
+// Real IN-SEASON team-strength signal (added 2026-09-20, see scripts/backtest-ncaaf-blend-signal.js)
+// -- the exact same formula as NFL's own shipped fetchNflTeamScoringTendency (combined scored+
+// allowed per game vs. league average), just computed from CFBD's real current-season NCAAF scores
+// instead of nflverse's. Backtested STRONGER than the prior-year SP+ signal alone (r=0.30 vs r=0.18
+// vs actual total points) -- makes sense, since a season-old SP+ rating can't see this year's
+// coaching change or roster turnover the way real in-season results already do. No look-ahead risk:
+// this only ever sums games CFBD already marks `completed`, so a live request today naturally only
+// sees real season-to-date results, same reasoning already established for NFL's own version.
+async function fetchNcaafInSeasonTendency(env, awayLocation, homeLocation) {
+  const season = new Date().getUTCFullYear();
+  const tendency = await cached(env, `cfbd-games-tendency:${season}`, 4 * 60 * 60, async () => {
+    if (!env.CFBD_API_KEY) throw new Error("CFBD_API_KEY not configured");
+    const res = await fetch(`https://api.collegefootballdata.com/games?year=${season}&seasonType=regular`, {
+      headers: { Authorization: `Bearer ${env.CFBD_API_KEY}`, accept: "application/json" },
+    });
+    if (!res.ok) throw new Error(`CFBD games ${res.status}`);
+    const games = await res.json();
+    const byTeam = {};
+    let leagueSum = 0,
+      leagueGames = 0;
+    for (const g of games) {
+      if (!g.completed || g.homeClassification !== "fbs" || g.awayClassification !== "fbs") continue;
+      if (g.homePoints == null || g.awayPoints == null) continue;
+      leagueSum += g.homePoints + g.awayPoints;
+      leagueGames += 1;
+      byTeam[g.homeTeam] = byTeam[g.homeTeam] || { scoredSum: 0, allowedSum: 0, games: 0 };
+      byTeam[g.homeTeam].scoredSum += g.homePoints;
+      byTeam[g.homeTeam].allowedSum += g.awayPoints;
+      byTeam[g.homeTeam].games += 1;
+      byTeam[g.awayTeam] = byTeam[g.awayTeam] || { scoredSum: 0, allowedSum: 0, games: 0 };
+      byTeam[g.awayTeam].scoredSum += g.awayPoints;
+      byTeam[g.awayTeam].allowedSum += g.homePoints;
+      byTeam[g.awayTeam].games += 1;
+    }
+    return { byTeam, leagueAvgTotal: leagueGames ? leagueSum / leagueGames : null };
+  });
+
+  const home = tendency.byTeam[homeLocation];
+  const away = tendency.byTeam[awayLocation];
+  if (!home || !away || home.games < MIN_TEAM_GAMES_FOR_TENDENCY || away.games < MIN_TEAM_GAMES_FOR_TENDENCY || tendency.leagueAvgTotal == null) return null;
+  const homeInvolvement = (home.scoredSum + home.allowedSum) / home.games;
+  const awayInvolvement = (away.scoredSum + away.allowedSum) / away.games;
+  return (homeInvolvement + awayInvolvement) / 2 - tendency.leagueAvgTotal;
+}
+
+// Blends the two real NCAAF team-strength signals above into one already-normalized value, ready to
+// pass straight into computeGameEnvironmentScore as teamScoringDelta with NCAAF_TEAM_SCALE. Each
+// raw component is normalized by its OWN real scale first (so the blend weight applies to two
+// comparably-scaled numbers, not two differently-scaled raw ones) -- see NCAAF_TEAM_SCALE's own
+// comment in rules-engine.js for the real backtest this weight/scale combination came from. Falls
+// back to SP+ alone (weight 1.0, not the calibrated blend) when in-season data isn't available yet
+// (first few weeks of the season) -- graceful degradation, same pattern as every other missing-data
+// case in this file, not a silent wrong number.
+async function fetchNcaafTeamScoringDelta(env, awayLocation, homeLocation) {
+  const [spPlus, inSeason] = await Promise.all([
+    fetchNcaafSpPlusTendency(env, awayLocation, homeLocation).catch(() => null),
+    fetchNcaafInSeasonTendency(env, awayLocation, homeLocation).catch(() => null),
+  ]);
+  if (spPlus == null && inSeason == null) return null;
+  if (inSeason == null) return spPlus / NCAAF_SP_SCALE;
+  if (spPlus == null) return inSeason / NCAAF_IN_SEASON_SCALE;
+  return NCAAF_BLEND_WEIGHT_SP * (spPlus / NCAAF_SP_SCALE) + (1 - NCAAF_BLEND_WEIGHT_SP) * (inSeason / NCAAF_IN_SEASON_SCALE);
+}
+
 async function handleNcaafGame(env, params) {
   const venueId = params.get("venueKey");
   const city = params.get("city");
@@ -874,16 +938,16 @@ async function handleNcaafGame(env, params) {
   const score = scoreNflGame(weather, venue);
 
   // Game Environment Score: weather + real team strength (added 2026-09-20, see
-  // fetchNcaafSpPlusTendency above) -- previously weather-only, since no nflverse-equivalent free
-  // dataset existed covering all 130+ FBS teams' game-by-game results. SP+ closes that gap. Falls
-  // back to null (wind+temp only, same graceful "only present inputs count" behavior
-  // computeGameEnvironmentScore already has for NFL games missing team data early in a season) for
-  // any game where either team can't be matched to a rating -- a non-FBS opponent, a name-matching
-  // miss, or the CFBD fetch itself failing -- never a hard error for the whole request.
+  // fetchNcaafTeamScoringDelta above) -- previously weather-only, since no nflverse-equivalent free
+  // dataset existed covering all 130+ FBS teams' game-by-game results. Blended SP+/in-season signal
+  // closes that gap. Falls back to null (wind+temp only, same graceful "only present inputs count"
+  // behavior computeGameEnvironmentScore already has for NFL games missing team data early in a
+  // season) for any game where neither component can be matched -- a non-FBS opponent, a
+  // name-matching miss, or the CFBD fetch itself failing -- never a hard error for the whole request.
   let teamScoringDelta = null;
   if (awayLocation && homeLocation) {
     try {
-      teamScoringDelta = await fetchNcaafSpPlusTendency(env, awayLocation, homeLocation);
+      teamScoringDelta = await fetchNcaafTeamScoringDelta(env, awayLocation, homeLocation);
     } catch (err) {
       teamScoringDelta = null;
     }
