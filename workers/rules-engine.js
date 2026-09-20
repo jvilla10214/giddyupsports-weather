@@ -622,6 +622,25 @@ function nflGameEnvironmentTier(score) {
   return "Strong Low-Scoring Environment";
 }
 
+// NCAAF's own tier thresholds (added 2026-09-20, see scripts/backtest-ncaaf-tier-calibration.js) --
+// NCAAF used to just reuse nflGameEnvironmentTier wholesale, a reasonable stand-in when its score
+// was weather-only (wind/temp scales are shared real physics, no reason to think outdoor football
+// weather effects differ by division), but wrong now that a real team signal is in the mix: NCAAF's
+// composite genuinely skews lower than NFL's (bootstrap median -0.30 vs NFL's near-zero), so
+// reusing NFL's thresholds as-is would mislabel a real chunk of NCAAF games. No free source has real
+// historical weather joined to NCAAF's real historical scores at nflverse's scale, so these
+// percentiles come from a bootstrap: real NCAAF team-signal values (CFBD, 4,174 games) each paired
+// with a randomly-resampled REAL NFL outdoor wind/temp pair (independence assumption -- weather and
+// team strength aren't meaningfully correlated with each other in either sport), not real joint
+// NCAAF game-by-game data. Real p10/p25/p50/p75/p90 of that bootstrap: -0.87/-0.59/-0.30/-0.03/0.20.
+function ncaafGameEnvironmentTier(score) {
+  if (score >= 0.2) return "Strong High-Scoring Environment";
+  if (score >= -0.03) return "High-Scoring Leaning";
+  if (score > -0.59) return "Neutral";
+  if (score > -0.87) return "Low-Scoring Leaning";
+  return "Strong Low-Scoring Environment";
+}
+
 /**
  * @param {object} inputs
  *   windMph: number|null - ignored when roofClosed (matches scoreNflGame's own wind/precip gate)
@@ -636,9 +655,13 @@ function nflGameEnvironmentTier(score) {
  *     (NFL_GES_SCALE.teamScoringDelta) for backward compatibility -- NCAAF callers must pass
  *     NCAAF_TEAM_SCALE explicitly, since SP+ ratings are not on the same scale as nflverse's raw
  *     scored/allowed points.
+ *   tierFn: (score: number) => string - maps the final composite to a tier label; defaults to
+ *     nflGameEnvironmentTier for backward compatibility -- NCAAF callers must pass
+ *     ncaafGameEnvironmentTier explicitly, since its composite has a genuinely different real
+ *     distribution (see that function's comment).
  * @returns {{score: number, tier: string, inputsUsed: string[]}|null} null only if every input is missing
  */
-function computeGameEnvironmentScore(inputs, teamScale = NFL_GES_SCALE.teamScoringDelta) {
+function computeGameEnvironmentScore(inputs, teamScale = NFL_GES_SCALE.teamScoringDelta, tierFn = nflGameEnvironmentTier) {
   const contributions = [];
   const add = (key, raw, scaleKey) => {
     if (raw == null || !Number.isFinite(raw)) return;
@@ -660,7 +683,7 @@ function computeGameEnvironmentScore(inputs, teamScale = NFL_GES_SCALE.teamScori
     .map((c) => ({ key: c.key, weightedValue: c.weight * c.normalized }))
     .sort((a, b) => Math.abs(b.weightedValue) - Math.abs(a.weightedValue));
 
-  return { score, tier: nflGameEnvironmentTier(score), inputsUsed: contributions.map((c) => c.key), contributions: rankedContributions };
+  return { score, tier: tierFn(score), inputsUsed: contributions.map((c) => c.key), contributions: rankedContributions };
 }
 
 export {
@@ -677,4 +700,5 @@ export {
   computeGameEnvironmentScore,
   MIN_TEAM_GAMES_FOR_TENDENCY,
   NCAAF_TEAM_SCALE,
+  ncaafGameEnvironmentTier,
 };
