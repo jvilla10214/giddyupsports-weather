@@ -712,15 +712,25 @@
      one consistent visual language instead of one isolated color change nobody could explain. */
   .game-card.is-final .gc-glow { opacity: 0.07; }
 
-  .gc-top { display: flex; align-items: center; justify-content: space-between; z-index: 1; }
+  /* Fixed-height header row (see gc-time/badge nowrap+ellipsis below) -- real user report: when
+     the live-clock badge text ran long ("11:26 - 3RD"), the date/time text next to it would wrap
+     to a second line on THAT card only, pushing its scoreboard/odds down and breaking row
+     alignment against every other card in the same grid row that didn't wrap. min-height reserves
+     the same vertical space regardless, and nowrap+ellipsis on both children keeps this a single
+     line in the first place for the vast majority of real cases. */
+  .gc-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; z-index: 1; min-height: 16px; }
   .game-card .gc-time {
     font-family: var(--font-mono); font-size: 0.64rem; text-transform: uppercase;
     letter-spacing: 0.07em; color: var(--text-faint);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
   }
-  .gc-live-badge { display: flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 0.62rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--accent-live); }
+  .gc-live-badge {
+    display: flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 0.62rem; font-weight: 700;
+    letter-spacing: 0.07em; text-transform: uppercase; color: var(--accent-live); white-space: nowrap; flex: none;
+  }
   .gc-final-badge {
     font-family: var(--font-mono); font-size: 0.6rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
-    color: var(--text-faint); background: var(--bg-elevated-2); padding: 2px 7px; border-radius: 100px;
+    color: var(--text-faint); background: var(--bg-elevated-2); padding: 2px 7px; border-radius: 100px; white-space: nowrap; flex: none;
   }
 
   /* Teams stacked vertically (logo above code) rather than side-by-side -- a horizontal chip+text
@@ -771,9 +781,19 @@
        accent-live fill. Left untouched for the .muted state below, whose neutral bg is exactly
        the surface those tokens were designed for. */
     --accent-move-up: #eafff5; --accent-move-down: #ffd9dc;
+    /* Same reasoning as the arrow-color override above, applied to movementArrowHtml's "opened X"
+       text (see that function) -- --text-faint is tuned for a plain surface and reads poorly
+       against this pill's solid fill; also sized down from the detail-view hero's 0.85rem, which
+       would dominate this much smaller pill. */
+    --odds-open-color: rgba(255, 255, 255, 0.82); --odds-open-size: 0.68rem;
   }
   .gc-odds-pill .lbl { font-size: 0.56rem; letter-spacing: 0.06em; text-transform: uppercase; color: rgba(255, 255, 255, 0.78); }
-  .gc-odds-pill .val { font-size: 0.82rem; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Wraps instead of clipping -- text-overflow:ellipsis here was silently truncating whatever sat
+     at the end of the value (the movement arrow, and now the "opened X" text) once content ran
+     wider than the pill (real user report: arrows had gone invisible after this component's
+     redesign). A pill is free to grow a second line; losing the arrow/open-value silently was the
+     actual bug. */
+  .gc-odds-pill .val { font-size: 0.82rem; font-weight: 700; color: #fff; line-height: 1.35; }
   .gc-odds-pill.muted { background: var(--bg-elevated-2); border-color: var(--line); }
   .gc-odds-pill.muted .lbl { color: var(--text-faint); }
   .gc-odds-pill.muted .val { color: var(--text-muted); }
@@ -1842,7 +1862,10 @@
     const shaft = direction === "up" ? '<line x1="6" y1="13" x2="6" y2="3"/>' : '<line x1="6" y1="1" x2="6" y2="11"/>';
     const head = direction === "up" ? '<polyline points="2,7 6,2 10,7"/>' : '<polyline points="2,7 6,12 10,7"/>';
     const icon = `<svg width="10" height="11" viewBox="0 0 12 14" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px; margin-left:3px;">${shaft}${head}</svg>`;
-    const openText = showOpen ? `<span style="font-family: var(--font-body); font-style: italic; color: var(--text-faint); font-size: 0.85rem; font-weight: 500; letter-spacing: 0.01em; margin-left:6px;">opened ${previousValue}</span>` : "";
+    // Color/size read from custom properties (falling back to the values tuned for the roomy
+    // detail-view hero) so a tighter context -- the grid card's odds pill -- can override both
+    // without this function needing to know which context it's in.
+    const openText = showOpen ? `<span style="font-family: var(--font-body); font-style: italic; color: var(--odds-open-color, var(--text-faint)); font-size: var(--odds-open-size, 0.85rem); font-weight: 500; letter-spacing: 0.01em; margin-left:6px;">opened ${previousValue}</span>` : "";
     return `<span title="${direction === "up" ? "Up" : "Down"} ${fromLabel} ${previousValue}">${icon}</span>${openText}`;
   }
 
@@ -1890,7 +1913,12 @@
   // always starts a total with "O/U ", never a spread) rather than threading a separate type
   // through -- one less thing oddsParts' two return shapes (Covers vs ESPN fallback) has to agree on.
   function oddsPillsHtml(g, isFinal) {
-    const parts = oddsParts(g);
+    // showOpen=true (added 2026-09-20, real user feedback: seeing how the line moved matters to a
+    // bettor, not just that it moved) -- was false here, detail-view-only, before. Also fixed
+    // alongside this: .val used to clip with text-overflow:ellipsis, which was silently truncating
+    // the trailing arrow icon (and would have done the same to this open-value text) whenever the
+    // pill's content ran wider than its fixed width -- see .gc-odds-pill .val's own comment.
+    const parts = oddsParts(g, true);
     if (!parts.length) return "";
     return `<div class="gc-odds-pills">${parts
       .map((p) => {
