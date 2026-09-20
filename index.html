@@ -591,28 +591,52 @@
   .landing-intro h1 { font-family: var(--font-display); font-weight: var(--font-display-w2); font-size: clamp(1.7rem, 3.6vw, 2.4rem); text-transform: uppercase; letter-spacing: 0.01em; margin: 0 0 8px; text-wrap: balance; }
   .landing-intro p { color: var(--text-muted); max-width: 62ch; font-size: 0.92rem; line-height: 1.6; margin: 0; }
   .landing-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
+  /* Each tile sets --tile-accent-light/-dark (and -2) via inline style rather than a single
+     --tile-accent -- the landing page doesn't switch html[data-sport], so nothing would otherwise
+     brighten these for dark mode the way every real per-sport theme already does. --tile-accent-r
+     (and -2-r) resolve to the light pair normally and swap to the dark pair under dark mode,
+     mirroring the exact light/dark dual-block pattern the sport themes use above. Values are
+     each sport's own real accent-ai/accent-atmo tokens, not invented ones. */
   .landing-tile {
     position: relative; overflow: hidden;
     display: flex; flex-direction: column; gap: 8px; text-align: left;
-    background: var(--bg-elevated); border: var(--card-border-width) solid var(--line);
+    --tile-accent-r: var(--tile-accent-light);
+    --tile-accent-2-r: var(--tile-accent-2-light);
+    background: color-mix(in srgb, var(--tile-accent-r) 10%, var(--bg-elevated));
+    border: 1px solid color-mix(in srgb, var(--tile-accent-r) 38%, var(--line));
     border-radius: var(--radius-lg); padding: 22px 20px 20px;
     font: inherit; color: inherit; box-shadow: var(--shadow-soft);
     transition: transform 0.15s ease, border-color 0.15s ease;
   }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]) .landing-tile {
+      --tile-accent-r: var(--tile-accent-dark, var(--tile-accent-light));
+      --tile-accent-2-r: var(--tile-accent-2-dark, var(--tile-accent-2-light));
+    }
+  }
+  html[data-theme="dark"] .landing-tile {
+    --tile-accent-r: var(--tile-accent-dark, var(--tile-accent-light));
+    --tile-accent-2-r: var(--tile-accent-2-dark, var(--tile-accent-2-light));
+  }
   .landing-tile::before {
-    content: ""; position: absolute; inset: 0 0 auto 0; height: 3px;
-    background: linear-gradient(90deg, var(--tile-accent), var(--tile-accent-2));
+    content: ""; position: absolute; inset: 0 0 auto 0; height: 5px;
+    background: linear-gradient(90deg, var(--tile-accent-r), var(--tile-accent-2-r));
   }
   button.landing-tile { cursor: pointer; }
-  button.landing-tile:hover { transform: translateY(-3px); border-color: var(--tile-accent); }
+  button.landing-tile:hover { transform: translateY(-3px); border-color: var(--tile-accent-r); }
   .landing-tile.soon { opacity: 0.78; }
-  .lt-name { font-family: var(--font-display); font-size: 1.5rem; font-weight: var(--font-display-w2); color: var(--tile-accent); line-height: 1.05; }
-  .lt-sport { font-family: var(--font-mono); font-size: 0.64rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--text-faint); }
+  /* --tile-font-display/-mono/-weight let each tile render in ITS OWN sport's real theme
+     font (Anton for NFL, Oswald for NCAAF, etc.) instead of whatever html[data-sport] happens
+     to be active before a sport is picked -- previously every tile silently rendered in MLB's
+     font since that's the default data-sport. Golf/Tennis have no real font identity yet, so
+     they fall back to the shared page font via the var() default. */
+  .lt-name { font-family: var(--tile-font-display, var(--font-display)); font-size: 1.5rem; font-weight: var(--tile-font-weight, var(--font-display-w2)); color: var(--tile-accent-r); line-height: 1.05; }
+  .lt-sport { font-family: var(--tile-font-mono, var(--font-mono)); font-size: 0.64rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--text-faint); }
   .lt-desc { font-size: 0.82rem; color: var(--text-muted); line-height: 1.5; margin-top: 2px; }
   .lt-status {
-    align-self: flex-start; font-family: var(--font-mono); font-size: 0.6rem; font-weight: 700;
+    align-self: flex-start; font-family: var(--tile-font-mono, var(--font-mono)); font-size: 0.6rem; font-weight: 700;
     letter-spacing: 0.08em; text-transform: uppercase; padding: 3px 10px; border-radius: 100px;
-    margin-top: 6px; color: var(--tile-accent-2); background: color-mix(in srgb, var(--tile-accent-2) 16%, transparent);
+    margin-top: 6px; color: #fff; background: var(--tile-accent-2-r);
   }
   .landing-tile.soon .lt-status { color: var(--text-faint); background: var(--bg-elevated-2); }
 
@@ -1104,31 +1128,31 @@
       <p>A real bet suggestion for every game, not a hot take — built on a deterministic physics model backtested against real seasons. Pick a sport to see today's calls.</p>
     </div>
     <div class="landing-grid">
-      <button class="landing-tile live" data-sport="mlb" style="--tile-accent:#A8681F; --tile-accent-2:#2E6B8F;">
+      <button class="landing-tile live" data-sport="mlb" style="--tile-accent-light:#A8681F; --tile-accent-2-light:#2E6B8F; --tile-accent-dark:#D99A3F; --tile-accent-2-dark:#6FA9CC; --tile-font-display:'Big Shoulders Display', sans-serif; --tile-font-mono:'IBM Plex Mono', monospace; --tile-font-weight:800;">
         <div class="lt-name">Diamond Atmospherics</div>
         <div class="lt-sport">MLB · Baseball</div>
         <div class="lt-desc">Stadium lights meeting a storm front — air density, carry distance, and 150 years of parks built to keep the sun out of a hitter's eyes. Every game gets a real Over/Under call, not just a forecast.</div>
         <div class="lt-status">Live</div>
       </button>
-      <button class="landing-tile live" data-sport="nfl" style="--tile-accent:#D4A017; --tile-accent-2:#6E97AC;">
+      <button class="landing-tile live" data-sport="nfl" style="--tile-accent-light:#96731A; --tile-accent-2-light:#3E7089; --tile-accent-dark:#D4A017; --tile-accent-2-dark:#6E97AC; --tile-font-display:'Anton', sans-serif; --tile-font-mono:'Space Mono', monospace; --tile-font-weight:400;">
         <div class="lt-name">Gridiron Pressure</div>
         <div class="lt-sport">NFL · Football</div>
         <div class="lt-desc">Frozen turf under floodlight — where atmospheric pressure and fourth-quarter pressure read the same on the gauge. Every matchup gets a real lean, plus the spread and total tracked from open to kickoff.</div>
         <div class="lt-status">Live</div>
       </button>
-      <button class="landing-tile live" data-sport="ncaaf" style="--tile-accent:#8B2E2E; --tile-accent-2:#3E6B8F;">
+      <button class="landing-tile live" data-sport="ncaaf" style="--tile-accent-light:#8B2E2E; --tile-accent-2-light:#3E6B8F; --tile-accent-dark:#C96B5A; --tile-accent-2-dark:#6F9BC0; --tile-font-display:'Oswald', sans-serif; --tile-font-mono:'Roboto Mono', monospace; --tile-font-weight:700;">
         <div class="lt-name">Top 25 Watch</div>
         <div class="lt-sport">NCAAF · College Football</div>
         <div class="lt-desc">Saturday's ranked matchups only — AP and Coaches poll teams, with the same wind/passing read as the NFL board. A real lean on every ranked game, not just a number.</div>
         <div class="lt-status">Beta</div>
       </button>
-      <div class="landing-tile soon" style="--tile-accent:#A83E30; --tile-accent-2:#5D7268;">
+      <div class="landing-tile soon" style="--tile-accent-light:#A83E30; --tile-accent-2-light:#5D7268; --tile-accent-dark:#C68278; --tile-accent-2-dark:#8FA39C;">
         <div class="lt-name">Links &amp; Lie</div>
         <div class="lt-sport">Golf</div>
         <div class="lt-desc">A windswept coastal links — where club selection has always been a weather reading first, a yardage second.</div>
         <div class="lt-status">Coming Soon</div>
       </div>
-      <div class="landing-tile soon" style="--tile-accent:#6B3F82; --tile-accent-2:#3E6B3C;">
+      <div class="landing-tile soon" style="--tile-accent-light:#6B3F82; --tile-accent-2-light:#3E6B3C; --tile-accent-dark:#9F82AE; --tile-accent-2-dark:#8AA389;">
         <div class="lt-name">Advantage Court</div>
         <div class="lt-sport">Tennis</div>
         <div class="lt-desc">All white on grass — SW19's own purple and green, where a crosswind is the one opponent neither player can scout.</div>
