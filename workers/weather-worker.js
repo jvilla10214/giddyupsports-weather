@@ -768,12 +768,27 @@ async function fetchNflTeamScoringTendency(env) {
 // plus rotating FCS/G5 opponents made a hand-curated file both impractical and a duplicate of data
 // ESPN already hands over every request (see the NCAAF module plan). ESPN's own scoreboard venue
 // object has no lat/lon (confirmed live, checked three ways: the site API scoreboard, the site API
-// rankings/team detail, and the core API's dedicated venue endpoint -- none of them expose it), so
-// this geocodes from the city/state the client already has (from its own ESPN-sourced schedule,
-// see index.html's fetchNcaafScheduleClientSide) using Open-Meteo's free geocoding API -- the same
-// provider already used for weather elsewhere in this app (see DECISIONS.md). Cached a full year
-// per venue (effectively permanent -- a stadium's city doesn't move), same spirit as MLB/NFL's
-// static lat/lon never needing a refetch.
+// rankings/team detail, and the core API's dedicated venue endpoint -- none of them expose it).
+//
+// REVISED 2026-09-20 (real user report: the live satellite map for NCAAF games was landing on the
+// wrong part of town, not the actual stadium). Root cause: this used to geocode by CITY NAME ONLY
+// via Open-Meteo's geocoding API -- e.g. searching "Columbus" and taking whatever point that
+// resolves to (a city-label/population centroid), even though the real venue name was already
+// being fetched and passed all the way through to this handler for DISPLAY only, never used to
+// actually locate anything. A city centroid can sit miles from the real stadium, and NFL/NCAAF
+// share the same tight 190m map half-extent (STADIUM_HALF_EXTENT_M in index.html, tuned assuming
+// the marker sits exactly on the stadium) -- any offset was directly visible on screen as a crop of
+// the wrong neighborhood, a failure mode NFL/MLB structurally can't hit since their coordinates are
+// hand-verified per-stadium constants.
+//
+// Fix: geocode the actual VENUE NAME first via Nominatim (OpenStreetMap's free public geocoder,
+// no API key) -- confirmed live against 8 real FBS stadiums (Ohio Stadium, Kyle Field, Neyland,
+// Jack Trice, Doak Campbell, Rice-Eccles, Nippert -- 7/8 hit, all returned as OSM's own "stadium"
+// POI type with exact coordinates; only a stadium under an unusually long sponsor-heavy name
+// missed). Falls back to the original city-name Open-Meteo geocode when Nominatim finds nothing --
+// same behavior as before for that rare case, never a hard error either way. Same year-long cache
+// as before (a stadium's location doesn't move), and Nominatim's own usage policy requires exactly
+// the identifying User-Agent this app already sends to Open-Meteo elsewhere.
 const US_STATE_NAMES = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California", CO: "Colorado",
   CT: "Connecticut", DE: "Delaware", DC: "District of Columbia", FL: "Florida", GA: "Georgia",
@@ -786,16 +801,35 @@ const US_STATE_NAMES = {
   VA: "Virginia", WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming",
 };
 
-async function fetchNcaafVenueGeo(env, venueId, city, state) {
+const NCAAF_GEOCODE_USER_AGENT = "GiddyUpSports-Weather/1.0 (contact: jvilla10214@gmail.com)";
+
+async function fetchNcaafVenueByCity(city, state) {
+  const stateName = US_STATE_NAMES[state] || state;
+  const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=10&country=US`;
+  const res = await fetch(url, { headers: { "User-Agent": NCAAF_GEOCODE_USER_AGENT } });
+  if (!res.ok) throw new Error(`Open-Meteo geocoding ${res.status}`);
+  const data = await res.json();
+  const match = (data.results || []).find((r) => r.admin1 === stateName);
+  if (!match) throw new Error(`No geocoding match for "${city}, ${state}"`);
+  return { lat: match.latitude, lon: match.longitude };
+}
+
+async function fetchNcaafVenueGeo(env, venueId, city, state, venueName) {
   return cached(env, `ncaaf-venue-geo:${venueId}`, 365 * 24 * 60 * 60, async () => {
-    const stateName = US_STATE_NAMES[state] || state;
-    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=10&country=US`;
-    const res = await fetch(url, { headers: { "User-Agent": "GiddyUpSports-Weather/1.0 (contact: jvilla10214@gmail.com)" } });
-    if (!res.ok) throw new Error(`Open-Meteo geocoding ${res.status}`);
-    const data = await res.json();
-    const match = (data.results || []).find((r) => r.admin1 === stateName);
-    if (!match) throw new Error(`No geocoding match for "${city}, ${state}"`);
-    return { lat: match.latitude, lon: match.longitude };
+    if (venueName && venueName !== "Venue") {
+      try {
+        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(`${venueName}, ${city}, ${state}`)}&format=json&limit=1&countrycodes=us`;
+        const res = await fetch(url, { headers: { "User-Agent": NCAAF_GEOCODE_USER_AGENT } });
+        if (res.ok) {
+          const results = await res.json();
+          if (results?.[0]) return { lat: Number(results[0].lat), lon: Number(results[0].lon) };
+        }
+      } catch {
+        // fall through to the city-name geocode below -- a Nominatim hiccup shouldn't break the
+        // whole request when a real (if less precise) fallback exists
+      }
+    }
+    return fetchNcaafVenueByCity(city, state);
   });
 }
 
@@ -924,7 +958,7 @@ async function handleNcaafGame(env, params) {
 
   let geo;
   try {
-    geo = await fetchNcaafVenueGeo(env, venueId, city, state);
+    geo = await fetchNcaafVenueGeo(env, venueId, city, state, venueName);
   } catch (err) {
     return json({ error: `Could not locate venue: ${err.message}` }, 400);
   }
