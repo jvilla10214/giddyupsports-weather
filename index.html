@@ -670,14 +670,31 @@
   }
   @keyframes esNeedleSpin { to { transform: rotate(360deg); } }
 
-  /* ---------- Quick-look grid: every game on today's slate, front and center ---------- */
-  .games-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+  /* Shared by the detail view's matchup header (.vh-matchup) and, via the more specific
+     .gc-logo-chip override below, the game-card grid. */
+  .team-logo { width: 18px; height: 18px; object-fit: contain; vertical-align: -4px; margin-right: 4px; }
+  .vh-matchup .team-logo { margin-left: 3px; }
+
+  /* ---------- Quick-look grid: every game on today's slate, front and center ----------
+     Redesigned 2026-09-20 (user feedback: the old flat list + a solid-fill odds badge read as
+     "blocky" and "boring") -- glossy gradient card, a soft corner glow in each team's own REAL
+     brand color (--away-color/--home-color, set inline per card -- see gameCardHtml), and a
+     broadcast-style scoreboard row instead of a plain text matchup line. Light is the default
+     look in both themes (glossy-white on light, glossy-dark on dark) -- this isn't a separate
+     "always dark" mode, it's the same card riding the existing light/dark toggle like everything
+     else, just restyled. */
+  .games-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
   .game-card {
-    display: flex; flex-direction: column; gap: 8px; text-align: left;
-    background: var(--bg-elevated); border: var(--card-border-width) solid var(--line);
-    border-radius: var(--radius-md); padding: 14px 16px; cursor: pointer;
-    font: inherit; color: inherit; box-shadow: var(--shadow-soft);
+    position: relative; overflow: hidden;
+    display: flex; flex-direction: column; gap: 11px; text-align: left;
+    background: linear-gradient(155deg, var(--bg-elevated), color-mix(in srgb, var(--bg-elevated) 90%, var(--bg-elevated-2)));
+    border: 1px solid var(--line); border-radius: 14px; padding: 15px 16px 14px;
+    font: inherit; color: inherit; box-shadow: var(--shadow-soft); cursor: pointer;
     transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+  }
+  .game-card::before {
+    content: ""; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--line-strong), transparent);
   }
   /* Hover + press (design audit, Polish section): a grid of 16 near-identical cards gave no
      confirmation of which one you were about to open, or that a click had registered at all --
@@ -685,45 +702,65 @@
      get), and :active gives a real press-down instead of nothing happening until the click lands. */
   .game-card:hover, .game-card:focus-visible { transform: translateY(-2px); border-color: var(--accent-atmo); }
   .game-card:active { transform: translateY(0) scale(0.98); border-color: var(--accent-atmo); box-shadow: none; }
+
+  .gc-glow { position: absolute; width: 150px; height: 150px; border-radius: 50%; filter: blur(36px); opacity: 0.16; pointer-events: none; }
+  .gc-glow.away { top: -40px; left: -30px; background: var(--away-color, var(--accent-atmo)); }
+  .gc-glow.home { bottom: -50px; right: -30px; background: var(--home-color, var(--accent-atmo)); }
+
+  .gc-top { display: flex; align-items: center; justify-content: space-between; z-index: 1; }
   .game-card .gc-time {
-    font-family: var(--font-mono); font-size: 0.66rem; text-transform: uppercase;
-    letter-spacing: 0.06em; color: var(--text-faint);
+    font-family: var(--font-mono); font-size: 0.64rem; text-transform: uppercase;
+    letter-spacing: 0.07em; color: var(--text-faint);
   }
-  .game-card .gc-matchup {
-    font-family: var(--font-display); font-weight: var(--font-display-w0); font-size: 1.12rem;
-    letter-spacing: 0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  .gc-live-badge { display: flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 0.62rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--accent-live); }
+  .gc-final-badge { font-family: var(--font-mono); font-size: 0.62rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-faint); }
+
+  .gc-scoreboard { display: flex; align-items: center; justify-content: space-between; gap: 6px; z-index: 1; }
+  .gc-team { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+  .gc-team.right { flex-direction: row-reverse; text-align: right; }
+  .gc-logo-chip { width: 34px; height: 34px; border-radius: 50%; background: var(--bg-elevated-2); display: flex; align-items: center; justify-content: center; flex: none; }
+  .gc-logo-chip .team-logo { width: 22px; height: 22px; margin: 0; vertical-align: middle; }
+  .gc-team-abbr { font-family: var(--font-body); font-weight: 600; font-size: 0.78rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gc-score-num { font-family: var(--font-display); font-weight: var(--font-display-w2); font-size: 1.7rem; line-height: 1; color: var(--text); min-width: 28px; text-align: center; }
+  .gc-score-num.lead { color: var(--accent-live); }
+  .gc-score-sep { font-family: var(--font-display); font-size: 1.05rem; color: var(--text-faint); padding: 0 1px; }
+  .gc-vs { font-family: var(--font-display); font-weight: var(--font-display-w0); font-size: 1.05rem; color: var(--text-faint); }
+
+  .gc-odds-pills { display: flex; gap: 7px; z-index: 1; }
+  .gc-odds-pill {
+    flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px;
+    /* Darkened via color-mix rather than using --accent-live at full strength: that token is
+       tuned per-theme to read well as TEXT on a plain surface, not as a fill white text sits on
+       top of -- NFL's dark-mode accent-live (a lighter, brighter green) left white .val text at
+       2.88:1 against it, well under WCAG's 4.5:1 floor. Mixing toward black keeps each theme's
+       real hue while guaranteeing enough headroom for white on top, verified via computed
+       contrast in both a light-default theme (MLB/NCAAF) and NFL's dark-default one. */
+    background: color-mix(in srgb, var(--accent-live) 72%, black);
+    border: 1px solid color-mix(in srgb, var(--accent-live) 72%, black);
+    border-radius: 8px; padding: 5px 9px; font-family: var(--font-mono);
+    /* Movement-arrow tokens overridden locally: --accent-move-up/-down are tuned for a plain
+       surface, and would nearly vanish (up-arrow green-on-green) against this pill's own solid
+       accent-live fill. Left untouched for the .muted state below, whose neutral bg is exactly
+       the surface those tokens were designed for. */
+    --accent-move-up: #eafff5; --accent-move-down: #ffd9dc;
   }
-  .game-card .gc-matchup em { font-style: normal; color: var(--text-faint); font-weight: 400; font-family: var(--font-body); margin: 0 3px; }
-  .team-logo { width: 18px; height: 18px; object-fit: contain; vertical-align: -4px; margin-right: 4px; }
-  .vh-matchup .team-logo { margin-left: 3px; }
-  .game-card .gc-weather { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.76rem; color: var(--text-muted); min-height: 1.1em; }
-  .game-card .gc-pitchers { font-size: 0.74rem; color: var(--text-faint); }
-  .game-card .gc-odds {
-    font-family: var(--font-mono);
-    font-weight: 800;
-    font-size: 1.05rem;
-    color: var(--accent-atmo);
-    background: var(--accent-atmo-dim);
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    width: fit-content;
-    padding: 4px 9px;
-    border-radius: 6px;
-    letter-spacing: 0.01em;
-  }
-  .game-card .gc-odds-row { line-height: 1.3; }
-  .game-card .gc-score { font-family: var(--font-mono); font-size: 0.76rem; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 5px; }
-  .game-card .gc-score.final { color: var(--text-muted); font-weight: 600; }
-  .game-card .gc-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-live); flex: none; }
-  @media (prefers-reduced-motion: no-preference) {
-    .game-card .gc-live-dot { animation: gcLivePulse 1.6s ease-in-out infinite; }
-  }
-  @keyframes gcLivePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .gc-odds-pill .lbl { font-size: 0.56rem; letter-spacing: 0.06em; text-transform: uppercase; color: rgba(255, 255, 255, 0.78); }
+  .gc-odds-pill .val { font-size: 0.82rem; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gc-odds-pill.muted { background: var(--bg-elevated-2); border-color: var(--line); }
+  .gc-odds-pill.muted .lbl { color: var(--text-faint); }
+  .gc-odds-pill.muted .val { color: var(--text-muted); }
+
+  .game-card .gc-pitchers { font-size: 0.72rem; color: var(--text-faint); z-index: 1; }
+  .game-card .gc-weather { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); min-height: 1.1em; z-index: 1; }
   .game-card .gc-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); flex: none; }
   .game-card .gc-dot.good { background: var(--accent-live); }
   .game-card .gc-dot.warn { background: var(--accent-ai); }
   .game-card .gc-dot.bad { background: var(--accent-warn); }
+  .gc-live-badge .gc-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-live); flex: none; }
+  @media (prefers-reduced-motion: no-preference) {
+    .gc-live-badge .gc-live-dot { animation: gcLivePulse 1.6s ease-in-out infinite; }
+  }
+  @keyframes gcLivePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
   .back-btn {
     display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
@@ -1632,6 +1669,11 @@
         homeAbbr: home?.team?.abbreviation || null,
         awayLogo: away?.team?.logo || null,
         homeLogo: home?.team?.logo || null,
+        // Real per-team brand color, same payload already used for the logo above (confirmed
+        // live: every competitor.team carries color/alternateColor) -- used only for the game
+        // card's decorative corner glow, see gameCardHtml.
+        awayColor: away?.team?.color || null,
+        homeColor: home?.team?.color || null,
         venue: comp?.venue?.fullName,
         venueKey: home?.team?.abbreviation || null,
         status: ev.status?.type?.description,
@@ -1696,6 +1738,11 @@
         homeAbbr: home?.team?.abbreviation || null,
         awayLogo: away?.team?.logo || null,
         homeLogo: home?.team?.logo || null,
+        // Real per-team brand color, same payload already used for the logo above (confirmed
+        // live: every competitor.team carries color/alternateColor) -- used only for the game
+        // card's decorative corner glow, see gameCardHtml.
+        awayColor: away?.team?.color || null,
+        homeColor: home?.team?.color || null,
         venue: comp?.venue?.fullName,
         venueKey: comp?.venue?.id || null, // ESPN venue id -- NOT a stadiums-dict key like MLB/NFL (see Stage 2 plan), just a stable per-game identifier
         venueCity: comp?.venue?.address?.city || null,
@@ -1729,35 +1776,23 @@
     return `${stateAbbr} ${ord}`;
   }
 
-  function mlbScoreLine(g) {
-    if (g.abstractState === "Live") {
-      return `<div class="gc-score live"><span class="gc-live-dot"></span>${inningLabel(g.inningState, g.currentInning)} &middot; ${g.awayScore}-${g.homeScore}</div>`;
+  // Normalizes MLB's abstractState ("Preview"/"Live"/"Final") and NFL/NCAAF's gameState
+  // ("pre"/"in"/"post") to one shared shape so the scoreboard renderer in gameCardHtml doesn't
+  // need per-sport branching beyond this one spot. liveDetail is the human-readable clock/inning
+  // text shown next to the live dot (MLB's own inningLabel, or ESPN's pre-formatted statusDetail).
+  function gameCardState(g, sport) {
+    if (sport === "mlb") {
+      const state = g.abstractState === "Live" ? "live" : g.abstractState === "Final" ? "final" : "preview";
+      return { state, liveDetail: inningLabel(g.inningState, g.currentInning) };
     }
-    if (g.abstractState === "Final") {
-      return `<div class="gc-score final">FINAL &middot; ${g.awayScore}-${g.homeScore}</div>`;
-    }
-    return ""; // Preview -- no score yet, the scheduled time above already covers it
+    const state = g.gameState === "in" ? "live" : g.gameState === "post" ? "final" : "preview";
+    return { state, liveDetail: g.statusDetail || "LIVE" };
   }
 
-  // NFL/NCAAF live score (added 2026-09-12) -- both fetched client-side from the same ESPN
-  // scoreboard shape (fetchNflScheduleClientSide/fetchNcaafScheduleClientSide), so one shared
-  // renderer covers both. gameState is ESPN's own "pre"/"in"/"post" (the reliable gate -- score is
-  // literally "0" pre-game, not null). statusDetail is ESPN's own pre-formatted clock+quarter
-  // string ("2:00 - 4th", "Final") -- no quarter/clock formatting to build by hand here.
-  function footballScoreLine(g) {
-    if (g.gameState === "in") {
-      return `<div class="gc-score live"><span class="gc-live-dot"></span>${g.statusDetail || "LIVE"} &middot; ${g.awayScore}-${g.homeScore}</div>`;
-    }
-    if (g.gameState === "post") {
-      return `<div class="gc-score final">FINAL &middot; ${g.awayScore}-${g.homeScore}</div>`;
-    }
-    return ""; // pre-game -- no score yet, the scheduled time above already covers it
-  }
-
-  // Odds line (added 2026-09-19, NFL/NCAAF only -- see fetchNflScheduleClientSide's comment for
-  // where this data comes from). No gameState check needed: ESPN drops the odds field itself once
-  // a game goes live/final, so absence alone is the gate, same "hide gracefully" pattern used
-  // elsewhere in this file.
+  // Odds pills (added 2026-09-19, redesigned 2026-09-20 -- see oddsPillsHtml below). NFL/NCAAF
+  // only, see fetchNflScheduleClientSide's comment for where this data comes from. No gameState
+  // check needed: ESPN drops the odds field itself once a game goes live/final, so absence alone
+  // is the gate, same "hide gracefully" pattern used elsewhere in this file.
   // Small colored arrow (green up / red down) showing real line movement -- same convention as
   // MLB's Total Runs Call arrow. "same" (no movement) shows nothing. fromLabel distinguishes MLB's
   // meaning (previousValue = last time this was polled, ~15min ago) from NFL/NCAAF's (previousValue
@@ -1817,14 +1852,24 @@
     return oddsParts(g, true).join(" · ");
   }
 
-  // Spread and total each get their own row (never joined onto one "·"-separated line) so every
-  // sport's odds badge follows the same fixed template: spread on top, total underneath. MLB has
-  // no spread, so its badge is just the one O/U row -- same box, same code path, one row instead
-  // of two.
-  function oddsLineHtml(g) {
+  // Spread and total each get their own pill (never joined onto one "·"-separated line) so every
+  // sport's odds badge follows the same fixed template: spread first, total second. MLB has no
+  // spread, so its badge is just the one O/U pill -- same code path, one pill instead of two.
+  // Redesigned 2026-09-20: was a single solid-fill badge that read as "blocky" next to the rest of
+  // the (otherwise all-outline) card -- now a labeled pill per value, filled with --accent-live
+  // while the line is still active and muted once the game's final (a closed line isn't live
+  // information worth the same visual weight). Label is inferred from the text itself (oddsParts
+  // always starts a total with "O/U ", never a spread) rather than threading a separate type
+  // through -- one less thing oddsParts' two return shapes (Covers vs ESPN fallback) has to agree on.
+  function oddsPillsHtml(g, isFinal) {
     const parts = oddsParts(g);
     if (!parts.length) return "";
-    return `<div class="gc-odds">${parts.map((p) => `<div class="gc-odds-row">${p}</div>`).join("")}</div>`;
+    return `<div class="gc-odds-pills">${parts
+      .map((p) => {
+        const label = p.startsWith("O/U") ? "O/U" : "SPRD";
+        return `<div class="gc-odds-pill${isFinal ? " muted" : ""}"><span class="lbl">${label}</span><span class="val">${p}</span></div>`;
+      })
+      .join("")}</div>`;
   }
 
   // Real spread/total + line-movement tracking for NFL/NCAAF (see fetchCoversLines in
@@ -2071,6 +2116,28 @@
     return `<img class="team-logo" src="${url}" alt="${alt}" loading="lazy" onerror="this.remove()">`;
   }
 
+  // Real per-team brand colors, used only for the game card's decorative corner glow (see
+  // gameCardHtml). NFL/NCAAF get this for free from ESPN's own scoreboard payload (awayColor/
+  // homeColor, set alongside awayLogo/homeLogo above) -- MLB's schedule comes from the Worker's
+  // /api/schedule, which proxies MLB Stats API, and that API has no color field at all. All 30
+  // real hex values below, sourced from ESPN's own MLB team list (site.api.espn.com/.../mlb/teams,
+  // confirmed live 2026-09-20) since ESPN covers every MLB team's colors too, just not through the
+  // schedule endpoint this app actually uses for MLB. Keyed by the same abbreviation MLB Stats API
+  // returns (confirmed live team 133 = "ATH", not "OAK", matching the 2025 Sacramento rebrand).
+  const MLB_TEAM_COLORS = {
+    ARI: "aa182c", ATH: "003831", ATL: "0c2340", BAL: "df4601", BOS: "0d2b56",
+    CHC: "0e3386", CHW: "000000", CIN: "c6011f", CLE: "002b5c", COL: "33006f",
+    DET: "0a2240", HOU: "002d62", KC: "004687", LAA: "ba0021", LAD: "005a9c",
+    MIA: "00a3e0", MIL: "13294b", MIN: "031f40", NYM: "002d72", NYY: "132448",
+    PHI: "e81828", PIT: "000000", SD: "2f241d", SF: "000000", SEA: "005c5c",
+    STL: "be0a14", TB: "092c5c", TEX: "003278", TOR: "134a8e", WSH: "ab0003",
+  };
+  function gameCardTeamColors(g) {
+    const away = g.awayColor || MLB_TEAM_COLORS[g.awayAbbr] || null;
+    const home = g.homeColor || MLB_TEAM_COLORS[g.homeAbbr] || null;
+    return { away: away ? `#${away}` : null, home: home ? `#${home}` : null };
+  }
+
   function gameCardHtml(g, i) {
     const d = new Date(g.startTimeUtc);
     const date = d.toLocaleDateString([], { weekday: "short", month: "numeric", day: "numeric" });
@@ -2089,14 +2156,40 @@
       currentSport === "mlb"
         ? `<div class="gc-pitchers">${g.awayProbablePitcher?.name || "TBD"} vs ${g.homeProbablePitcher?.name || "TBD"}</div>`
         : "";
-    const scoreLine = currentSport === "mlb" ? mlbScoreLine(g) : currentSport === "nfl" || currentSport === "ncaaf" ? footballScoreLine(g) : "";
-    const oddsLine = oddsLineHtml(g);
-    return `<button class="game-card" data-idx="${i}">
-      <div class="gc-time">${date} &middot; ${time}</div>
-      <div class="gc-matchup">${teamLogoHtml(currentSport, g, "away")}${awayRankPrefix}${g.awayAbbr || g.away}<em>@</em>${teamLogoHtml(currentSport, g, "home")}${homeRankPrefix}${g.homeAbbr || g.home}</div>
-      ${oddsLine}
+    const { state, liveDetail } = gameCardState(g, currentSport);
+    const oddsPills = oddsPillsHtml(g, state === "final");
+    const colors = gameCardTeamColors(g);
+    const glowStyle = `${colors.away ? `--away-color:${colors.away};` : ""}${colors.home ? `--home-color:${colors.home};` : ""}`;
+
+    const topRight =
+      state === "live"
+        ? `<div class="gc-live-badge"><span class="gc-live-dot"></span>${liveDetail}</div>`
+        : state === "final"
+        ? `<div class="gc-final-badge">FINAL</div>`
+        : "";
+    // Whichever side is ahead gets the accent-live color, live or final alike ("leading" becomes
+    // "won" once the game ends, same visual language either way); a tie gets neither.
+    const hasScore = state === "live" || state === "final";
+    const awayLead = hasScore && g.awayScore > g.homeScore;
+    const homeLead = hasScore && g.homeScore > g.awayScore;
+    const scoreCenter = hasScore
+      ? `<span class="gc-score-num${awayLead ? " lead" : ""}">${g.awayScore}</span><span class="gc-score-sep">&ndash;</span><span class="gc-score-num${homeLead ? " lead" : ""}">${g.homeScore}</span>`
+      : `<span class="gc-vs">VS</span>`;
+
+    return `<button class="game-card" data-idx="${i}" style="${glowStyle}">
+      <div class="gc-glow away"></div>
+      <div class="gc-glow home"></div>
+      <div class="gc-top">
+        <div class="gc-time">${date} &middot; ${time}</div>
+        ${topRight}
+      </div>
+      <div class="gc-scoreboard">
+        <div class="gc-team"><div class="gc-logo-chip">${teamLogoHtml(currentSport, g, "away")}</div><span class="gc-team-abbr">${awayRankPrefix}${g.awayAbbr || g.away}</span></div>
+        ${scoreCenter}
+        <div class="gc-team right"><div class="gc-logo-chip">${teamLogoHtml(currentSport, g, "home")}</div><span class="gc-team-abbr">${homeRankPrefix}${g.homeAbbr || g.home}</span></div>
+      </div>
+      ${oddsPills}
       ${pitchersLine}
-      ${scoreLine}
       <div class="gc-weather" id="gcw-${i}"><span class="gc-dot"></span>…</div>
     </button>`;
   }
@@ -2179,8 +2272,8 @@
         const data = await res.json();
         if (data.error) throw new Error(data.error);
         games = data.games || [];
-        // O/U only, same badge template as NFL/NCAAF's spread+total (see oddsLineHtml) -- MLB has
-        // no spread concept, so the badge just renders the one row. fetchTotalLines (the route
+        // O/U only, same pill template as NFL/NCAAF's spread+total (see oddsPillsHtml) -- MLB has
+        // no spread concept, so the badge just renders the one pill. fetchTotalLines (the route
         // behind this) always scrapes *today's* RotoGrinders slate with no dayOffset support, so
         // skip the merge for "tomorrow" rather than tag those games with today's lines.
         if (currentDayOffset === 0) mergeCoversLines(games, await fetchCoversLinesForSlate("mlb"));
