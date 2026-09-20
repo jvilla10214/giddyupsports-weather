@@ -715,12 +715,32 @@
   .gc-live-badge { display: flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 0.62rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--accent-live); }
   .gc-final-badge { font-family: var(--font-mono); font-size: 0.62rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-faint); }
 
-  .gc-scoreboard { display: flex; align-items: center; justify-content: space-between; gap: 6px; z-index: 1; }
-  .gc-team { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
-  .gc-team.right { flex-direction: row-reverse; text-align: right; }
-  .gc-logo-chip { width: 34px; height: 34px; border-radius: 50%; background: var(--bg-elevated-2); display: flex; align-items: center; justify-content: center; flex: none; }
-  .gc-logo-chip .team-logo { width: 22px; height: 22px; margin: 0; vertical-align: middle; }
-  .gc-team-abbr { font-family: var(--font-body); font-weight: 600; font-size: 0.78rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Teams stacked vertically (logo above code) rather than side-by-side -- a horizontal chip+text
+     row left each team sharing a cramped slice of the row with the big score in the middle, and
+     even plain 3-letter codes (PHI, NYM) were truncating to "P..."/"N..." at real mobile card
+     widths (found from a real screenshot, not just desktop testing). Stacked, each team gets the
+     column's full width for its own centered text instead of splitting a row. */
+  .gc-scoreboard { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; z-index: 1; }
+  .gc-team { display: flex; flex-direction: column; align-items: center; gap: 5px; flex: 1; min-width: 0; text-align: center; }
+  /* White backing regardless of theme -- most real team logos (Phillies, Mets, etc.) carry their
+     own opaque white/colored circular disc baked into the source image, which clashed visibly
+     against a dark theme-following chip (found from a real screenshot). Sports logos are designed
+     assuming a light backing, the same reason every real broadcast graphic uses one regardless of
+     dark mode -- matching that convention here instead of fighting it. */
+  .gc-logo-chip { width: 36px; height: 36px; border-radius: 50%; background: #fff; border: 1px solid rgba(0, 0, 0, 0.08); display: flex; align-items: center; justify-content: center; flex: none; }
+  .gc-logo-chip .team-logo { width: 24px; height: 24px; margin: 0; vertical-align: middle; }
+  .gc-team-abbr { font-family: var(--font-body); font-weight: 600; font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  /* AP rank badge, positioned on the logo chip itself rather than inline with the team code (see
+     gameCardHtml's comment) -- small enough to read as a real ranking marker, not compete with it. */
+  .gc-logo-chip { position: relative; }
+  .gc-rank {
+    position: absolute; top: -4px; right: -4px; min-width: 16px; height: 16px; padding: 0 3px;
+    border-radius: 100px; background: var(--accent-ai); color: #fff;
+    font-family: var(--font-mono); font-size: 0.56rem; font-weight: 700; line-height: 16px; text-align: center;
+  }
+  /* Vertically centers the score/VS against the taller team stacks (logo + code) now that
+     .gc-scoreboard itself aligns to flex-start, see that rule's own comment. */
+  .gc-score-center { display: flex; align-items: center; align-self: center; flex: none; }
   .gc-score-num { font-family: var(--font-display); font-weight: var(--font-display-w2); font-size: 1.7rem; line-height: 1; color: var(--text); min-width: 28px; text-align: center; }
   .gc-score-num.lead { color: var(--accent-live); }
   .gc-score-sep { font-family: var(--font-display); font-size: 1.05rem; color: var(--text-faint); padding: 0 1px; }
@@ -2142,11 +2162,12 @@
     const d = new Date(g.startTimeUtc);
     const date = d.toLocaleDateString([], { weekday: "short", month: "numeric", day: "numeric" });
     const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-    // AP rank, inline in the matchup line itself (between each team's logo and name, same
-    // placement as the detail view's vh-matchup) rather than a separate summary line below --
-    // one real position for "how ranked is this team," not two redundant ones.
-    const awayRankPrefix = g.apRankAway ? `#${g.apRankAway} ` : "";
-    const homeRankPrefix = g.apRankHome ? `#${g.apRankHome} ` : "";
+    // AP rank as a small badge on the logo chip rather than text prepended to the team code --
+    // moved 2026-09-20 (real user report: NCAAF names were truncating) since "#12 " ahead of an
+    // already-short column was exactly the kind of thing that pushed a real code past its
+    // available width. One real position for "how ranked is this team," not two redundant ones.
+    const awayRankBadge = g.apRankAway ? `<span class="gc-rank">#${g.apRankAway}</span>` : "";
+    const homeRankBadge = g.apRankHome ? `<span class="gc-rank">#${g.apRankHome}</span>` : "";
     // MLB starting pitchers -- this data was already fetched (fetchMlbSchedule hydrates
     // probablePitcher) and used internally for the Run Environment Score's pitcher signals, but
     // never actually shown to the user until now. "TBD" per side rather than hiding the row
@@ -2173,8 +2194,8 @@
     const awayLead = hasScore && g.awayScore > g.homeScore;
     const homeLead = hasScore && g.homeScore > g.awayScore;
     const scoreCenter = hasScore
-      ? `<span class="gc-score-num${awayLead ? " lead" : ""}">${g.awayScore}</span><span class="gc-score-sep">&ndash;</span><span class="gc-score-num${homeLead ? " lead" : ""}">${g.homeScore}</span>`
-      : `<span class="gc-vs">VS</span>`;
+      ? `<div class="gc-score-center"><span class="gc-score-num${awayLead ? " lead" : ""}">${g.awayScore}</span><span class="gc-score-sep">&ndash;</span><span class="gc-score-num${homeLead ? " lead" : ""}">${g.homeScore}</span></div>`
+      : `<div class="gc-score-center"><span class="gc-vs">VS</span></div>`;
 
     return `<button class="game-card" data-idx="${i}" style="${glowStyle}">
       <div class="gc-glow away"></div>
@@ -2184,9 +2205,9 @@
         ${topRight}
       </div>
       <div class="gc-scoreboard">
-        <div class="gc-team"><div class="gc-logo-chip">${teamLogoHtml(currentSport, g, "away")}</div><span class="gc-team-abbr">${awayRankPrefix}${g.awayAbbr || g.away}</span></div>
+        <div class="gc-team"><div class="gc-logo-chip">${teamLogoHtml(currentSport, g, "away")}${awayRankBadge}</div><span class="gc-team-abbr">${g.awayAbbr || g.away}</span></div>
         ${scoreCenter}
-        <div class="gc-team right"><div class="gc-logo-chip">${teamLogoHtml(currentSport, g, "home")}</div><span class="gc-team-abbr">${homeRankPrefix}${g.homeAbbr || g.home}</span></div>
+        <div class="gc-team"><div class="gc-logo-chip">${teamLogoHtml(currentSport, g, "home")}${homeRankBadge}</div><span class="gc-team-abbr">${g.homeAbbr || g.home}</span></div>
       </div>
       ${oddsPills}
       ${pitchersLine}
@@ -2545,10 +2566,22 @@
     // so "neg" here is theoretical/unreachable in practice, not a real half of this phrase pair.
     turf: { pos: "turf field boosting scoring", neg: "grass field suppressing scoring" },
   };
-  function whyText(contributions, phraseMap, maxFactors = 2) {
-    if (!contributions?.length) return "";
+  // BUG FIX 2026-09-20 (real user report: a Reds game showed "HR-friendly weather + HR-friendly
+  // ump" -- both Over-favoring phrases -- next to an Under call). Root cause: this used to rank
+  // ALL contributions by |weightedValue| and label the top two independently, with no check that
+  // they agreed with the net score's own direction. Two large same-signed signals (say wind+temp,
+  // both positive) can still lose to several smaller-but-more-numerous opposing signals (team+turf,
+  // both negative) once summed -- the net score goes negative, but the old code would still surface
+  // the two biggest individual phrases regardless, both pointing the wrong way. Not a sign-inversion
+  // bug (each phrase's own pos/neg label was always correct for that signal) -- the bug was ranking
+  // by magnitude alone instead of first requiring agreement with netScore's sign. Now takes netScore
+  // explicitly and only considers contributions on the same side of zero, so the phrases shown can
+  // never contradict the score (and therefore the call) they're explaining.
+  function whyText(contributions, phraseMap, netScore, maxFactors = 2) {
+    if (!contributions?.length || netScore == null) return "";
+    const netPositive = netScore >= 0;
     const phrases = contributions
-      .filter((c) => Math.abs(c.weightedValue) > 0.05) // skip near-zero, noise-level factors
+      .filter((c) => Math.abs(c.weightedValue) > 0.05 && (c.weightedValue >= 0) === netPositive)
       .slice(0, maxFactors)
       .map((c) => phraseMap[c.key]?.[c.weightedValue >= 0 ? "pos" : "neg"])
       .filter(Boolean);
@@ -2579,7 +2612,22 @@
       } else {
         const cls = totalCall.call.includes("Over") ? "good" : "info";
         const strength = totalCall.call.startsWith("Likely") ? "strong" : "lean"; // MLB only has these two real tiers, no "slight"
-        setPickHero(cls, totalCall.call, whyText(runEnvironmentScore?.contributions, MLB_WHY_PHRASES), strength);
+        const envScore = runEnvironmentScore?.score;
+        let why = whyText(runEnvironmentScore?.contributions, MLB_WHY_PHRASES, envScore);
+        // The call compares the model's implied total to the real market line (see
+        // computeTotalRunsCall) -- it is NOT just the environment score's own sign, so a genuinely
+        // hitter-leaning score can still net an Under call if the market line is set high enough,
+        // and vice versa. whyText above is now guaranteed to agree with the environment score's own
+        // direction, but that can still visibly diverge from totalCall.call itself -- when it does,
+        // say so explicitly instead of leaving a call that looks unexplained by its own "why" line.
+        if (why && envScore != null) {
+          const callIsOver = totalCall.call.includes("Over");
+          const envIsOver = envScore >= 0;
+          if (callIsOver !== envIsOver) {
+            why += ` — market line already priced ${callIsOver ? "below" : "above"} what that implies`;
+          }
+        }
+        setPickHero(cls, totalCall.call, why, strength);
       }
     } else if (sport === "nfl" || sport === "ncaaf") {
       // NCAAF's gameEnvironmentScore now includes a real team signal too (added 2026-09-20, see
@@ -2589,7 +2637,10 @@
         pickHero.style.display = "none";
       } else {
         const lean = nflLeanFromScore(gameEnvironmentScore.score, gameEnvironmentScore.tier);
-        setPickHero(lean.cls, lean.label, whyText(gameEnvironmentScore.contributions, NFL_WHY_PHRASES), lean.strength);
+        // Unlike MLB, the call here IS just gameEnvironmentScore.score's own sign (see
+        // nflLeanFromScore) -- no separate market-line comparison -- so passing that same score
+        // into whyText guarantees the phrases shown can never disagree with the call itself.
+        setPickHero(lean.cls, lean.label, whyText(gameEnvironmentScore.contributions, NFL_WHY_PHRASES, gameEnvironmentScore.score), lean.strength);
       }
     } else {
       pickHero.className = "pick-hero";
