@@ -1800,6 +1800,7 @@ async function handleGame(env, sport, params) {
         tempF: weather.tempF,
         roofClosed: score.roofClosed,
         teamScoringDelta,
+        isTurf: venue.surface != null ? venue.surface !== "grass" : null,
       });
     } catch (err) {
       gameEnvironmentScore = null;

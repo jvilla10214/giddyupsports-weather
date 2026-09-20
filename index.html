@@ -2382,6 +2382,10 @@
     wind: { pos: "calm conditions", neg: "wind suppressing scoring" },
     temp: { pos: "warm conditions favoring offense", neg: "cold conditions suppressing scoring" },
     team: { pos: "both teams trending toward higher scoring", neg: "both teams trending toward lower scoring" },
+    // Real 4th input added 2026-09-20 (see NFL_GES_WEIGHTS in rules-engine.js) -- turf's contribution
+    // is never negative by construction (it's a plain 0/1 indicator, see that constant's comment),
+    // so "neg" here is theoretical/unreachable in practice, not a real half of this phrase pair.
+    turf: { pos: "turf field boosting scoring", neg: "grass field suppressing scoring" },
   };
   function whyText(contributions, phraseMap, maxFactors = 2) {
     if (!contributions?.length) return "";

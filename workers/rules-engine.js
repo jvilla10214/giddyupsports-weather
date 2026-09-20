@@ -577,15 +577,41 @@ function computeConditionsAdjustedEra(era, resScore) {
 // a game is actually played, so a live request today naturally already sees only real season-to-date
 // results (and an NFL team plays at most one game per week, so "games played so far" and "weeks
 // strictly prior" are the same thing from that team's own perspective -- nothing to fix there). This
-// was purely a backtest-methodology bug, same distinction already made twice before. Even after the
-// correction, team scoring tendency remains the STRONGEST of the three GES inputs (wind's own r is
-// only -0.089, temp's is 0.082) -- weight left at 1.0, only the scale changed.
-const NFL_GES_WEIGHTS = { wind: 1.0, temp: 0.6, team: 1.0 };
+// was purely a backtest-methodology bug, same distinction already made twice before.
+//
+// WEIGHTS re-derived 2026-09-20 (see scripts/backtest-nfl-regression-weights.js) -- the old
+// {wind:1.0, temp:0.6, team:1.0} was a hand-picked ratio, never actually fit to the data. A real
+// multiple OLS regression (wind, temp, team, and a new 4th input -- surface, see below -- all
+// predicting actual total points at once, not each signal's own standalone/marginal correlation in
+// isolation) was fit on 2020-2023 and checked against the held-out 2024-2025 seasons: the
+// regression-weighted composite scored r=0.244 on that real held-out test, vs the old ad-hoc
+// weights' r=0.174 on the same games -- a genuine, validated accuracy gain, not a guess.
+//
+// Honest surprise worth flagging explicitly: this does NOT mean team scoring tendency should be
+// weighted down and weather up as instinct might suggest from each signal's own marginal
+// correlation (wind r=-0.089, temp r=0.082, team r=0.145 standalone). Controlling for all three
+// (plus surface) simultaneously, wind's real UNIQUE contribution is comparable to or larger than
+// team's, and temp's is the weakest of the three real inputs -- team is not "boosted" here so much
+// as temp is cut roughly in half relative to the old scheme. The takeaway is "use the numbers a real
+// regression actually found," not "shrink weather because it feels like the smaller signal."
+const NFL_GES_WEIGHTS = { wind: 1.305, temp: 0.857, team: 1.0, turf: 0.904 };
 const NFL_GES_SCALE = {
   windMph: 11, // real p75 across 2020-2025 outdoor/open-roof games
   tempFDeltaFrom60: 25, // real p75 of |tempF - 60|, outdoor/open-roof games only
   teamScoringDelta: 4.3, // real p75 of |value|, point-in-time corrected -- was 3.29 -- see comment above
 };
+
+// Surface (grass vs. turf) -- added 2026-09-20 as the Game Environment Score's 4th input, alongside
+// wind/temp/team. Real, previously untested: turf games averaged ~2 points higher combined scoring
+// than grass (2020-2025), and including it as a 4th regression predictor improved the held-out test
+// correlation further (r=0.230 -> r=0.244 on the identical held-out games, see
+// scripts/backtest-nfl-regression-weights.js). Kept as the same plain 0 (grass) / 1 (turf) indicator
+// the regression itself was fit on -- tried centering it to +-1 to match the symmetric-around-zero
+// style of the other three inputs, but that empirically performed slightly WORSE (r=0.172 vs 0.179
+// on the full sample) than just using the raw indicator directly, so simplicity+what-was-actually-
+// validated won over stylistic consistency. No NCAAF equivalent yet -- no verified per-stadium
+// surface data exists for 130+ FBS venues the way data/stadiums.js's NFL_STADIUMS now has (surface
+// field added 2026-09-20, sourced live).
 
 // NCAAF's team-strength signal is a BLEND of two real components (added 2026-09-20, see
 // scripts/backtest-ncaaf-blend-signal.js): prior-year-final SP+ (combinedScoringTendency, shipped
@@ -611,38 +637,41 @@ const NCAAF_TEAM_SCALE = 0.8565; // real p75 of |blended value| -- pass this as 
 const MIN_TEAM_GAMES_FOR_TENDENCY = 3;
 
 // Tier boundaries are the real p10/p25/p75/p90 of this composite score across the 1,615-game
-// backtest (median -0.25, not 0 -- the wind term can only ever subtract, never add, since wind
-// speed can't be negative, so the whole distribution skews low). Percentile-based, same
-// methodology as MLB's LEAN_HITTER_THRESHOLD/CARRY_LEAN_THRESHOLD_FT, not a symmetric guess.
+// backtest. Percentile-based, same methodology as MLB's LEAN_HITTER_THRESHOLD/
+// CARRY_LEAN_THRESHOLD_FT, not a symmetric guess.
 //
-// Re-derived 2026-09-12 against the point-in-time-corrected teamScoringDelta (see NFL_GES_SCALE
-// comment above): real p10/p25/p75/p90 of the corrected composite are -0.92/-0.60/+0.13/+0.62 --
-// the upper tail moved more than the lower one (p90 0.72->0.62, p75 0.19->0.13, vs p25/p10 barely
-// moving), consistent with the corrected signal being noisier early in a season. Updated to match,
-// same as MLB's pitcherHr9 recalibration.
+// Re-derived 2026-09-20 against the reweighted formula + new turf input (see NFL_GES_WEIGHTS'
+// comment above, scripts/backtest-nfl-reweighted-tier-calibration.js): real p10/p25/p50/p75/p90 are
+// now -0.54/-0.31/-0.04/+0.34/+0.93 -- shifted meaningfully from the old ad-hoc-weighted composite's
+// -0.92/-0.60/+0.13/+0.62 (median moved from -0.25 to -0.04, closer to symmetric, since turf's 0/1
+// indicator doesn't share wind's "can only ever subtract" one-sided skew). IMPORTANT, checked
+// honestly: real Likely Over/Under hit rate against actual historical odds with this new formula is
+// still ~47-53% depending on margin/side -- at or below the ~52.4% breakeven line against standard
+// vig. The regression weights are a genuine, validated fit-quality improvement (see
+// scripts/backtest-nfl-regression-weights.js, r=0.244 held-out vs the old scheme's r=0.174 on the
+// same games) but do NOT turn this into a beatable market -- NFL totals remain efficiently priced.
 function nflGameEnvironmentTier(score) {
-  if (score >= 0.62) return "Strong High-Scoring Environment";
-  if (score >= 0.13) return "High-Scoring Leaning";
-  if (score > -0.6) return "Neutral";
-  if (score > -0.92) return "Low-Scoring Leaning";
+  if (score >= 0.93) return "Strong High-Scoring Environment";
+  if (score >= 0.34) return "High-Scoring Leaning";
+  if (score > -0.31) return "Neutral";
+  if (score > -0.54) return "Low-Scoring Leaning";
   return "Strong Low-Scoring Environment";
 }
 
 // NCAAF's own tier thresholds -- re-derived 2026-09-20 (see
-// scripts/backtest-ncaaf-blend-tier-calibration.js) against the new blended team signal above.
-// Same bootstrap methodology as the original SP+-only calibration (no free source joins real
-// historical weather to NCAAF's real historical scores, so real team-signal values are paired with
-// a randomly-resampled real NFL outdoor wind/temp pair, run through this exact production formula),
-// just with the stronger blended signal in place of SP+ alone. Result barely moved despite the
-// underlying signal's accuracy improving a lot (r=0.18 -> r=0.27 held-out) -- expected, since both
-// components are independently normalized to p75=1 before blending, so the composite's overall
-// SHAPE stays similar even as its real predictive power improves. Real p10/p25/p50/p75/p90:
-// -0.86/-0.60/-0.31/-0.03/0.21.
+// scripts/backtest-ncaaf-blend-tier-calibration.js), re-run a second time same day after
+// NFL_GES_WEIGHTS' wind/temp weights changed (see that constant's own comment) -- NCAAF shares
+// those same weights (only its team-signal SCALE is sport-specific), so this bootstrap needed
+// re-running against the updated formula even though nothing about NCAAF's own team signal changed.
+// Same bootstrap methodology as before (no free source joins real historical weather to NCAAF's
+// real historical scores, so real team-signal values are paired with a randomly-resampled real NFL
+// outdoor wind/temp pair, run through this exact production formula). Real p10/p25/p50/p75/p90:
+// -0.85/-0.60/-0.33/-0.07/0.15.
 function ncaafGameEnvironmentTier(score) {
-  if (score >= 0.21) return "Strong High-Scoring Environment";
-  if (score >= -0.03) return "High-Scoring Leaning";
+  if (score >= 0.15) return "Strong High-Scoring Environment";
+  if (score >= -0.07) return "High-Scoring Leaning";
   if (score > -0.6) return "Neutral";
-  if (score > -0.86) return "Low-Scoring Leaning";
+  if (score > -0.85) return "Low-Scoring Leaning";
   return "Strong Low-Scoring Environment";
 }
 
@@ -660,6 +689,9 @@ function ncaafGameEnvironmentTier(score) {
  *     (NFL_GES_SCALE.teamScoringDelta) for backward compatibility -- NCAAF callers must pass
  *     NCAAF_TEAM_SCALE explicitly, since SP+ ratings are not on the same scale as nflverse's raw
  *     scored/allowed points.
+ *   isTurf: boolean|null - NFL only (see data/stadiums.js's NFL_STADIUMS.surface); null/omitted
+ *     skips this input entirely rather than guessing, same graceful-degradation pattern as every
+ *     other input here.
  *   tierFn: (score: number) => string - maps the final composite to a tier label; defaults to
  *     nflGameEnvironmentTier for backward compatibility -- NCAAF callers must pass
  *     ncaafGameEnvironmentTier explicitly, since its composite has a genuinely different real
@@ -676,6 +708,10 @@ function computeGameEnvironmentScore(inputs, teamScale = NFL_GES_SCALE.teamScori
   add("wind", inputs.roofClosed ? null : inputs.windMph != null ? -inputs.windMph : null, "windMph");
   add("temp", inputs.roofClosed || inputs.tempF == null ? null : inputs.tempF - 60, "tempFDeltaFrom60");
   add("team", inputs.teamScoringDelta, "teamScoringDelta");
+  // Already a 0/1 indicator, not a raw physical quantity -- no scale division needed (see
+  // NFL_GES_WEIGHTS.turf's own comment for why this stayed a plain indicator instead of being
+  // centered like the other three inputs).
+  if (inputs.isTurf != null) contributions.push({ key: "turf", weight: NFL_GES_WEIGHTS.turf, normalized: inputs.isTurf ? 1 : 0 });
 
   if (!contributions.length) return null;
 

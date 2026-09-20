@@ -247,21 +247,24 @@ assert(computeConditionsAdjustedEra(null, 0.5) === null, "A missing ERA should r
 assert(computeConditionsAdjustedEra(4.0, null) === null, "A missing resScore should return null, not a fake adjustment");
 
 // ---- Game Environment Score (NFL) ----
-// Test magnitudes grounded in the real 2020-2025 nflverse backtest (scripts/backtest-nfl-environment-score.js):
-// windMph real p90 ~15mph, tempF real p10/p90 ~35/80F, teamScoringDelta (point-in-time corrected
-// 2026-09-12, see NFL_GES_SCALE comment) real p90 ~6.2.
+// Test magnitudes grounded in the real 2020-2025 nflverse backtest. Thresholds/weights re-derived
+// 2026-09-20 (see NFL_GES_WEIGHTS and nflGameEnvironmentTier's own comments in rules-engine.js) --
+// windMph real p90 ~15mph, tempF real p10/p90 ~35/80F, teamScoringDelta real p90 ~6.2, and the new
+// turf input (real per-stadium data, see data/stadiums.js's NFL_STADIUMS.surface).
 
-// Calm + warm + high-scoring teams, all pointing the same way -> should clear the Strong High tier.
-const highScoringNfl = computeGameEnvironmentScore({ windMph: 0, tempF: 85, roofClosed: false, teamScoringDelta: 6.2 });
+// Calm + warm + high-scoring teams on turf, all pointing the same way -> should clear the Strong
+// High tier. Pushed somewhat past each signal's own real p90 individually (team=10, not 6.2) since
+// the new p90 tier threshold (0.93) describes the COMBINED composite's own p90, not each input's.
+const highScoringNfl = computeGameEnvironmentScore({ windMph: 0, tempF: 90, roofClosed: false, teamScoringDelta: 10, isTurf: true });
 console.log("High-scoring NFL environment:", highScoringNfl);
-assert(highScoringNfl.score >= 0.62, "Calm + warm + high-scoring teams should clear the Strong High-Scoring threshold");
+assert(highScoringNfl.score >= 0.93, "Calm + warm + high-scoring teams on turf should clear the Strong High-Scoring threshold");
 assert(highScoringNfl.tier === "Strong High-Scoring Environment", "Should land in the Strong High-Scoring tier");
-assert(highScoringNfl.inputsUsed.length === 3, "All three inputs should be counted when all three are provided");
+assert(highScoringNfl.inputsUsed.length === 4, "All four inputs should be counted when all four are provided");
 
 // High wind + freezing + low-scoring teams -> should clear the Strong Low tier.
 const lowScoringNfl = computeGameEnvironmentScore({ windMph: 20, tempF: 15, roofClosed: false, teamScoringDelta: -6.2 });
 console.log("Low-scoring NFL environment:", lowScoringNfl);
-assert(lowScoringNfl.score <= -0.92, "High wind + freezing + low-scoring teams should clear the Strong Low-Scoring threshold");
+assert(lowScoringNfl.score <= -0.54, "High wind + freezing + low-scoring teams should clear the Strong Low-Scoring threshold");
 assert(lowScoringNfl.tier === "Strong Low-Scoring Environment", "Should land in the Strong Low-Scoring tier");
 
 // A closed roof must gate wind/temp out entirely, same as scoreNflGame's own roofClosed handling --
