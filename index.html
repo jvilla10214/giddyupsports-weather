@@ -1739,18 +1739,23 @@
   // meaning (previousValue = last time this was polled, ~15min ago) from NFL/NCAAF's (previousValue
   // = the real Open line, compared directly to a live sportsbook's current number -- see
   // fetchCoversLines in weather-worker.js) since the two aren't the same kind of "previous."
-  // Redesigned 2026-09-20: the old &#9650;/&#9660; unicode triangles rendered inconsistently across
-  // platforms (oversized, misaligned baseline, chunky at small sizes -- exactly what "ugly" was
-  // pointing at). A small purpose-built SVG triangle renders identically everywhere and aligns
-  // cleanly inline with text. `showOpen` appends the real open value as visible text next to the
-  // arrow (not just a hover title) -- used in the roomier detail view; the compact grid-card badge
-  // stays hover-only (title attribute) since there isn't room to spell it out there.
+  // Redesigned 2026-09-20, twice: the old &#9650;/&#9660; unicode triangles rendered inconsistently
+  // across platforms (oversized, misaligned baseline, chunky at small sizes). A filled-triangle SVG
+  // was tried first, still didn't land -- landed instead on a full shaft+arrowhead icon (option "C"
+  // from a side-by-side comparison), the same convention real trading/betting apps already use
+  // (Robinhood, sportsbook line trackers), legible at a glance, and -- unlike a diagonal trend
+  // arrow -- doesn't visually borrow "up = good news," which matters since --accent-move-up/down
+  // exist specifically so "the line moved" never gets conflated with "this favors you." `showOpen`
+  // appends the real open value as visible text next to the arrow (not just a hover title) -- used
+  // in the roomier detail view; the compact grid-card badge stays hover-only (title attribute)
+  // since there isn't room to spell it out there.
   function movementArrowHtml(direction, previousValue, fromLabel = "from", showOpen = false) {
     if (direction !== "up" && direction !== "down") return "";
     const color = direction === "up" ? "var(--accent-move-up)" : "var(--accent-move-down)";
-    const points = direction === "up" ? "5,1.5 9,8.5 1,8.5" : "5,8.5 1,1.5 9,1.5";
-    const icon = `<svg width="9" height="9" viewBox="0 0 10 10" style="vertical-align:1px; margin-left:3px;"><polygon points="${points}" fill="${color}"/></svg>`;
-    const openText = showOpen ? `<span style="color: var(--text-faint); font-size: 0.78em; font-weight: 400; margin-left:5px;">opened ${previousValue}</span>` : "";
+    const shaft = direction === "up" ? '<line x1="6" y1="13" x2="6" y2="3"/>' : '<line x1="6" y1="1" x2="6" y2="11"/>';
+    const head = direction === "up" ? '<polyline points="2,7 6,2 10,7"/>' : '<polyline points="2,7 6,12 10,7"/>';
+    const icon = `<svg width="10" height="11" viewBox="0 0 12 14" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px; margin-left:3px;">${shaft}${head}</svg>`;
+    const openText = showOpen ? `<span style="font-family: var(--font-body); font-style: italic; color: var(--text-faint); font-size: 0.7rem; font-weight: 500; letter-spacing: 0.01em; margin-left:5px;">opened ${previousValue}</span>` : "";
     return `<span title="${direction === "up" ? "Up" : "Down"} ${fromLabel} ${previousValue}">${icon}</span>${openText}`;
   }
 
