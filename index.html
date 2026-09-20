@@ -851,14 +851,14 @@
      Empty when there's no odds for this game (final/live games, or none posted yet) --
      :empty collapses it. */
   .bet-box .odds-hero {
-    font-family: var(--font-mono);
-    font-weight: 800;
-    font-size: clamp(1.3rem, 2.8vw, 1.9rem);
+    font-family: var(--font-display);
+    font-weight: var(--font-display-w2);
+    font-size: clamp(1.4rem, 3vw, 2.05rem);
     color: var(--accent-atmo);
     background: var(--accent-atmo-dim);
     display: inline-block;
     width: fit-content;
-    padding: 4px 14px;
+    padding: 4px 16px;
     border-radius: 8px;
     letter-spacing: 0.01em;
     margin: 2px 0;
@@ -1755,7 +1755,7 @@
     const shaft = direction === "up" ? '<line x1="6" y1="13" x2="6" y2="3"/>' : '<line x1="6" y1="1" x2="6" y2="11"/>';
     const head = direction === "up" ? '<polyline points="2,7 6,2 10,7"/>' : '<polyline points="2,7 6,12 10,7"/>';
     const icon = `<svg width="10" height="11" viewBox="0 0 12 14" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px; margin-left:3px;">${shaft}${head}</svg>`;
-    const openText = showOpen ? `<span style="font-family: var(--font-body); font-style: italic; color: var(--text-faint); font-size: 0.7rem; font-weight: 500; letter-spacing: 0.01em; margin-left:5px;">opened ${previousValue}</span>` : "";
+    const openText = showOpen ? `<span style="font-family: var(--font-body); font-style: italic; color: var(--text-faint); font-size: 0.85rem; font-weight: 500; letter-spacing: 0.01em; margin-left:6px;">opened ${previousValue}</span>` : "";
     return `<span title="${direction === "up" ? "Up" : "Down"} ${fromLabel} ${previousValue}">${icon}</span>${openText}`;
   }
 
