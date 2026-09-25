@@ -52,7 +52,7 @@
  */
 
 import { MLB_STADIUMS, NFL_STADIUMS, MLB_TEAM_ID_TO_KEY, MLB_KEY_TO_TEAM_ID } from "../data/stadiums.js";
-import { scoreMlbGame, scoreNflGame, windCompassOrVariable, computeRunEnvironmentScore, MIN_PITCHER_IP, MIN_PITCHER_BATTED_BALLS, computeTotalRunsCall, computeConditionsAdjustedEra, computeGameEnvironmentScore, MIN_TEAM_GAMES_FOR_TENDENCY, NCAAF_TEAM_SCALE, NCAAF_SP_SCALE, NCAAF_IN_SEASON_SCALE, NCAAF_BLEND_WEIGHT_SP, ncaafGameEnvironmentTier } from "./rules-engine.js";
+import { scoreMlbGame, scoreNflGame, windCompassOrVariable, computeRunEnvironmentScore, MIN_PITCHER_IP, MIN_PITCHER_BATTED_BALLS, computeTotalRunsProjection, computeTotalRunsCall, computeConditionsAdjustedEra, computeGameEnvironmentScore, MIN_TEAM_GAMES_FOR_TENDENCY, NCAAF_TEAM_SCALE, NCAAF_SP_SCALE, NCAAF_IN_SEASON_SCALE, NCAAF_BLEND_WEIGHT_SP, ncaafGameEnvironmentTier } from "./rules-engine.js";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -553,23 +553,47 @@ function parseInningsPitched(ip) {
 // full day, same as park factors -- these are slow-moving season aggregates.
 async function fetchLeagueHrRate(env) {
   const year = new Date().getUTCFullYear();
-  return cached(env, `league-hr-rate:${year}`, 24 * 60 * 60, async () => {
+  // Cache key v2 (2026-09-25): the cached shape gained team offense + staff ERA for the Total Runs
+  // projection, so old v1 entries (missing those fields) must not be served for the rest of the day.
+  return cached(env, `league-hr-rate:v2:${year}`, 24 * 60 * 60, async () => {
     const headers = { "User-Agent": "GiddyUpSports-Weather/1.0" };
-    const [pitchingRes, vsLeftRes, vsRightRes] = await Promise.all([
+    const [pitchingRes, vsLeftRes, vsRightRes, hittingRes] = await Promise.all([
       fetch(`https://statsapi.mlb.com/api/v1/teams/stats?stats=season&group=pitching&season=${year}&sportIds=1`, { headers }),
       fetch(`https://statsapi.mlb.com/api/v1/teams/stats?stats=statSplits&group=hitting&season=${year}&sportIds=1&sitCodes=vl`, { headers }),
       fetch(`https://statsapi.mlb.com/api/v1/teams/stats?stats=statSplits&group=hitting&season=${year}&sportIds=1&sitCodes=vr`, { headers }),
+      fetch(`https://statsapi.mlb.com/api/v1/teams/stats?stats=season&group=hitting&season=${year}&sportIds=1`, { headers }),
     ]);
-    if (!pitchingRes.ok || !vsLeftRes.ok || !vsRightRes.ok) throw new Error("MLB Stats API team-stats fetch failed");
-    const [pitching, vsLeft, vsRight] = await Promise.all([pitchingRes.json(), vsLeftRes.json(), vsRightRes.json()]);
+    if (!pitchingRes.ok || !vsLeftRes.ok || !vsRightRes.ok || !hittingRes.ok) throw new Error("MLB Stats API team-stats fetch failed");
+    const [pitching, vsLeft, vsRight, hitting] = await Promise.all([pitchingRes.json(), vsLeftRes.json(), vsRightRes.json(), hittingRes.json()]);
 
+    // Team staff ERA + league ERA (Total Runs projection's pitching term, see
+    // computeTotalRunsProjection in rules-engine.js) come from the same pitching call as HR/9.
     let leagueHr = 0;
     let leagueIp = 0;
+    let leagueEr = 0;
+    const staffByTeamId = {};
     for (const s of pitching.stats?.[0]?.splits || []) {
+      const ip = parseInningsPitched(s.stat?.inningsPitched);
       leagueHr += s.stat?.homeRuns || 0;
-      leagueIp += parseInningsPitched(s.stat?.inningsPitched);
+      leagueIp += ip;
+      leagueEr += s.stat?.earnedRuns || 0;
+      if (s.team?.id && ip) staffByTeamId[s.team.id] = { staffEra: ((s.stat?.earnedRuns || 0) / ip) * 9 };
     }
     const pitcherHr9League = leagueIp ? (leagueHr / leagueIp) * 9 : null;
+    const leagueEra = leagueIp ? (leagueEr / leagueIp) * 9 : null;
+
+    // Team offense: season runs per game, plus the league per-team average it's compared against.
+    let leagueRuns = 0;
+    let leagueGames = 0;
+    const offenseByTeamId = {};
+    for (const s of hitting.stats?.[0]?.splits || []) {
+      const runs = s.stat?.runs || 0;
+      const games = s.stat?.gamesPlayed || 0;
+      leagueRuns += runs;
+      leagueGames += games;
+      if (s.team?.id && games) offenseByTeamId[s.team.id] = { runsPerGame: runs / games, games };
+    }
+    const leagueRunsPerGame = leagueGames ? leagueRuns / leagueGames : null;
 
     function splitsByTeam(splitData) {
       const byTeamId = {};
@@ -596,6 +620,10 @@ async function fetchLeagueHrRate(env) {
     return {
       year,
       pitcherHr9League,
+      leagueEra,
+      leagueRunsPerGame,
+      staffByTeamId,
+      offenseByTeamId,
       hittingLeagueByHand: { L: vl.leagueHrRate, R: vr.leagueHrRate },
       hittingByTeamId,
     };
@@ -1559,7 +1587,7 @@ async function narrate(env, sport, score, weather, venue, parkFactor, umpire, ru
     // total are close -- silence there would read as "nothing to say" rather than "genuinely close".
     function totalRunsSentence() {
       if (sport !== "mlb" || !totalRunsCall) return "";
-      return ` Total: ${totalRunsCall.call} ${totalRunsCall.marketLine} (our model implies ${totalRunsCall.impliedTotal}).`;
+      return ` Total: ${totalRunsCall.call} ${totalRunsCall.marketLine} (we project ${totalRunsCall.projectedTotal} runs vs that line).`;
     }
     // Game Environment Score (NFL, see computeGameEnvironmentScore in rules-engine.js): same terse
     // appended-clause treatment, since gameEnvNoteEl already shows this as its own badge. Worded as
@@ -1689,6 +1717,7 @@ async function handleGame(env, sport, params) {
   // returns the raw score/tier so it can be checked against real games before either of those.
   let runEnvironmentScore = null;
   let pitcherAdjustedEra = null; // { home, away } -- see computeConditionsAdjustedEra in rules-engine.js
+  let projectionTeams = null; // { leagueRates, game, homePitcher, awayPitcher } -- Total Runs projection inputs, see below
   if (sport === "mlb" && gameId) {
     try {
       const schedule = await fetchMlbSchedule(env, mlbScheduleDate);
@@ -1760,6 +1789,8 @@ async function handleGame(env, sport, params) {
         // (see fetchUmpireCareerLean/MIN_CAREER_GAMES) means perGameBatterImpact is noise, not a lean.
         const umpireLeanRunsPerGame = umpire?.career && umpire.career.lean !== "insufficient data" ? umpire.career.perGameBatterImpact : null;
 
+        projectionTeams = { leagueRates, game, homePitcher, awayPitcher };
+
         runEnvironmentScore = computeRunEnvironmentScore({
           carryFt: score.carryFt,
           parkFactorPct: parkFactor?.totalPct ?? null,
@@ -1787,18 +1818,34 @@ async function handleGame(env, sport, params) {
     }
   }
 
-  // Total Runs Call (see computeTotalRunsCall in rules-engine.js): needs both a real market O/U
-  // line (RotoGrinders) and a computed Run Environment Score -- wrapped separately from the block
-  // above so a RotoGrinders scrape hiccup degrades to "no total call today" without touching the
-  // Run Environment Score that's already independently useful.
+  // Total Runs Call (see computeTotalRunsProjection/computeTotalRunsCall in rules-engine.js): our
+  // own projected total from both offenses, both starters, both staffs and today's conditions,
+  // compared against the live RotoGrinders line exactly as posted (never adjusted). Wrapped
+  // separately so a RotoGrinders scrape hiccup degrades to "no total call today" without touching
+  // the Run Environment Score above. No call at all when team data is missing -- see
+  // computeTotalRunsProjection for why a league-average fallback would bring back the old bug.
   let totalRunsCall = null;
-  if (sport === "mlb" && runEnvironmentScore) {
+  if (sport === "mlb" && projectionTeams) {
     try {
-      const lines = await fetchTotalLines(env);
-      const line = lines.byVenueKey[venueKey];
-      if (line) {
+      const { leagueRates, game, homePitcher, awayPitcher } = projectionTeams;
+      const team = (teamId, pitcher) => ({
+        runsPerGame: leagueRates.offenseByTeamId?.[teamId]?.runsPerGame,
+        games: leagueRates.offenseByTeamId?.[teamId]?.games,
+        staffEra: leagueRates.staffByTeamId?.[teamId]?.staffEra,
+        starter: pitcher?.era != null ? { era: pitcher.era, inningsPitched: pitcher.inningsPitched } : null,
+      });
+      const projection = computeTotalRunsProjection({
+        leagueRunsPerGame: leagueRates.leagueRunsPerGame,
+        leagueEra: leagueRates.leagueEra,
+        home: team(game.homeTeamId, homePitcher),
+        away: team(game.awayTeamId, awayPitcher),
+        runEnvironmentScore,
+      });
+      const lines = projection ? await fetchTotalLines(env) : null;
+      const line = lines?.byVenueKey[venueKey];
+      if (projection && line) {
         totalRunsCall = {
-          ...computeTotalRunsCall(runEnvironmentScore.score, line.marketLine),
+          ...computeTotalRunsCall(projection, line.marketLine),
           awayAbbr: line.awayAbbr,
           homeAbbr: line.homeAbbr,
           lineDirection: line.direction,

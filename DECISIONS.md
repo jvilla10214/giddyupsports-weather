@@ -6,9 +6,14 @@ racing command center's `DECISIONS.md`.
 
 ---
 
-## OPEN REQUIREMENT: MLB total call must predict Over/Under the live line, never "adjust" the line
+## MLB total call predicts Over/Under the live line, never "adjusts" the line
 **Date:** 2026-09-25
-**Status:** saved for a future session — not implemented yet.
+**Status:** implemented 2026-09-25 — see `computeTotalRunsProjection` in `workers/rules-engine.js`.
+We now build our own projected total from both offenses (runs/game), both starters (ERA, regressed
+by innings), both staffs (ERA, bullpen proxy) and today's conditions (park/weather/umpire slice of
+the Run Environment Score). The call is simply that projection vs the live line as posted. The UI
+says "we project X runs vs the Y line" instead of "model implies". Still open: the constants are
+standard modeling defaults, not yet backtested against historical closing lines (next bullet).
 
 **User requirement (stated directly):** the conditions must NOT change the market line. The live
 market O/U line is the fixed target, and the conditions *and everything else* (starters, lineups,

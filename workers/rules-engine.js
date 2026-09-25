@@ -509,29 +509,112 @@ const TOTAL_CALL_MARGIN = 1.0; // runs of gap between implied total and market l
 // to predict real hit rate at all (flat ~47-51% regardless of bucket, see project memory), so
 // "Lean" vs "Likely" here is honestly a "how big is the gap" label, not a "how likely to be right"
 // one, and the product copy should never imply otherwise.
-/**
- * @param {number} resScore - Run Environment Score's `score` (not the tier label)
- * @param {number} marketLine - the real O/U line for this game (e.g. from RotoGrinders)
- * @returns {{impliedTotal: number, marketLine: number, delta: number, call: string}}
- */
 //
-// BUG FIX 2026-09-25 (real user report: TB @ PHI showed "carry-suppressing conditions + tough HR
-// matchup" next to a "Likely Over" call, and the same contradiction on other games). Root cause:
-// impliedTotal used to be INTERCEPT + SLOPE * resScore -- an unconditional league-average total
-// (~8.84) nudged by the environment -- compared straight against the market line. But the market
-// line already prices the starters, lineups and park, which resScore barely captures (R2 0.027),
-// so the comparison was really "is this line below league average?". Any low-line game (e.g. two
-// good starters at 6.5) got "Over" no matter how pitcher-friendly the conditions: resScore would
-// need to be below -1.34 to flip it, far past p10 (-0.49). Now the market line is the baseline and
-// only resScore's own deviation from a neutral day (SLOPE * resScore, the regression's real
-// per-point effect) moves it -- so the call's direction always matches the conditions shown, and
-// "Likely" (|delta| >= TOTAL_CALL_MARGIN, i.e. |resScore| >= ~0.575) lines up with the "Strong"
-// tiers (±0.58/-0.49) instead of with how far the line sits from league average.
-function computeTotalRunsCall(resScore, marketLine) {
-  const delta = Math.round(TOTAL_RUNS_REGRESSION.slope * resScore * 100) / 100;
-  const impliedTotal = Math.round((marketLine + delta) * 100) / 100;
-  const call = delta >= 0 ? (delta >= TOTAL_CALL_MARGIN ? "Likely Over" : "Lean Over") : delta <= -TOTAL_CALL_MARGIN ? "Likely Under" : "Lean Under";
-  return { impliedTotal, marketLine, delta, call };
+// REBUILT 2026-09-25 (user requirement, see DECISIONS.md): the live market line is the fixed target
+// and is NEVER adjusted. We build our own independent projection of total runs from everything we
+// have -- both offenses, both starters, both staffs, and today's conditions -- and the call is simply
+// whether that projection lands over or under the live line.
+//
+// History, so this isn't re-litigated: the first version projected INTERCEPT + SLOPE * resScore,
+// i.e. a league-average total (~8.84) nudged by conditions. resScore barely captures pitcher/lineup
+// quality, so any low line (two good starters at 6.5) called Over regardless of conditions. A same-
+// day stopgap then showed marketLine + SLOPE * resScore -- an "adjusted line", which the user
+// rejected. This version fixes the root cause instead: the projection now actually models the
+// starters and offenses the market is pricing, so a 6.5 line is compared to a projection that also
+// knows it's an ace matchup.
+//
+// Projection, per side (runs scored by team T against opponent O):
+//   leagueRPG * offense(T) * pitching(O)
+//   offense(T)  = T's runs/game, regressed toward league by games/(games+OFFENSE_REGRESS_GAMES), / leagueRPG
+//   pitching(O) = (STARTER_SHARE * O starter's ERA regressed by ip/(ip+STARTER_REGRESS_IP)
+//                  + (1-STARTER_SHARE) * O's staff ERA) / leagueERA
+// plus today's conditions in runs: the park/weather/umpire slice of the Run Environment Score
+// (carry, parkFactor, parkHr, umpireLean), converted to runs through the same backtested slope
+// (TOTAL_RUNS_REGRESSION.slope). Its pitcher/lineup HR signals are deliberately left out here --
+// the ERA/offense terms above replace them, so they'd be double-counted. Known overlap: a team's
+// runs/game already includes its home park for half its games, so the park term partly repeats
+// that; left as-is rather than invent an unbacktested correction.
+//
+// HONEST CAVEAT: the constants below are standard baseball-modeling defaults, NOT backtested
+// against historical closing lines (this project has no MLB odds archive yet -- see DECISIONS.md).
+// "Likely" vs "Lean" is a "how big is the gap" label, never a claim about hit rate.
+const STARTER_SHARE = 5.5 / 9; // typical starter's share of a game's innings; the rest goes to the staff ERA (bullpen proxy)
+const STARTER_REGRESS_IP = 50; // innings of league-average ERA blended into each starter's own ERA
+const OFFENSE_REGRESS_GAMES = 20; // games of league-average scoring blended into each offense
+const CONDITIONS_KEYS = ["carry", "parkFactor", "parkHr", "umpireLean"];
+
+function regressToward(value, sample, priorSample, mean) {
+  if (value == null || !Number.isFinite(value)) return mean;
+  const w = sample > 0 ? sample / (sample + priorSample) : 0;
+  return w * value + (1 - w) * mean;
+}
+
+/**
+ * @param {object} inputs
+ *   leagueRunsPerGame: number - league runs per team per game this season
+ *   leagueEra: number - league ERA this season
+ *   home/away: { runsPerGame, games, staffEra, starter: {era, inningsPitched}|null }
+ *   runEnvironmentScore: computeRunEnvironmentScore's result (or null) -- only its conditions slice is used
+ * @returns {{total, homeRuns, awayRuns, conditionsRuns, factors}|null} null when team data is missing --
+ *   without it the projection collapses to league average, which is exactly the bug this replaced
+ */
+function computeTotalRunsProjection(inputs) {
+  const { leagueRunsPerGame: lgRpg, leagueEra: lgEra, home, away, runEnvironmentScore } = inputs;
+  if (!(lgRpg > 0) || !(lgEra > 0) || !home || !away) return null;
+  for (const t of [home, away]) {
+    if (!(t.runsPerGame > 0) || !(t.staffEra > 0) || !(t.games > 0)) return null;
+  }
+
+  const offense = (t) => regressToward(t.runsPerGame, t.games, OFFENSE_REGRESS_GAMES, lgRpg) / lgRpg;
+  const pitching = (t) => {
+    const starterEra = t.starter ? regressToward(t.starter.era, t.starter.inningsPitched || 0, STARTER_REGRESS_IP, lgEra) : t.staffEra;
+    return (STARTER_SHARE * starterEra + (1 - STARTER_SHARE) * t.staffEra) / lgEra;
+  };
+
+  // Runs scored by `batting` against `pitchingTeam`, split into offense and pitching effects (both
+  // in runs vs a league-average side) so the "why" line can name the real drivers.
+  const factors = [];
+  const side = (batting, battingSide, pitchingTeam, pitchingSide) => {
+    const o = offense(batting);
+    const p = pitching(pitchingTeam);
+    factors.push({ key: "offense", side: battingSide, runs: lgRpg * (o - 1) });
+    factors.push({ key: "pitching", side: pitchingSide, runs: lgRpg * o * (p - 1) });
+    return lgRpg * o * p;
+  };
+  const homeRuns = side(home, "home", away, "away");
+  const awayRuns = side(away, "away", home, "home");
+
+  let conditionsRuns = 0;
+  const res = runEnvironmentScore;
+  if (res?.contributions?.length) {
+    const weightTotal = res.inputsUsed.reduce((sum, k) => sum + RES_WEIGHTS[k], 0);
+    for (const c of res.contributions) {
+      if (!CONDITIONS_KEYS.includes(c.key)) continue;
+      const runs = (TOTAL_RUNS_REGRESSION.slope * c.weightedValue) / weightTotal;
+      conditionsRuns += runs;
+      factors.push({ key: c.key, runs });
+    }
+  }
+
+  const r2 = (x) => Math.round(x * 100) / 100;
+  return {
+    total: r2(homeRuns + awayRuns + conditionsRuns),
+    homeRuns: r2(homeRuns),
+    awayRuns: r2(awayRuns),
+    conditionsRuns: r2(conditionsRuns),
+    factors: factors.map((f) => ({ ...f, runs: r2(f.runs) })).sort((a, b) => Math.abs(b.runs) - Math.abs(a.runs)),
+  };
+}
+
+/**
+ * @param {object} projection - computeTotalRunsProjection's result
+ * @param {number} marketLine - the live O/U line, used exactly as posted
+ * @returns {{projectedTotal, marketLine, gap, call, factors}}
+ */
+function computeTotalRunsCall(projection, marketLine) {
+  const gap = Math.round((projection.total - marketLine) * 100) / 100;
+  const call = gap >= 0 ? (gap >= TOTAL_CALL_MARGIN ? "Likely Over" : "Lean Over") : gap <= -TOTAL_CALL_MARGIN ? "Likely Under" : "Lean Under";
+  return { projectedTotal: projection.total, marketLine, gap, call, factors: projection.factors };
 }
 
 // ---- Conditions-Adjusted ERA ----
@@ -756,6 +839,7 @@ export {
   computeRunEnvironmentScore,
   MIN_PITCHER_IP,
   MIN_PITCHER_BATTED_BALLS,
+  computeTotalRunsProjection,
   computeTotalRunsCall,
   computeConditionsAdjustedEra,
   computeGameEnvironmentScore,

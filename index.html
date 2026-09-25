@@ -2542,7 +2542,7 @@
     totalCallNoteEl.innerHTML =
       `<span class="hn-dot"></span>Total (${totalCall.marketLine}${arrow} O/U):` +
       `<span class="pill-lean ${cls}" style="margin-left:6px;">${totalCall.call}</span>` +
-      `<span style="margin-left:8px; color: var(--text-muted); font-size: 0.85em;">model implies ${totalCall.impliedTotal}</span>`;
+      `<span style="margin-left:8px; color: var(--text-muted); font-size: 0.85em;">we project ${totalCall.projectedTotal} runs</span>`;
     totalCallNoteEl.style.display = "flex";
     // Odds hero shows the NEUTRAL market number only (same meaning as NFL/NCAAF's client-side-set
     // text above -- this function only ever runs for MLB, so there's no cross-sport collision).
@@ -2624,6 +2624,27 @@
     return phrases.join(" + ");
   }
 
+  // MLB Total Runs "why" (rebuilt 2026-09-25 with the projection model): factors come from
+  // computeTotalRunsProjection, each already in runs vs a league-average game. Offense/pitching
+  // factors are per team, so they're named with the real team abbreviation.
+  function mlbTotalWhyText(totalCall) {
+    const isOver = totalCall.gap >= 0;
+    const lead = `We project ${totalCall.projectedTotal} runs vs the ${totalCall.marketLine} line`;
+    const abbr = (side) => (side === "home" ? totalCall.homeAbbr : totalCall.awayAbbr) || (side === "home" ? "home" : "away");
+    const phrase = (f) => {
+      const pos = f.runs >= 0;
+      if (f.key === "offense") return pos ? `${abbr(f.side)} offense scoring above average` : `${abbr(f.side)} offense below average`;
+      if (f.key === "pitching") return pos ? `${abbr(f.side)} pitching allowing runs` : `${abbr(f.side)} strong pitching`;
+      return MLB_WHY_PHRASES[f.key]?.[pos ? "pos" : "neg"];
+    };
+    const reasons = (totalCall.factors || [])
+      .filter((f) => Math.abs(f.runs) >= 0.1 && (f.runs >= 0) === isOver)
+      .slice(0, 2)
+      .map(phrase)
+      .filter(Boolean);
+    return reasons.length ? `${lead} — ${reasons.join(" + ")}` : lead;
+  }
+
   // Suggested Bet: a real, committed call for every game where we have a computed signal -- MLB's
   // Total Runs Call and NFL/NCAAF's lean (Game Environment Score's own score+tier) always resolve
   // to an actual Over/Under/side, never "Toss-up" (removed 2026-09-20 -- see computeTotalRunsCall
@@ -2648,10 +2669,11 @@
       } else {
         const cls = totalCall.call.includes("Over") ? "good" : "info";
         const strength = totalCall.call.startsWith("Likely") ? "strong" : "lean"; // MLB only has these two real tiers, no "slight"
-        // The call is the market line adjusted by the environment score's own effect (see
-        // computeTotalRunsCall), so its direction always matches the score's sign -- and whyText
-        // only surfaces contributions agreeing with that sign -- so the "why" can't contradict it.
-        const why = whyText(runEnvironmentScore?.contributions, MLB_WHY_PHRASES, runEnvironmentScore?.score);
+        // The call is our own projected total vs the live line exactly as posted (see
+        // computeTotalRunsProjection/computeTotalRunsCall in rules-engine.js). The "why" leads with
+        // that comparison, then names the biggest real drivers pushing the same way as the call --
+        // same agreement rule as whyText, so the reasons can never contradict the call.
+        const why = mlbTotalWhyText(totalCall);
         setPickHero(cls, totalCall.call, why, strength);
       }
     } else if (sport === "nfl" || sport === "ncaaf") {
