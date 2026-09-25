@@ -6,6 +6,31 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## OPEN REQUIREMENT: MLB total call must predict Over/Under the live line, never "adjust" the line
+**Date:** 2026-09-25
+**Status:** saved for a future session — not implemented yet.
+
+**User requirement (stated directly):** the conditions must NOT change the market line. The live
+market O/U line is the fixed target, and the conditions *and everything else* (starters, lineups,
+park, umpire, etc.) should decide whether the game goes **over or under that live line**.
+
+**Where things stand:** the 2026-09-25 fix to `computeTotalRunsCall` (`workers/rules-engine.js`)
+stopped low-line games from always calling Over, which was the real bug. But it did that by showing
+`impliedTotal = marketLine + slope * resScore`, an "adjusted line" ("model implies X" in the UI and
+the AI narration). The user doesn't want that framing. Its direction also comes only from the Run
+Environment Score's sign, so it's still mostly a conditions-only read.
+
+**What next time should do:**
+- Keep the live line exactly as posted. Don't show or narrate an adjusted/"implied" line (see
+  `renderTotalCallNote` in `index.html` and `totalRunsSentence` in `weather-worker.js`).
+- Build the call as a real Over/Under-vs-that-line prediction that uses every signal, not just
+  weather. The line itself should be an input: the question is "given this line, over or under?"
+- Validate the hit rate against historical closing lines before trusting it. Past checks found
+  ~47-51% hit rates, and this project has no MLB historical odds archive yet, so one has to be
+  sourced first.
+
+---
+
 ## Cross-checked cfBearingDeg against MLB's own azimuthAngle field — mostly confirms it, no changes
 **Date:** 2026-09-04
 While researching roof status (below), noticed MLB's own venue API
