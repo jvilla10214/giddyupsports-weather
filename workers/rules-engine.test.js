@@ -203,25 +203,27 @@ assert(parkFactorVsParkHrOffset.inputsUsed.length === 2, "Both parkFactor and pa
 
 // ---- Total Runs Call ----
 
-// A Neutral-ish score (near the regression's own mean) against a very low market line -> our
-// implied total should sit well above it -> Likely Over.
-const overCall = computeTotalRunsCall(0, 6.5);
-console.log("Total call vs a low market line:", overCall);
-assert(overCall.call === "Likely Over", "A market line well below our implied total should call Likely Over");
-assert(overCall.impliedTotal > 8, "Score 0 should imply a total near the regression's intercept (~8.84)");
+// The market line is the baseline; only the environment score moves it. Regression for the
+// 2026-09-25 bug: a pitcher-friendly score against a LOW line (6.5) used to call Over because the
+// old implied total started from the league-average intercept (~8.84) instead of the line.
+const lowLinePitcherCall = computeTotalRunsCall(-0.3, 6.5);
+console.log("Pitcher-leaning score vs a low market line:", lowLinePitcherCall);
+assert(lowLinePitcherCall.call.includes("Under"), "A pitcher-leaning score should never call Over just because the market line is low");
+assert(lowLinePitcherCall.impliedTotal < 6.5, "A pitcher-leaning score should imply a total below the market line");
 
-// Same score against a very high market line -> Likely Under.
-const underCall = computeTotalRunsCall(0, 11);
-console.log("Total call vs a high market line:", underCall);
-assert(underCall.call === "Likely Under", "A market line well above our implied total should call Likely Under");
+// Hitter-leaning score against a HIGH line -> still Over (the line's level alone never decides it).
+const highLineHitterCall = computeTotalRunsCall(0.3, 11);
+assert(highLineHitterCall.call.includes("Over"), "A hitter-leaning score should call Over regardless of how high the line is");
 
-// Market line very close to our implied total -> a real directional Lean, not a non-answer. This is
-// the common case given the regression's real residual std dev (4.52 runs) -- most real market
-// lines should land inside TOTAL_CALL_MARGIN, not outside it (changed 2026-09-20 -- "Toss-up" was
-// removed, see computeTotalRunsCall's own comment).
-const closeCall = computeTotalRunsCall(0, 8.5);
-console.log("Total call vs a close market line:", closeCall);
-assert(closeCall.call === "Lean Over", "A market line just below our implied total, inside TOTAL_CALL_MARGIN, should still call Lean Over, not refuse to answer");
+// Strong-tier scores earn "Likely"; modest ones get a real directional "Lean", not a non-answer.
+const overCall = computeTotalRunsCall(0.65, 8.5);
+const underCall = computeTotalRunsCall(-0.65, 8.5);
+const closeCall = computeTotalRunsCall(0.1, 8.5);
+console.log("Strong/close total calls:", overCall, underCall, closeCall);
+assert(overCall.call === "Likely Over", "A Strong Hitter score should call Likely Over");
+assert(underCall.call === "Likely Under", "A Strong Pitcher score should call Likely Under");
+assert(closeCall.call === "Lean Over", "A slightly positive score should call Lean Over, not refuse to answer");
+assert(computeTotalRunsCall(0, 7).impliedTotal === 7, "A neutral score should leave the market line unchanged");
 
 // delta should be signed correctly: impliedTotal - marketLine, positive means we lean Over.
 assert(overCall.delta > 0, "A Likely Over call should have a positive delta (implied above market)");

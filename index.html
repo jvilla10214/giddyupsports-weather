@@ -2648,21 +2648,10 @@
       } else {
         const cls = totalCall.call.includes("Over") ? "good" : "info";
         const strength = totalCall.call.startsWith("Likely") ? "strong" : "lean"; // MLB only has these two real tiers, no "slight"
-        const envScore = runEnvironmentScore?.score;
-        let why = whyText(runEnvironmentScore?.contributions, MLB_WHY_PHRASES, envScore);
-        // The call compares the model's implied total to the real market line (see
-        // computeTotalRunsCall) -- it is NOT just the environment score's own sign, so a genuinely
-        // hitter-leaning score can still net an Under call if the market line is set high enough,
-        // and vice versa. whyText above is now guaranteed to agree with the environment score's own
-        // direction, but that can still visibly diverge from totalCall.call itself -- when it does,
-        // say so explicitly instead of leaving a call that looks unexplained by its own "why" line.
-        if (why && envScore != null) {
-          const callIsOver = totalCall.call.includes("Over");
-          const envIsOver = envScore >= 0;
-          if (callIsOver !== envIsOver) {
-            why += ` — market line already priced ${callIsOver ? "below" : "above"} what that implies`;
-          }
-        }
+        // The call is the market line adjusted by the environment score's own effect (see
+        // computeTotalRunsCall), so its direction always matches the score's sign -- and whyText
+        // only surfaces contributions agreeing with that sign -- so the "why" can't contradict it.
+        const why = whyText(runEnvironmentScore?.contributions, MLB_WHY_PHRASES, runEnvironmentScore?.score);
         setPickHero(cls, totalCall.call, why, strength);
       }
     } else if (sport === "nfl" || sport === "ncaaf") {

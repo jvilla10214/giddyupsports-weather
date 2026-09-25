@@ -514,9 +514,22 @@ const TOTAL_CALL_MARGIN = 1.0; // runs of gap between implied total and market l
  * @param {number} marketLine - the real O/U line for this game (e.g. from RotoGrinders)
  * @returns {{impliedTotal: number, marketLine: number, delta: number, call: string}}
  */
+//
+// BUG FIX 2026-09-25 (real user report: TB @ PHI showed "carry-suppressing conditions + tough HR
+// matchup" next to a "Likely Over" call, and the same contradiction on other games). Root cause:
+// impliedTotal used to be INTERCEPT + SLOPE * resScore -- an unconditional league-average total
+// (~8.84) nudged by the environment -- compared straight against the market line. But the market
+// line already prices the starters, lineups and park, which resScore barely captures (R2 0.027),
+// so the comparison was really "is this line below league average?". Any low-line game (e.g. two
+// good starters at 6.5) got "Over" no matter how pitcher-friendly the conditions: resScore would
+// need to be below -1.34 to flip it, far past p10 (-0.49). Now the market line is the baseline and
+// only resScore's own deviation from a neutral day (SLOPE * resScore, the regression's real
+// per-point effect) moves it -- so the call's direction always matches the conditions shown, and
+// "Likely" (|delta| >= TOTAL_CALL_MARGIN, i.e. |resScore| >= ~0.575) lines up with the "Strong"
+// tiers (±0.58/-0.49) instead of with how far the line sits from league average.
 function computeTotalRunsCall(resScore, marketLine) {
-  const impliedTotal = Math.round((TOTAL_RUNS_REGRESSION.intercept + TOTAL_RUNS_REGRESSION.slope * resScore) * 100) / 100;
-  const delta = Math.round((impliedTotal - marketLine) * 100) / 100;
+  const delta = Math.round(TOTAL_RUNS_REGRESSION.slope * resScore * 100) / 100;
+  const impliedTotal = Math.round((marketLine + delta) * 100) / 100;
   const call = delta >= 0 ? (delta >= TOTAL_CALL_MARGIN ? "Likely Over" : "Lean Over") : delta <= -TOTAL_CALL_MARGIN ? "Likely Under" : "Lean Under";
   return { impliedTotal, marketLine, delta, call };
 }
