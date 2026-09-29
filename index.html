@@ -2542,7 +2542,7 @@
     totalCallNoteEl.innerHTML =
       `<span class="hn-dot"></span>Total (${totalCall.marketLine}${arrow} O/U):` +
       `<span class="pill-lean ${cls}" style="margin-left:6px;">${totalCall.call}</span>` +
-      `<span style="margin-left:8px; color: var(--text-muted); font-size: 0.85em;">we project ${totalCall.projectedTotal} runs</span>`;
+      (totalCall.projectedTotal != null ? `<span style="margin-left:8px; color: var(--text-muted); font-size: 0.85em;">we project ${totalCall.projectedTotal} runs</span>` : "");
     totalCallNoteEl.style.display = "flex";
     // Odds hero shows the NEUTRAL market number only (same meaning as NFL/NCAAF's client-side-set
     // text above -- this function only ever runs for MLB, so there's no cross-sport collision).
@@ -2628,6 +2628,9 @@
   // computeTotalRunsProjection, each already in runs vs a league-average game. Offense/pitching
   // factors are per team, so they're named with the real team abbreviation.
   function mlbTotalWhyText(totalCall) {
+    // Guard for a worker response from before the 2026-09-25 projection rebuild (e.g. index.html
+    // deployed ahead of the worker): no projectedTotal -> no lead or reasons, rather than "undefined runs".
+    if (totalCall.projectedTotal == null) return "";
     const isOver = totalCall.gap >= 0;
     const lead = `We project ${totalCall.projectedTotal} runs vs the ${totalCall.marketLine} line`;
     const abbr = (side) => (side === "home" ? totalCall.homeAbbr : totalCall.awayAbbr) || (side === "home" ? "home" : "away");
