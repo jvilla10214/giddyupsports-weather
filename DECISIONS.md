@@ -6,6 +6,91 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## MLB Total Runs projection: real outcome backtest, no market-line archive needed for this part
+**Date:** 2026-09-29
+**Status:** done — see `scripts/backtest-mlb-total-runs-projection.js`, results cached at
+`scripts/.res-cache/mlb-total-runs-projection-backtest-results.json`.
+
+**What this answers, and what it doesn't:** the branch's own notes flagged that
+`computeTotalRunsProjection`'s constants are untuned defaults, unbacktested against historical
+closing lines — and that a free historical MLB odds archive doesn't exist (confirmed live:
+sportsbookreviewsonline.com's archive pages are dead; cross-checked against an independent public
+project — `kshreyan/mlb-prediction-system` — that investigated the exact same question and reached
+the same conclusion, down to the same specific dead ends: Kaggle needs credentials, GitHub
+"scrapers" found by search are code pointed at the dead site, not committed data, and The Odds
+API's free tier is far too limited to backtest with). Given the user chose the free option: this
+validates the projection against real ACTUAL final scores instead — not a market-line backtest, but
+a real check of whether the model tracks real outcomes at all.
+
+**Real result (2025 season, n=611 games, systematic every-4th-game sample, real point-in-time
+inputs — no look-ahead):** r=0.1275 between `projectedTotal` and actual combined runs, essentially
+zero bias (mean residual 0.03 runs). Comparable to this project's own prior best MLB totals signal
+(the resScore-only regression's r~0.16 across the full 2,430-game 2025 season, see
+`TOTAL_RUNS_REGRESSION`'s own comment in rules-engine.js). Spot-checked the best/worst individual
+predictions by hand: best matches were near-exact, worst misses were real 22-24 combined-run blowout
+games — the kind of high-variance outlier no free, deterministic model should be expected to catch,
+not a sign of a bug.
+
+**Every input was real and point-in-time**, not fabricated or using final-season stats as a proxy
+for what was knowable before each game:
+- Team offense (runs/game) and staff ERA: MLB Stats API's `byDateRange` team stats, `endDate` set to
+  the day before each sampled game.
+- Starter ERA: that pitcher's own real game log, summed over starts strictly before the game.
+- Weather: MLB's own real recorded per-game reading (`gameData.weather`: condition/temp/wind) — not
+  simulated or reconstructed from a separate provider. Wind is text ("Out To LF", "L To R", etc.);
+  catalogued the full real vocabulary from a 206-game sample before writing a parser (see the
+  backtest script's own comments for the bearing derivation, sanity-checked against
+  `scoreMlbGame`'s existing cosine-weighted carry formula).
+- Park factors: Baseball Savant's real 2025-season leaderboards (not today's/2026's).
+- League averages (runs/game, ERA): summed across all 30 teams for the same point-in-time date
+  range as the per-team stats, same no-look-ahead discipline.
+
+**Honest scope limitation, stated plainly:** `umpireLean` has no free historical per-game archive,
+so it's null throughout this backtest. `pitcherHr9Delta`/`teamHrRateDelta`/`hardHitDelta` are
+excluded from `computeTotalRunsProjection`'s conditions sum by design already (the ERA/offense terms
+replace them), so omitting them from this backtest doesn't change conditionsRuns' numerator — but it
+does shrink `weightTotal`'s denominator vs. a live game where those 3 signals are also present,
+which very slightly amplifies conditionsRuns here relative to production for the same raw
+carry/parkFactor/parkHr values. Conditions are a small modifier next to offense+pitching in this
+model, so the effect on `projectedTotal` is minor, but it's real and worth knowing before reading too
+much into small differences between this backtest and any single live game's own numbers.
+
+**What would still need paid data:** whether the call actually beats the market (CLV) — this
+backtest only checks real-outcome tracking, not "does it show an edge over the live line," which
+needs real historical closing lines the project doesn't have for free.
+
+---
+
+## MLB total call predicts Over/Under the live line, never "adjusts" the line
+**Date:** 2026-09-25
+**Status:** implemented 2026-09-25 — see `computeTotalRunsProjection` in `workers/rules-engine.js`.
+We now build our own projected total from both offenses (runs/game), both starters (ERA, regressed
+by innings), both staffs (ERA, bullpen proxy) and today's conditions (park/weather/umpire slice of
+the Run Environment Score). The call is simply that projection vs the live line as posted. The UI
+says "we project X runs vs the Y line" instead of "model implies". Still open: the constants are
+standard modeling defaults, not yet backtested against historical closing lines (next bullet).
+
+**User requirement (stated directly):** the conditions must NOT change the market line. The live
+market O/U line is the fixed target, and the conditions *and everything else* (starters, lineups,
+park, umpire, etc.) should decide whether the game goes **over or under that live line**.
+
+**Where things stand:** the 2026-09-25 fix to `computeTotalRunsCall` (`workers/rules-engine.js`)
+stopped low-line games from always calling Over, which was the real bug. But it did that by showing
+`impliedTotal = marketLine + slope * resScore`, an "adjusted line" ("model implies X" in the UI and
+the AI narration). The user doesn't want that framing. Its direction also comes only from the Run
+Environment Score's sign, so it's still mostly a conditions-only read.
+
+**What next time should do:**
+- Keep the live line exactly as posted. Don't show or narrate an adjusted/"implied" line (see
+  `renderTotalCallNote` in `index.html` and `totalRunsSentence` in `weather-worker.js`).
+- Build the call as a real Over/Under-vs-that-line prediction that uses every signal, not just
+  weather. The line itself should be an input: the question is "given this line, over or under?"
+- Validate the hit rate against historical closing lines before trusting it. Past checks found
+  ~47-51% hit rates, and this project has no MLB historical odds archive yet, so one has to be
+  sourced first.
+
+---
+
 ## Cross-checked cfBearingDeg against MLB's own azimuthAngle field — mostly confirms it, no changes
 **Date:** 2026-09-04
 While researching roof status (below), noticed MLB's own venue API

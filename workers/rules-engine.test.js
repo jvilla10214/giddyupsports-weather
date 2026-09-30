@@ -1,6 +1,6 @@
 // Quick sanity checks for rules-engine.js against known real-world cases.
 // Run with: node workers/rules-engine.test.js
-import { scoreMlbGame, scoreNflGame, computeRunEnvironmentScore, computeTotalRunsCall, computeConditionsAdjustedEra, computeGameEnvironmentScore } from "./rules-engine.js";
+import { scoreMlbGame, scoreNflGame, computeRunEnvironmentScore, computeTotalRunsProjection, computeTotalRunsCall, computeConditionsAdjustedEra, computeGameEnvironmentScore } from "./rules-engine.js";
 import { MLB_STADIUMS, NFL_STADIUMS } from "../data/stadiums.js";
 
 function assert(cond, msg) {
@@ -203,29 +203,41 @@ assert(parkFactorVsParkHrOffset.inputsUsed.length === 2, "Both parkFactor and pa
 
 // ---- Total Runs Call ----
 
-// A Neutral-ish score (near the regression's own mean) against a very low market line -> our
-// implied total should sit well above it -> Likely Over.
-const overCall = computeTotalRunsCall(0, 6.5);
-console.log("Total call vs a low market line:", overCall);
-assert(overCall.call === "Likely Over", "A market line well below our implied total should call Likely Over");
-assert(overCall.impliedTotal > 8, "Score 0 should imply a total near the regression's intercept (~8.84)");
+// Projection model (rebuilt 2026-09-25): our own total from offenses + starters + staffs +
+// conditions, compared to the live line exactly as posted.
+const avgTeam = (starterEra = 4.2) => ({ runsPerGame: 4.5, games: 150, staffEra: 4.2, starter: { era: starterEra, inningsPitched: 170 } });
+const lg = { leagueRunsPerGame: 4.5, leagueEra: 4.2 };
 
-// Same score against a very high market line -> Likely Under.
-const underCall = computeTotalRunsCall(0, 11);
-console.log("Total call vs a high market line:", underCall);
-assert(underCall.call === "Likely Under", "A market line well above our implied total should call Likely Under");
+// League-average everything, no conditions -> projects exactly a league-average game (9.0).
+const neutralProj = computeTotalRunsProjection({ ...lg, home: avgTeam(), away: avgTeam(), runEnvironmentScore: null });
+assert(neutralProj.total === 9, "Two league-average teams with no conditions should project 2x league runs/game");
 
-// Market line very close to our implied total -> a real directional Lean, not a non-answer. This is
-// the common case given the regression's real residual std dev (4.52 runs) -- most real market
-// lines should land inside TOTAL_CALL_MARGIN, not outside it (changed 2026-09-20 -- "Toss-up" was
-// removed, see computeTotalRunsCall's own comment).
-const closeCall = computeTotalRunsCall(0, 8.5);
-console.log("Total call vs a close market line:", closeCall);
-assert(closeCall.call === "Lean Over", "A market line just below our implied total, inside TOTAL_CALL_MARGIN, should still call Lean Over, not refuse to answer");
+// Regression for the 2026-09-25 bug: a real ace matchup at a 6.5 line must NOT call Over just
+// because 6.5 is below league average -- the projection itself has to know the starters are aces.
+const aceProj = computeTotalRunsProjection({ ...lg, home: avgTeam(2.2), away: avgTeam(2.2), runEnvironmentScore: null });
+console.log("Ace matchup projection:", aceProj.total);
+assert(aceProj.total < neutralProj.total - 1.5, "Two ace starters should pull the projection well below a league-average game");
 
-// delta should be signed correctly: impliedTotal - marketLine, positive means we lean Over.
-assert(overCall.delta > 0, "A Likely Over call should have a positive delta (implied above market)");
-assert(underCall.delta < 0, "A Likely Under call should have a negative delta (implied below market)");
+// Pitcher-friendly conditions push the projection DOWN, and never touch the market line.
+const suppressing = computeRunEnvironmentScore({ carryFt: -25, parkFactorPct: -6, umpireLeanRunsPerGame: -0.2, parkHrIndexDelta: -15 });
+const suppressedProj = computeTotalRunsProjection({ ...lg, home: avgTeam(), away: avgTeam(), runEnvironmentScore: suppressing });
+assert(suppressedProj.conditionsRuns < 0 && suppressedProj.total < neutralProj.total, "Suppressing conditions should lower our projection");
+const suppressedCall = computeTotalRunsCall(suppressedProj, 9);
+assert(suppressedCall.marketLine === 9, "The market line must be reported exactly as posted, never adjusted");
+assert(suppressedCall.call.includes("Under"), "League-average teams in suppressing conditions vs a league-average line should call Under");
+
+// Pitcher/lineup HR signals are replaced by the ERA/offense terms, so they must not also count as "conditions".
+const hrOnly = computeRunEnvironmentScore({ pitcherHr9Delta: 0.35, teamHrRateDelta: 0.0045 });
+assert(computeTotalRunsProjection({ ...lg, home: avgTeam(), away: avgTeam(), runEnvironmentScore: hrOnly }).conditionsRuns === 0, "HR-matchup signals must not be double-counted as conditions");
+
+// Missing team data -> no projection at all (a league-average fallback is exactly the old bug).
+assert(computeTotalRunsProjection({ ...lg, home: { ...avgTeam(), runsPerGame: null }, away: avgTeam() }) === null, "Missing team offense should yield no projection");
+
+// Call thresholds: gap = projection - line; "Likely" at >= 1 run, otherwise a real directional "Lean".
+assert(computeTotalRunsCall(neutralProj, 7.5).call === "Likely Over", "Projection 1.5 over the line should call Likely Over");
+assert(computeTotalRunsCall(neutralProj, 10.5).call === "Likely Under", "Projection 1.5 under the line should call Likely Under");
+assert(computeTotalRunsCall(neutralProj, 8.5).call === "Lean Over", "Projection 0.5 over the line should call Lean Over");
+assert(computeTotalRunsCall(neutralProj, 9.5).gap === -0.5, "gap should be projection minus line");
 
 // ---- Conditions-Adjusted ERA ----
 
