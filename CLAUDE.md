@@ -42,10 +42,21 @@ Over/Under").
   returns null.
 - No bugs found. No code changes were needed this pass.
 
+**Backtested against real outcomes (2026-09-29)** -- see the DECISIONS.md entry "MLB Total Runs
+projection: real outcome backtest, no market-line archive needed for this part" and
+`scripts/backtest-mlb-total-runs-projection.js`. No free historical MLB odds archive exists
+(confirmed live, cross-checked against an independent project's own investigation) -- user chose to
+validate against real actual final scores instead. Real result: r=0.1275 vs actual combined runs
+(n=611, 2025 season, real point-in-time inputs throughout, no look-ahead), essentially zero bias,
+comparable to this project's own prior best MLB totals signal. No bugs found in the projection
+itself from this pass.
+
 **Next steps:**
-1. Backtest the call against historical MLB closing lines. This needs an odds data source first;
-   the project has none. The constants (`STARTER_SHARE`, `STARTER_REGRESS_IP`,
-   `OFFENSE_REGRESS_GAMES`, `TOTAL_CALL_MARGIN`) are still untuned defaults until then.
+1. Whether the call actually beats the market (CLV) still needs real historical closing lines,
+   which the project doesn't have for free -- this is the one thing last pass's backtest couldn't
+   answer. The constants (`STARTER_SHARE`, `STARTER_REGRESS_IP`, `OFFENSE_REGRESS_GAMES`,
+   `TOTAL_CALL_MARGIN`) are still untuned defaults until real closing-line data is available (paid,
+   see the DECISIONS.md entry for what that would take).
 2. The frontend (`index.html`) on this branch has NOT been deployed anywhere public yet (GitHub
    Pages serves `main`, and this branch isn't merged) -- verification above went through the
    Worker's own `/api/game` endpoint and running the real frontend function in isolation, not a
