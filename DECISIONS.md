@@ -6,6 +6,45 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## NCAAF spread (SP+): first real test, genuine null — closes the last open football signal question
+**Date:** 2026-10-03
+**Status:** done — see `scripts/backtest-ncaaf-sp-plus-spread-signal.js`.
+
+The one genuinely open question left in football signal-hunting (see
+[[project_giddyupsports_ncaaf_spread_open_2026-09-20]]): SP+'s team-strength rating had only ever
+been tested against NCAAF totals, and even that test was against raw outcomes directly
+(`backtest-ncaaf-sp-plus-signal.js`: r=0.175/0.183), never the real market residual — the same
+"trivial vs real" trap this project's own memory had already flagged once for a different signal.
+Nobody had built the margin-shaped (spread) version, against either metric.
+
+**Signal:** `netSp(team) = offense.rating - defense.rating` (SP+'s own real convention — higher
+offense rating is better, LOWER defense rating is better, so subtracting correctly rewards both);
+`marginDiff = home's netSp - away's netSp`. Same prior-season-final-rating methodology as the totals
+test (CFBD's `/ratings/sp` has no true point-in-time weekly snapshot). Real market spread from
+CFBD's `/lines` endpoint (DraftKings preferred, falling back to any available provider).
+
+**Sign convention verified against real data, not assumed:** CFBD's `spread` is negative when home
+is favored (checked directly: Pittsburgh -3.5 as home favorite, won by only 2, confirmed as a
+non-cover) — the OPPOSITE convention from nflverse's NFL data, where `spread_line` is positive when
+home is favored. Using `residual = margin - spread` (copying the NFL script's formula blindly) would
+have silently inverted every finding below. Used `residual = margin + spread` instead, verified
+against the real example first.
+
+**Real result (2020-2025, n=4174 games with both teams' prior-year SP+ and a real spread line):**
+- `marginDiff` vs raw margin directly: r=**0.5002** — SP+ explains roughly half the variance in
+  actual game margins, a genuinely strong team-strength rating.
+- `marginDiff` vs the REAL ATS residual: r=**-0.0092** (all seasons), r=**-0.0020** (held-out
+  2024-2025, n=1481) — despite that strong raw-outcome correlation, essentially zero relationship
+  with what the market gets wrong. The fitted slope was so flat it almost never produced a real call
+  at any threshold in the held-out hit-rate table.
+
+**Conclusion:** NCAAF's spread market prices real team strength (even a rating this strong) just as
+efficiently as NFL's does. This closes the last genuinely open football signal-family question this
+project had — team-strength/efficiency ratings (power-margin, EPA, SP+) now show no exploitable
+edge against any closing line (spread or totals) in either NFL or NCAAF, with free public data.
+
+---
+
 ## NFL turnover differential: real test against both markets, genuine null
 **Date:** 2026-10-03
 **Status:** done — see `scripts/backtest-nfl-turnover-signal.js`.
