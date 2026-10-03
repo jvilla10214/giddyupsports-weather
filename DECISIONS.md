@@ -6,6 +6,37 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## NFL turnover differential: real test against both markets, genuine null
+**Date:** 2026-10-03
+**Status:** done — see `scripts/backtest-nfl-turnover-signal.js`.
+
+A genuinely distinct signal family from EPA/power-margin (closed out just above) — real turnover
+margin (takeaways minus giveaways), the classic handicapping metric, never tested in this project
+before. Real per-team-game data from nflverse's `stats_team_week` (same source as EPA):
+`giveaways = passing_interceptions + fumbles_lost_total`, `takeaways = def_interceptions +
+fumble_recovery_opp`. Same point-in-time no-look-ahead discipline, same train(2020-23)/
+test(2024-25) split as every other signal here.
+
+**Spread** (`marginDiff` = home's own point-in-time turnover margin minus away's): held-out
+r=-0.0627 (n=448) — not statistically meaningful, and the wrong sign if anything.
+**Totals** (`combinedGiveawayRate` = both teams' own giveaway rate summed, a "sloppiness" proxy):
+held-out r=0.0517 (n=448) — also not meaningful.
+
+**Notably**, the regressed signal was so weak that it never once crossed the real TOTAL_CALL_MARGIN-
+equivalent threshold (|predicted residual| >= 1) anywhere in the held-out test set — even if shipped,
+it would never actually produce a pick, just silence, every single game.
+
+**Why this isn't surprising** (and a sanity check that the methodology is sound, not broken): real
+football analytics already treats turnover margin as heavily luck-driven at the single-game level —
+fumble recovery rates specifically are close to a league-wide coin flip. It correlates strongly with
+*that same game's own outcome* (turnovers directly cause losses) but has little persistence as a
+*predictor of future games*, which is exactly the no-real-edge result found here.
+
+**Conclusion:** turnover differential does not predict what either NFL line gets wrong. Closes this
+signal family too.
+
+---
+
 ## NFL totals: real per-play EPA tested, genuine null — closes the last open efficiency-metric gap
 **Date:** 2026-10-03
 **Status:** done — see `scripts/backtest-nfl-epa-totals-signal.js`.
