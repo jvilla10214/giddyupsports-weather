@@ -1036,6 +1036,54 @@ async function handleNcaafGame(env, params) {
   return json({ sport: "ncaaf", venue, weather, score, gameEnvironmentScore, insight: insight.text });
 }
 
+// ---- Tennis ("Advantage Court") -- weather only, no bet calls, see DECISIONS.md ----
+//
+// User explicitly scoped this down from a full module: no odds/market-line source, no Suggested
+// Bet, no backtesting -- just real schedule + venue + weather, same shape as this product's
+// original pre-Worker version. ESPN's hidden scoreboard API (same family as NFL/NCAAF, confirmed
+// live for both tennis/atp and tennis/wda) gives a real `venue.fullName` city string per match
+// (e.g. "Tokyo, Japan") -- no lat/lon, so this geocodes the city name directly via Open-Meteo's
+// free geocoding API (international, unlike fetchNcaafVenueByCity's US-only one, since tennis
+// venues span the whole ATP/WTA tour calendar).
+async function fetchTennisVenueGeo(env, venueCity) {
+  return cached(env, `tennis-venue-geo:${venueCity}`, 365 * 24 * 60 * 60, async () => {
+    const cityOnly = venueCity.split(",")[0].trim();
+    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cityOnly)}&count=1`;
+    const res = await fetch(url, { headers: { "User-Agent": NCAAF_GEOCODE_USER_AGENT } });
+    if (!res.ok) throw new Error(`Open-Meteo geocoding ${res.status}`);
+    const data = await res.json();
+    const match = data.results?.[0];
+    if (!match) throw new Error(`No geocoding match for "${venueCity}"`);
+    return { lat: match.latitude, lon: match.longitude };
+  });
+}
+
+async function handleTennisGame(env, params) {
+  const venueCity = params.get("venueCity");
+  const startTimeUtc = params.get("startTimeUtc");
+  const court = params.get("court") || "";
+  if (!venueCity) return json({ error: "tennis requires venueCity" }, 400);
+
+  let geo;
+  try {
+    geo = await fetchTennisVenueGeo(env, venueCity);
+  } catch (err) {
+    return json({ error: `Could not locate venue: ${err.message}` }, 400);
+  }
+
+  const weather = await fetchWeather(env, geo.lat, geo.lon, startTimeUtc);
+  // Indoor only when ESPN's own per-match court name says so, e.g. Tokyo's Japan Open mixes
+  // "Indoor 1" with "Colosseum"/"Court 1" for the very same event -- confirmed live, a single
+  // named show-court can be indoors while the rest of the same tournament is played outdoors, so
+  // this has to be a per-match signal, never a tournament-level assumption. "venueConfirmedIndoor"
+  // is surfaced separately from roofType so the frontend can label it honestly as confirmed rather
+  // than assumed either way (same pattern as MLB's "Roof closed (assumed)").
+  const venueConfirmedIndoor = /indoor/i.test(court);
+  const venue = { venue: venueCity, roofType: venueConfirmedIndoor ? "dome" : "open", lat: geo.lat, lon: geo.lon };
+  const score = scoreNflGame(weather, venue); // reused unmodified, same wind/temp scoring shape NCAAF already reuses
+  return json({ sport: "tennis", venue, weather, score, venueConfirmedIndoor, insight: null });
+}
+
 // ---- Weather ----
 
 const NWS_HEADERS = { "User-Agent": "GiddyUpSports-Weather/1.0 (weather.giddyupsports contact: jvilla10214@gmail.com)" };
@@ -1957,10 +2005,10 @@ export default {
           }
           return json(await fetchMlbSchedule(env, dateIso));
         }
-        if (sport === "nfl" || sport === "ncaaf") {
+        if (sport === "nfl" || sport === "ncaaf" || sport === "tennis") {
           return json({ error: `${sport.toUpperCase()} schedule is fetched client-side (ESPN blocks Worker IPs) — see index.html and DECISIONS.md` }, 400);
         }
-        return json({ error: "sport must be mlb, nfl, or ncaaf" }, 400);
+        return json({ error: "sport must be mlb, nfl, ncaaf, or tennis" }, 400);
       }
 
       // Spread/total lines + real line-movement tracking for NFL/NCAAF (see fetchCoversLines'
@@ -1999,7 +2047,8 @@ export default {
       if (url.pathname === "/api/game") {
         const sport = url.searchParams.get("sport");
         if (sport === "ncaaf") return await handleNcaafGame(env, url.searchParams);
-        if (sport !== "mlb" && sport !== "nfl") return json({ error: "sport must be mlb, nfl, or ncaaf" }, 400);
+        if (sport === "tennis") return await handleTennisGame(env, url.searchParams);
+        if (sport !== "mlb" && sport !== "nfl") return json({ error: "sport must be mlb, nfl, ncaaf, or tennis" }, 400);
         return await handleGame(env, sport, url.searchParams);
       }
 

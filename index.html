@@ -378,6 +378,99 @@
     --accent-move-down: #d3726a;
   }
 
+  /* ---------- Tennis theme: "Advantage Court" — SW19's own purple and green ----------
+     Weather-only, no bet calls (see handleTennisGame in weather-worker.js and DECISIONS.md) --
+     the purple/green duality already chosen for the landing tile is reused directly here rather
+     than invented twice: accent-atmo (this app's wind/weather-reading color everywhere else)
+     becomes the purple, accent-live (favorable/live status) becomes the grass green, so the one
+     real weather readout this sport has (wind/temp) carries the sport's own identity instead of
+     a borrowed one. Light-default, same reasoning as MLB/NCAAF -- day-session grass/clay, not a
+     floodlit night sport like NFL. */
+  html[data-sport="tennis"] {
+    --bg: #f4f1f6;
+    --bg-elevated: #ffffff;
+    --bg-elevated-2: #ece4f0;
+    --bg-glass: rgba(255, 255, 255, 0.85);
+    --text: #221d27;
+    --text-muted: #675e70;
+    --text-faint: #a497ad;
+    --line: #ded2e4;
+    --line-strong: #c6b4d1;
+
+    --accent-atmo: #6b3f82;
+    --accent-atmo-dim: #e7ddee;
+    --accent-live: #3e6b3c;
+    --accent-live-dim: #dde8dc;
+    --accent-ai: #8a6d9f;
+    --accent-ai-dim: #e9e1ee;
+    --accent-warn: #9a4a52;
+    --accent-warn-dim: #ecdbdd;
+    --accent-move-up: #3e6b3c;
+    --accent-move-down: #9a4a52;
+
+    --shadow: 0 20px 50px -26px rgba(34, 29, 39, 0.18), 0 1px 2px rgba(34, 29, 39, 0.05);
+    --shadow-soft: 0 10px 26px -18px rgba(34, 29, 39, 0.13);
+
+    --font-display: "Barlow Semi Condensed", sans-serif;
+    --font-body: "Manrope", sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+    --font-display-w1: 600;
+    --font-display-w0: 500;
+    --font-display-w2: 700;
+
+    --card-border-width: 1px;
+    --radius-lg: 10px;
+    --radius-md: 6px;
+    --insight-border-color: var(--accent-atmo);
+  }
+  @media (prefers-color-scheme: dark) {
+    html[data-sport="tennis"]:not([data-theme="light"]) {
+      --bg: #17141a;
+      --bg-elevated: #211c27;
+      --bg-elevated-2: #2b2433;
+      --bg-glass: rgba(33, 28, 39, 0.85);
+      --text: #efeaf3;
+      --text-muted: #ab9fb7;
+      --text-faint: #786b86;
+      --line: #392f44;
+      --line-strong: #4c3f59;
+
+      --accent-atmo: #9f82ae;
+      --accent-atmo-dim: #2e2638;
+      --accent-live: #8aa389;
+      --accent-live-dim: #243223;
+      --accent-ai: #b09cc0;
+      --accent-ai-dim: #332a3f;
+      --accent-warn: #c17b82;
+      --accent-warn-dim: #3a2428;
+      --accent-move-up: #8aa389;
+      --accent-move-down: #c17b82;
+    }
+  }
+  /* Explicit dark-mode toggle for Tennis, same literal-duplicate reasoning as MLB/NCAAF's dark block. */
+  html[data-sport="tennis"][data-theme="dark"] {
+    --bg: #17141a;
+    --bg-elevated: #211c27;
+    --bg-elevated-2: #2b2433;
+    --bg-glass: rgba(33, 28, 39, 0.85);
+    --text: #efeaf3;
+    --text-muted: #ab9fb7;
+    --text-faint: #786b86;
+    --line: #392f44;
+    --line-strong: #4c3f59;
+
+    --accent-atmo: #9f82ae;
+    --accent-atmo-dim: #2e2638;
+    --accent-live: #8aa389;
+    --accent-live-dim: #243223;
+    --accent-ai: #b09cc0;
+    --accent-ai-dim: #332a3f;
+    --accent-warn: #c17b82;
+    --accent-warn-dim: #3a2428;
+    --accent-move-up: #8aa389;
+    --accent-move-down: #c17b82;
+  }
+
   * { box-sizing: border-box; }
   html, body { margin: 0; }
   body {
@@ -584,9 +677,10 @@
   /* ---------- Landing: the suite's front door, shown before a sport is picked ----------
      Chrome (background/text) still reads from the currently-active html[data-sport] tokens, but
      each tile carries its OWN sport identity via inline --tile-accent/--tile-accent-2 custom
-     properties -- Golf and Tennis don't have full page themes built (no real backend/data source
-     for either yet, see DECISIONS.md), so this is the lightest way to preview their identity
-     without standing up CSS token blocks for pages that don't exist. */
+     properties -- Golf doesn't have a full page theme built yet (no real backend/data source,
+     see DECISIONS.md), so this is the lightest way to preview its identity without standing up a
+     CSS token block for a page that doesn't exist. Tennis now has its own real theme block
+     (html[data-sport="tennis"]) but still sets these the same way, same as every live sport. */
   .landing { display: flex; flex-direction: column; gap: 26px; padding: 8px 0 40px; }
   .landing-intro h1 { font-family: var(--font-display); font-weight: var(--font-display-w2); font-size: clamp(1.7rem, 3.6vw, 2.4rem); text-transform: uppercase; letter-spacing: 0.01em; margin: 0 0 8px; text-wrap: balance; }
   .landing-intro p { color: var(--text-muted); max-width: 62ch; font-size: 0.92rem; line-height: 1.6; margin: 0; }
@@ -626,10 +720,10 @@
   button.landing-tile:hover { transform: translateY(-3px); border-color: var(--tile-accent-r); }
   .landing-tile.soon { opacity: 0.78; }
   /* --tile-font-display/-mono/-weight let each tile render in ITS OWN sport's real theme
-     font (Anton for NFL, Oswald for NCAAF, etc.) instead of whatever html[data-sport] happens
-     to be active before a sport is picked -- previously every tile silently rendered in MLB's
-     font since that's the default data-sport. Golf/Tennis have no real font identity yet, so
-     they fall back to the shared page font via the var() default. */
+     font (Anton for NFL, Oswald for NCAAF, Barlow Semi Condensed for Tennis, etc.) instead of
+     whatever html[data-sport] happens to be active before a sport is picked -- previously every
+     tile silently rendered in MLB's font since that's the default data-sport. Golf has no real
+     font identity yet, so it falls back to the shared page font via the var() default. */
   .lt-name { font-family: var(--tile-font-display, var(--font-display)); font-size: 1.5rem; font-weight: var(--tile-font-weight, var(--font-display-w2)); color: var(--tile-accent-r); line-height: 1.05; }
   .lt-sport { font-family: var(--tile-font-mono, var(--font-mono)); font-size: 0.64rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--text-faint); }
   .lt-desc { font-size: 0.82rem; color: var(--text-muted); line-height: 1.5; margin-top: 2px; }
@@ -748,6 +842,12 @@
   .gc-logo-chip { width: 36px; height: 36px; border-radius: 50%; background: #fff; border: 1px solid rgba(0, 0, 0, 0.08); display: flex; align-items: center; justify-content: center; flex: none; }
   .gc-logo-chip .team-logo { width: 24px; height: 24px; margin: 0; vertical-align: middle; }
   .gc-team-abbr { font-family: var(--font-body); font-weight: 600; font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  /* Tennis card: a winner (real or live) gets the same accent-live "lead" treatment as a leading
+     team's score elsewhere on this card, so the color language stays consistent across sports. */
+  .gc-team-abbr.lead { color: var(--accent-live); }
+  .tn-flag { width: 26px; height: 18px; object-fit: cover; border-radius: 3px; border: 1px solid rgba(0, 0, 0, 0.12); flex: none; }
+  .gc-tennis-meta { font-size: 0.68rem; color: var(--text-faint); z-index: 1; margin-top: -4px; }
+  .tn-sets { font-family: var(--font-mono); font-size: 0.86rem; font-weight: 700; color: var(--text); white-space: nowrap; }
   /* AP rank badge, positioned on the logo chip itself rather than inline with the team code (see
      gameCardHtml's comment) -- small enough to read as a real ranking marker, not compete with it. */
   .gc-logo-chip { position: relative; }
@@ -1210,7 +1310,7 @@
       <button data-sport="mlb" aria-pressed="false">MLB</button>
       <button data-sport="nfl" aria-pressed="false">NFL</button>
       <button data-sport="ncaaf" aria-pressed="false">NCAAF</button>
-      <button disabled title="Coming soon">Tennis</button>
+      <button data-sport="tennis" aria-pressed="false">Tennis</button>
       <button disabled title="Coming soon">Golf</button>
     </div>
     <button class="theme-toggle" id="themeToggle" type="button" aria-pressed="false" title="Night mode">
@@ -1248,12 +1348,12 @@
         <div class="lt-desc">A windswept coastal links — where club selection has always been a weather reading first, a yardage second.</div>
         <div class="lt-status">Coming Soon</div>
       </div>
-      <div class="landing-tile soon" style="--tile-accent-light:#6B3F82; --tile-accent-2-light:#3E6B3C; --tile-accent-dark:#9F82AE; --tile-accent-2-dark:#8AA389;">
+      <button class="landing-tile live" data-sport="tennis" style="--tile-accent-light:#6B3F82; --tile-accent-2-light:#3E6B3C; --tile-accent-dark:#9F82AE; --tile-accent-2-dark:#8AA389; --tile-font-display:'Barlow Semi Condensed', sans-serif; --tile-font-mono:'IBM Plex Mono', monospace; --tile-font-weight:600;">
         <div class="lt-name">Advantage Court</div>
         <div class="lt-sport">Tennis</div>
-        <div class="lt-desc">All white on grass — SW19's own purple and green, where a crosswind is the one opponent neither player can scout.</div>
-        <div class="lt-status">Coming Soon</div>
-      </div>
+        <div class="lt-desc">All white on grass — SW19's own purple and green, where a crosswind is the one opponent neither player can scout. Real conditions for every ATP/WTA match, no bet calls — just the weather.</div>
+        <div class="lt-status">Beta</div>
+      </button>
     </div>
   </div>
 
@@ -1417,7 +1517,9 @@
   // structures especially -- SoFi Stadium's roof alone runs ~330m/1,000ft+ long) are real-world
   // larger than MLB parks on average. Values measured live off the largest venue in each sport
   // (Coors Field for MLB, SoFi Stadium for NFL) so every smaller venue also fits with margin.
-  const STADIUM_HALF_EXTENT_M = { mlb: 95, nfl: 190, ncaaf: 190 };
+  // tennis: only a geocoded CITY (no exact venue, see fetchTennisVenueGeo in weather-worker.js),
+  // so this zooms to a city-wide view rather than falsely implying stadium-level precision.
+  const STADIUM_HALF_EXTENT_M = { mlb: 95, nfl: 190, ncaaf: 190, tennis: 6000 };
 
   const sportToggle = document.getElementById("sportToggle");
   const statusLine = document.getElementById("statusLine");
@@ -1824,6 +1926,68 @@
     return games;
   }
 
+  // Tennis ("Advantage Court") -- weather only, no bet calls (user explicitly scoped this down,
+  // see DECISIONS.md). Same client-side-fetch pattern as NFL/NCAAF above (ESPN blocks Worker IPs),
+  // but tennis's own scoreboard shape is genuinely different -- matches live under `groupings`
+  // (singles/doubles), not `competitions` directly, and `venue` sits on the match itself as a real
+  // city string ("Tokyo, Japan") rather than lat/lon, geocoded server-side (see fetchTennisVenueGeo
+  // in weather-worker.js). Singles only for v1 (Men's/Women's Singles) -- doubles pairs would need
+  // a 4-name card layout this version isn't scoped for. Both tours fetched in parallel and merged
+  // into one list, tagged by `tour`, so a user sees the whole real slate, not just one gender's.
+  const TENNIS_SCOREBOARD_URLS = { ATP: "https://site.api.espn.com/apis/site/v2/sports/tennis/atp/scoreboard", WTA: "https://site.api.espn.com/apis/site/v2/sports/tennis/wta/scoreboard" };
+
+  async function fetchTennisTourScheduleClientSide(tour, url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`ESPN ${tour} scoreboard API ${res.status}`);
+    const data = await res.json();
+    const matches = [];
+    for (const ev of data.events || []) {
+      for (const grouping of ev.groupings || []) {
+        const groupName = grouping.grouping?.displayName || "";
+        if (!/singles/i.test(groupName)) continue; // doubles excluded, see this function's own comment
+        for (const comp of grouping.competitions || []) {
+          const home = comp.competitors?.find((c) => c.homeAway === "home");
+          const away = comp.competitors?.find((c) => c.homeAway === "away");
+          if (!home?.athlete || !away?.athlete) continue; // a bye/walkover slot with no real opponent yet
+          const player = (c) => ({
+            name: c.athlete.displayName,
+            shortName: c.athlete.shortName || c.athlete.displayName,
+            flag: c.athlete.flag?.href || null,
+            winner: c.winner === true,
+            sets: (c.linescores || []).map((l) => Math.round(l.value)),
+          });
+          const state = comp.status?.type?.state;
+          matches.push({
+            tour,
+            matchId: comp.id,
+            tournament: ev.name,
+            round: groupName,
+            startTimeUtc: comp.date || comp.startDate,
+            venue: comp.venue?.fullName || "Venue",
+            venueCity: comp.venue?.fullName || null, // the whole "City, Country" string IS the venue here
+            venueKey: comp.venue?.fullName || comp.id, // just needs to be truthy, see loadSchedule's venueKey filter
+            court: comp.venue?.court || "",
+            gameState: state, // "pre" | "in" | "post", same convention as NFL/NCAAF above
+            statusDetail: comp.status?.type?.shortDetail || comp.status?.type?.description || "",
+            completed: comp.status?.type?.completed === true,
+            away: player(away),
+            home: player(home),
+          });
+        }
+      }
+    }
+    return matches;
+  }
+
+  async function fetchTennisScheduleClientSide() {
+    const [atp, wta] = await Promise.all(
+      Object.entries(TENNIS_SCOREBOARD_URLS).map(([tour, url]) => fetchTennisTourScheduleClientSide(tour, url))
+    );
+    const matches = [...atp, ...wta];
+    matches.sort((a, b) => new Date(a.startTimeUtc) - new Date(b.startTimeUtc));
+    return matches;
+  }
+
   // MLB live-score badge (added 2026-09-12): abstractState is the reliable "Preview"/"Live"/"Final"
   // field (detailedState has many more granular values -- "Warmup", "Delayed", "Manager challenge"
   // -- that all still mean "don't show a score yet" or "still live"). Ordinal-suffix inning label,
@@ -2210,7 +2374,47 @@
     return { away: away ? `#${away}` : null, home: home ? `#${home}` : null };
   }
 
+  // Tennis card: players, not teams -- no logos, no odds pills (weather only, see DECISIONS.md),
+  // real set scores from each side's own linescores (see fetchTennisScheduleClientSide), zipped
+  // into one "6-2, 6-3" line rather than shown per-player (same real match-score shape a live
+  // scoreboard already shows). Reuses the same .game-card/.gc-top/.gc-weather chrome as every other
+  // sport's card so it still feels like the same product, just with tennis-specific content inside.
+  function tennisCardHtml(g, i) {
+    const d = new Date(g.startTimeUtc);
+    const date = d.toLocaleDateString([], { weekday: "short", month: "numeric", day: "numeric" });
+    const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    const isFinal = g.gameState === "post";
+    const isLive = g.gameState === "in";
+    const topRight = isLive
+      ? `<div class="gc-live-badge"><span class="gc-live-dot"></span>${g.statusDetail || "Live"}</div>`
+      : isFinal
+      ? `<div class="gc-final-badge">FINAL</div>`
+      : "";
+    const setsLine =
+      isLive || isFinal
+        ? g.away.sets.map((s, idx) => `${s}-${g.home.sets[idx] ?? "–"}`).join(", ")
+        : null;
+    const scoreCenter = setsLine
+      ? `<div class="gc-score-center tn-sets">${setsLine}</div>`
+      : `<div class="gc-score-center"><span class="gc-vs">VS</span></div>`;
+    const flagImg = (p) => (p.flag ? `<img src="${p.flag}" alt="" class="tn-flag" loading="lazy">` : `<div class="gc-logo-chip"></div>`);
+    return `<button class="game-card${isFinal ? " is-final" : ""}" data-idx="${i}">
+      <div class="gc-top">
+        <div class="gc-time">${date} &middot; ${time}</div>
+        ${topRight}
+      </div>
+      <div class="gc-tennis-meta">${g.tournament} &middot; ${g.round}</div>
+      <div class="gc-scoreboard">
+        <div class="gc-team">${flagImg(g.away)}<span class="gc-team-abbr${g.away.winner ? " lead" : ""}">${g.away.shortName}</span></div>
+        ${scoreCenter}
+        <div class="gc-team">${flagImg(g.home)}<span class="gc-team-abbr${g.home.winner ? " lead" : ""}">${g.home.shortName}</span></div>
+      </div>
+      <div class="gc-weather" id="gcw-${i}"><span class="gc-dot"></span>…</div>
+    </button>`;
+  }
+
   function gameCardHtml(g, i) {
+    if (currentSport === "tennis") return tennisCardHtml(g, i);
     const d = new Date(g.startTimeUtc);
     const date = d.toLocaleDateString([], { weekday: "short", month: "numeric", day: "numeric" });
     const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -2269,8 +2473,12 @@
 
   function gameStripHtml(g, i, activeIdx) {
     const time = new Date(g.startTimeUtc).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    // Tennis's g.away/g.home are player objects (see fetchTennisScheduleClientSide), not the flat
+    // team-name strings every other sport uses here -- needs its own label, not the awayAbbr||away
+    // fallback chain below.
+    const label = currentSport === "tennis" ? `${g.away.shortName} vs ${g.home.shortName}` : `${g.awayAbbr || g.away} @ ${g.homeAbbr || g.home}`;
     return `<button class="gs-pill${i === activeIdx ? " active" : ""}" data-idx="${i}">
-      ${g.awayAbbr || g.away} @ ${g.homeAbbr || g.home} <span class="gs-time">${time}</span>
+      ${label} <span class="gs-time">${time}</span>
     </button>`;
   }
 
@@ -2318,12 +2526,15 @@
             sport === "ncaaf"
               ? `&city=${encodeURIComponent(g.venueCity || "")}&state=${encodeURIComponent(g.venueState || "")}&indoor=${g.venueIndoor ? "1" : "0"}&venueName=${encodeURIComponent(g.venue || "")}&awayLocation=${encodeURIComponent(g.awayLocation || "")}&homeLocation=${encodeURIComponent(g.homeLocation || "")}`
               : "";
+          // Tennis: venueCity + court instead of a stadiums-dict venueKey (see handleTennisGame in
+          // weather-worker.js) -- the city string itself is the only venue this feature has.
+          const tennisParams = sport === "tennis" ? `&venueCity=${encodeURIComponent(g.venueCity || "")}&court=${encodeURIComponent(g.court || "")}` : "";
           // gameId (MLB's Total Runs Call) and awayAbbr (NFL's Game Environment Score team signal)
           // are both needed server-side now that preview mode computes real Suggested Bet data, not
           // just weather -- see the detail-view fetch below for the same two params, added there first.
           const gameIdParam = g.gameId ? `&gameId=${encodeURIComponent(g.gameId)}` : "";
           const awayAbbrParam = g.awayAbbr ? `&awayAbbr=${encodeURIComponent(g.awayAbbr)}` : "";
-          const res = await fetch(`${WORKER_BASE}/api/game?sport=${sport}&venueKey=${g.venueKey}&preview=1&startTimeUtc=${encodeURIComponent(g.startTimeUtc)}${gameIdParam}${awayAbbrParam}${ncaafParams}`);
+          const res = await fetch(`${WORKER_BASE}/api/game?sport=${sport}&venueKey=${g.venueKey}&preview=1&startTimeUtc=${encodeURIComponent(g.startTimeUtc)}${gameIdParam}${awayAbbrParam}${ncaafParams}${tennisParams}`);
           const data = await res.json();
           const el = document.getElementById(`gcw-${i}`);
           fillLeanPill(document.getElementById(`gcl-${i}`), data.error ? null : gridLeanCallText(sport, data));
@@ -2373,6 +2584,8 @@
       } else if (sport === "ncaaf") {
         games = await fetchNcaafScheduleClientSide();
         mergeCoversLines(games, await fetchCoversLinesForSlate("ncaaf"));
+      } else if (sport === "tennis") {
+        games = await fetchTennisScheduleClientSide(); // no odds merge -- weather only, see DECISIONS.md
       } else {
         // dayOffset, not a client-computed date -- the Worker computes the actual calendar date
         // itself (America/New_York), so the browser's own clock/timezone can never disagree with
@@ -3017,7 +3230,94 @@
     }
   }
 
+  // Real, deterministic, rule-based note (no AI call -- see handleTennisGame's insight:null) on
+  // what today's wind/temp actually mean for a match: wind affects ball toss on serve and lob
+  // trajectory (the two shots most exposed to open air for the longest time), and heat measurably
+  // speeds up ball bounce/pace off the strings while cold does the opposite -- both real, physical
+  // effects, not an invented betting angle (there is no betting angle here, by design).
+  function tennisWeatherNote(weather, score, venueConfirmedIndoor) {
+    if (score.roofClosed) {
+      return venueConfirmedIndoor
+        ? "Played indoors — wind and outdoor temperature are not a factor in this match."
+        : "Likely played indoors at this venue — wind and outdoor temperature probably aren't a factor, though this venue's indoor/outdoor status isn't individually confirmed for this match.";
+    }
+    const windPart =
+      score.windTier === "light"
+        ? "Calm conditions — little expected effect on ball toss or lobs."
+        : score.windTier === "moderate"
+          ? `A real ${Math.round(weather.windSpeedMph)}mph wind could affect ball toss on serve and complicate high lobs near the baseline.`
+          : `A strong ${Math.round(weather.windSpeedMph)}mph wind is a real factor today — serve toss, lobs, and overheads are all more exposed to it than groundstrokes.`;
+    const tempPart = weather.tempF >= 85 ? " Warm conditions tend to speed up the ball off the strings." : weather.tempF <= 45 ? " Cold conditions tend to slow the ball and deaden bounce." : "";
+    return windPart + tempPart;
+  }
+
+  async function showTennisDetail(game) {
+    emptyState.style.display = "none";
+    gamesGrid.style.display = "none";
+    dayToggle.style.display = "none";
+    gameView.style.display = "flex";
+    setDetailMode("breakdown"); // no Verdict content for tennis (weather only, no bet calls) -- open straight to it
+    stopLineAutoRefresh(); // tennis has no odds to poll
+    renderGameStrip(currentGames.indexOf(game));
+    venueTag.textContent = `${game.venue || "Venue"}…`;
+    vhMatchup.innerHTML = `${game.away.flag ? `<img src="${game.away.flag}" alt="" class="tn-flag">` : ""}${game.away.name} vs. ${game.home.flag ? `<img src="${game.home.flag}" alt="" class="tn-flag">` : ""}${game.home.name}`;
+    venueMeta.textContent = `${game.tournament} · ${game.round}`;
+    vhPitchers.style.display = "none";
+    // No bet content at all for tennis, by design -- see DECISIONS.md.
+    pickHero.style.display = "none";
+    oddsHero.innerHTML = "";
+    updateBetBoxVisibility();
+    analystReadEl.style.display = "none";
+    insightTop.innerHTML = "";
+    fieldCarryEl.style.display = "none";
+    impactScaleMarksEl.style.display = "none";
+    handedNoteEl.style.display = "none";
+    umpireNoteEl.style.display = "none";
+    runEnvNoteEl.style.display = "none";
+    qbWatchNoteEl.style.display = "none";
+    totalCallNoteEl.style.display = "none";
+    pitcherNoteEl.style.display = "none";
+    almanacCard.style.display = "none";
+    gaugeCluster.innerHTML = "";
+    statPairs.innerHTML = "";
+    sparklineCard.style.display = "none";
+    windRoseSpeed.textContent = "—";
+    windRoseDir.textContent = "mph";
+    insightText.textContent = "Fetching conditions…";
+    setStatus("Fetching conditions…");
+
+    try {
+      const res = await fetch(`${WORKER_BASE}/api/game?sport=tennis&venueCity=${encodeURIComponent(game.venueCity || "")}&court=${encodeURIComponent(game.court || "")}&startTimeUtc=${encodeURIComponent(game.startTimeUtc)}`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      ensureMap(data.venue.lat, data.venue.lon, STADIUM_HALF_EXTENT_M.tennis);
+      venueTag.textContent = data.venue.venue;
+      const matchTime = new Date(game.startTimeUtc).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      const forecastTag = data.weather.isForecast ? " (forecast)" : "";
+      const indoorFact = data.venueConfirmedIndoor ? "Indoor (confirmed)" : game.court ? "Outdoor" : "Outdoor (assumed)";
+      const scoreFact =
+        game.gameState === "in"
+          ? `LIVE ${game.statusDetail || ""}`
+          : game.gameState === "post"
+            ? `FINAL${game.away.sets.length ? " " + game.away.sets.map((s, idx) => `${s}-${game.home.sets[idx] ?? "–"}`).join(", ") : ""}`
+            : null;
+      venueMeta.textContent = [`${game.tournament} · ${game.round}`, indoorFact, `Match time ${matchTime}${forecastTag}`, scoreFact].filter(Boolean).join(" · ");
+      lastWeather = data.weather;
+      renderInstrumentCluster(data.weather, data.score);
+      renderStatPairs("tennis", data.venue, data.score, null);
+      renderWindRose(data.weather, data.score);
+      renderSparkline(data.weather);
+      insightText.textContent = tennisWeatherNote(data.weather, data.score, data.venueConfirmedIndoor);
+      if (window.setWindFlow) window.setWindFlow(data.weather.windFromDeg || 0, data.weather.windSpeedMph || 0);
+      setStatus(`Updated ${new Date().toLocaleTimeString()}`);
+    } catch (err) {
+      insightText.textContent = `Could not load conditions: ${err.message}`;
+      setStatus(`Error: ${err.message}`);
+    }
+  }
+
   async function showDetail(sport, game) {
+    if (sport === "tennis") return showTennisDetail(game);
     emptyState.style.display = "none";
     gamesGrid.style.display = "none";
     dayToggle.style.display = "none"; // no "Today/Tomorrow" floating above a single game's detail view
