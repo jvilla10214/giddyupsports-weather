@@ -6,6 +6,30 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## NCAAF spread (Elo): continuously-updating rating tested, even more null than SP+
+**Date:** 2026-10-03
+**Status:** done — see `scripts/backtest-ncaaf-elo-spread-signal.js`.
+
+Follow-up to the SP+ spread close, in response to a "use every data point possible" push. CFBD's
+`/games` response already carries a real, point-in-time `homePregameElo`/`awayPregameElo` for every
+FBS game (no new API call needed — genuinely different signal shape from SP+: Elo updates after
+every game within the season, where SP+ is a frozen prior-year-final snapshot). Same residual math
+and sign convention as the SP+ spread script (verified there against a real Pittsburgh game).
+
+**Real result (2020-2025, n=4238):** `eloDiff` vs raw margin: r=0.5955 (even stronger than SP+'s raw
+correlation). `eloDiff` vs the market's own spread line: r=**-0.8977** — Elo is so good it's almost
+redundant with the closing line itself. `eloDiff` vs the REAL ATS residual: r=-0.0032 all-seasons,
+r=-0.0153 held-out (n=1514) — the held-out hit-rate table produced literally zero home-cover calls
+at any threshold and only 13 away-cover calls (46.2% hit, worse than coin-flip).
+
+**Conclusion:** doesn't just confirm the SP+ finding, it sharpens it — a rating that updates in
+real time within the season, not just a prior-year snapshot, is priced by the market *even more*
+tightly than SP+ was. Reinforces [[project_giddyupsports_ncaaf_spread_null_2026-10-03]]: team-
+strength/rating signals, however computed or however current, are a closed category for NCAAF
+spread specifically.
+
+---
+
 ## NCAAF spread (SP+): first real test, genuine null — closes the last open football signal question
 **Date:** 2026-10-03
 **Status:** done — see `scripts/backtest-ncaaf-sp-plus-spread-signal.js`.
