@@ -6,6 +6,35 @@ racing command center's `DECISIONS.md`.
 
 ---
 
+## NFL totals: real per-play EPA tested, genuine null — closes the last open efficiency-metric gap
+**Date:** 2026-10-03
+**Status:** done — see `scripts/backtest-nfl-epa-totals-signal.js`.
+
+Prior work left one real gap: EPA/play (real per-play efficiency, what nfelo/DVOA/FPI actually use)
+had only ever been tested against the NFL **spread** (`backtest-nfl-epa-spread-signal.js`, r=0.0182
+held-out, null). NFL **totals** had only ever seen the simpler "combined scoring involvement" proxy
+already shipped (`teamScoringDelta`), never real per-play efficiency. This fills that gap honestly
+rather than assuming the spread result transfers.
+
+**Two real, separate tests, same point-in-time no-look-ahead discipline, same train(2020-23)/
+test(2024-25) split as every other signal here:**
+1. Naive equal-weighted sum (`homeOff + awayOff + homeDefAllowed + awayDefAllowed`, all four real
+   per-game EPA components, point-in-time): held-out r=-0.0054 — essentially zero.
+2. Real multi-variable OLS (each of the 4 components as its own separately-weighted regression
+   term, matching how the MLB Total Runs rebuild's real improvement came from separately weighting
+   offense vs. pitching instead of one composite): held-out r=0.0201 — still negligible, and the
+   train-fit coefficients came out all-negative (more offensive EPA / more leaky-defense EPA allowed
+   predicting a LOWER residual), the opposite sign of what a real signal should show — a real red
+   flag for in-sample overfitting rather than a true effect, not something to chase further by
+   tuning weights again.
+
+**Conclusion:** real per-play efficiency does not predict what the NFL total line gets wrong, same
+conclusion as it already reached for the spread. This closes out efficiency metrics (power-margin
+AND EPA, both markets) as a NFL signal family — see
+[[project_giddyupsports_nfl_signals_exhausted_2026-09-20]] for the full prior list this joins.
+
+---
+
 ## MLB Total Runs projection: real outcome backtest, no market-line archive needed for this part
 **Date:** 2026-09-29
 **Status:** done — see `scripts/backtest-mlb-total-runs-projection.js`, results cached at
