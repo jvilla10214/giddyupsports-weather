@@ -1663,11 +1663,15 @@ async function handleGame(env, sport, params) {
   const score = sport === "mlb" ? scoreMlbGame(weather, venue, roofStatus) : scoreNflGame(weather, venue);
 
   // Preview mode (used by the front-page quick-look grid, one call per game on the slate) skips
-  // the AI narration call entirely -- no point spending Workers AI neurons on insights for games
-  // nobody's opened yet. The rules-engine score above is pure JS, so it's free either way. Same
-  // reasoning extends to park factors and umpire tendencies here -- both real, but not worth
-  // fetching nine times over for cards nobody's opened.
-  if (preview) return json({ sport, venue, weather, score, insight: null, parkFactor: null, umpire: null, runEnvironmentScore: null, totalRunsCall: null, gameEnvironmentScore: null, pitcherAdjustedEra: null });
+  // ONLY the AI narration call below -- no point spending Workers AI neurons on insights for games
+  // nobody's opened yet, and that's genuinely the expensive/unnecessary part for a card nobody's
+  // clicked into. Everything else below (park factor, umpire, Run Environment Score, the MLB Total
+  // Runs Call, NFL's Game Environment Score) now runs in preview too (changed 2026-10-03, real user
+  // report: the grid card showed no Suggested Bet lean at all) -- the per-game marginal cost is two
+  // pitcher-tendency fetches plus an umpire lookup, each already behind this file's own `cached()`
+  // KV layer, so a day's first grid load pays for it once and every subsequent load that day is
+  // free. Fine-grained enough that there was no need for a separate "cheap preview, heavy detail"
+  // split on these specific fields anymore.
 
   // Both of these are wrapped individually so a scrape hiccup on either external site degrades to
   // "no data today" for that one field, not a broken game page -- neither is load-bearing for the
@@ -1888,8 +1892,9 @@ async function handleGame(env, sport, params) {
     }
   }
 
-  const insight = await narrate(env, sport, score, weather, venue, parkFactor, umpire, runEnvironmentScore, totalRunsCall, gameEnvironmentScore, pitcherAdjustedEra);
-  return json({ sport, venue, weather, score, insight: insight.text, parkFactor, umpire, runEnvironmentScore, totalRunsCall, gameEnvironmentScore, pitcherAdjustedEra });
+  // Still the one thing preview mode skips -- see this function's own top-of-function comment.
+  const insight = preview ? null : await narrate(env, sport, score, weather, venue, parkFactor, umpire, runEnvironmentScore, totalRunsCall, gameEnvironmentScore, pitcherAdjustedEra);
+  return json({ sport, venue, weather, score, insight: insight ? insight.text : null, parkFactor, umpire, runEnvironmentScore, totalRunsCall, gameEnvironmentScore, pitcherAdjustedEra });
 }
 
 async function handleAlmanac(env, sport, params) {

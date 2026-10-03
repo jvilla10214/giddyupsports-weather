@@ -798,6 +798,17 @@
   .gc-odds-pill.muted .lbl { color: var(--text-faint); }
   .gc-odds-pill.muted .val { color: var(--text-muted); }
 
+  /* Suggested Bet lean pill (added 2026-10-03): same tinted-outline language as the detail view's
+     own pick-hero (see .pick-hero.good/.info) -- Over keeps accent-live, Under keeps accent-atmo,
+     so a bettor scanning a full grid learns the same two colors mean the same two things everywhere
+     on the site, not a third new color vocabulary invented just for this pill. Unlike the solid-fill
+     SPRD/O-U pills above, this one is a tinted outline on purpose -- it reads as a judgment call, not
+     a posted market number, and needs to stay visually distinct from them in the same row. */
+  .gc-odds-pill.lean.over { background: var(--accent-live-dim); border-color: color-mix(in srgb, var(--accent-live) 45%, transparent); }
+  .gc-odds-pill.lean.over .lbl, .gc-odds-pill.lean.over .val { color: var(--accent-live); }
+  .gc-odds-pill.lean.under { background: var(--accent-atmo-dim); border-color: color-mix(in srgb, var(--accent-atmo) 45%, transparent); }
+  .gc-odds-pill.lean.under .lbl, .gc-odds-pill.lean.under .val { color: var(--accent-atmo); }
+
   .game-card .gc-pitchers { font-size: 0.72rem; color: var(--text-faint); z-index: 1; }
   .game-card .gc-weather { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); min-height: 1.1em; z-index: 1; }
   .game-card .gc-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); flex: none; }
@@ -1912,7 +1923,7 @@
   // information worth the same visual weight). Label is inferred from the text itself (oddsParts
   // always starts a total with "O/U ", never a spread) rather than threading a separate type
   // through -- one less thing oddsParts' two return shapes (Covers vs ESPN fallback) has to agree on.
-  function oddsPillsHtml(g, isFinal) {
+  function oddsPillsHtml(g, isFinal, i) {
     // showOpen=true (added 2026-09-20, real user feedback: seeing how the line moved matters to a
     // bettor, not just that it moved) -- was false here, detail-view-only, before. Also fixed
     // alongside this: .val used to clip with text-overflow:ellipsis, which was silently truncating
@@ -1920,12 +1931,17 @@
     // pill's content ran wider than its fixed width -- see .gc-odds-pill .val's own comment.
     const parts = oddsParts(g, true);
     if (!parts.length) return "";
+    // Lean pill (added 2026-10-03): starts hidden -- the odds above come from the schedule's own
+    // odds fetch and are known immediately, but the lean needs the heavier per-game preview fetch
+    // (see loadGridPreviews/fillLeanPill), which resolves a beat later. data-final lets that later
+    // fill pick the same muted treatment the odds pills already get once a game's closed.
+    const leanSlot = `<div class="gc-odds-pill lean" id="gcl-${i}" data-final="${isFinal ? "1" : "0"}" style="display:none;"></div>`;
     return `<div class="gc-odds-pills">${parts
       .map((p) => {
         const label = p.startsWith("O/U") ? "O/U" : "SPRD";
         return `<div class="gc-odds-pill${isFinal ? " muted" : ""}"><span class="lbl">${label}</span><span class="val">${p}</span></div>`;
       })
-      .join("")}</div>`;
+      .join("")}${leanSlot}</div>`;
   }
 
   // Real spread/total + line-movement tracking for NFL/NCAAF (see fetchCoversLines in
@@ -2214,7 +2230,7 @@
         ? `<div class="gc-pitchers">${g.awayProbablePitcher?.name || "TBD"} vs ${g.homeProbablePitcher?.name || "TBD"}</div>`
         : "";
     const { state, liveDetail } = gameCardState(g, currentSport);
-    const oddsPills = oddsPillsHtml(g, state === "final");
+    const oddsPills = oddsPillsHtml(g, state === "final", i);
     const colors = gameCardTeamColors(g);
     const glowStyle = `${colors.away ? `--away-color:${colors.away};` : ""}${colors.home ? `--home-color:${colors.home};` : ""}`;
 
@@ -2262,6 +2278,36 @@
     gameStrip.innerHTML = currentGames.map((g, i) => gameStripHtml(g, i, activeIdx)).join("");
   }
 
+  // Grid-card Suggested Bet lean (added 2026-10-03, real user report: the grid showed an O/U
+  // number but never the actual lean, only visible after clicking into a game). MLB's totalRunsCall
+  // and NFL/NCAAF's gameEnvironmentScore now both come back from the SAME preview=1 fetch below (see
+  // handleGame/handleNcaafGame's own comments in weather-worker.js) -- this just picks the one real
+  // "call" text out of whichever shape this sport's data takes, reusing nflLeanFromScore so NFL/NCAAF
+  // render through the exact same label logic as the detail view's own Suggested Bet, never a
+  // second, divergent phrasing for the same score.
+  function gridLeanCallText(sport, data) {
+    if (sport === "mlb") return data.totalRunsCall ? data.totalRunsCall.call : null;
+    if (sport === "nfl" || sport === "ncaaf") return data.gameEnvironmentScore ? nflLeanFromScore(data.gameEnvironmentScore.score, data.gameEnvironmentScore.tier).label : null;
+    return null;
+  }
+
+  // Splits a call like "Strong Lean Over" into a label ("Strong Lean") + direction ("Over") so the
+  // pill can show them the same way the other odds pills split a label from a value.
+  function fillLeanPill(el, callText) {
+    if (!el) return;
+    const isFinal = el.dataset.final === "1";
+    if (!callText) {
+      el.style.display = "none";
+      return;
+    }
+    const words = callText.split(" ");
+    const dir = words.pop();
+    const lbl = words.join(" ") || "Lean";
+    el.className = `gc-odds-pill lean${isFinal ? " muted" : dir === "Over" ? " over" : " under"}`;
+    el.innerHTML = `<span class="lbl">${lbl}</span><span class="val">${dir}</span>`;
+    el.style.display = "";
+  }
+
   async function loadGridPreviews(sport, games) {
     await Promise.all(
       games.map(async (g, i) => {
@@ -2272,9 +2318,15 @@
             sport === "ncaaf"
               ? `&city=${encodeURIComponent(g.venueCity || "")}&state=${encodeURIComponent(g.venueState || "")}&indoor=${g.venueIndoor ? "1" : "0"}&venueName=${encodeURIComponent(g.venue || "")}&awayLocation=${encodeURIComponent(g.awayLocation || "")}&homeLocation=${encodeURIComponent(g.homeLocation || "")}`
               : "";
-          const res = await fetch(`${WORKER_BASE}/api/game?sport=${sport}&venueKey=${g.venueKey}&preview=1&startTimeUtc=${encodeURIComponent(g.startTimeUtc)}${ncaafParams}`);
+          // gameId (MLB's Total Runs Call) and awayAbbr (NFL's Game Environment Score team signal)
+          // are both needed server-side now that preview mode computes real Suggested Bet data, not
+          // just weather -- see the detail-view fetch below for the same two params, added there first.
+          const gameIdParam = g.gameId ? `&gameId=${encodeURIComponent(g.gameId)}` : "";
+          const awayAbbrParam = g.awayAbbr ? `&awayAbbr=${encodeURIComponent(g.awayAbbr)}` : "";
+          const res = await fetch(`${WORKER_BASE}/api/game?sport=${sport}&venueKey=${g.venueKey}&preview=1&startTimeUtc=${encodeURIComponent(g.startTimeUtc)}${gameIdParam}${awayAbbrParam}${ncaafParams}`);
           const data = await res.json();
           const el = document.getElementById(`gcw-${i}`);
+          fillLeanPill(document.getElementById(`gcl-${i}`), data.error ? null : gridLeanCallText(sport, data));
           if (!el || data.error) return;
           let cls = "";
           if (sport === "mlb") {
