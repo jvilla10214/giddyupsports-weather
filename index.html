@@ -1150,6 +1150,18 @@
   #map .leaflet-marker-icon,
   #map .leaflet-marker-shadow { cursor: default !important; }
 
+  /* Tennis court (added 2026-10-04, real user request: a satellite photo of an approximate city
+     centroid -- the real limitation, see fetchTennisVenueGeo's own comment -- read as weirdly
+     generic for a sport that's ALL about the court. A drawn court is honest where the satellite
+     photo wasn't really adding anything true either (it was never the actual court, just the host
+     city). Sits in the exact same #map-sized slot so the already-existing wind-flow canvas (see
+     initWindFlow) animates across it for free, no new animation code needed -- same real
+     windFromDeg/windSpeedMph data, just a court background instead of a satellite one. #map itself
+     is left completely alone (just hidden) so Leaflet's own cached instance is never touched. */
+  #tennisCourt { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--bg-elevated-2); }
+  #tennisCourt svg { width: 88%; height: 88%; }
+  .tc-compass-label { font-family: var(--font-mono); font-size: 5px; fill: var(--text-faint); }
+
   /* ---------- Wind-rose: a small analog compass dial over the aerial photo ---------- */
   .wind-rose {
     position: absolute; z-index: 450; bottom: 12px; left: 12px;
@@ -1463,6 +1475,7 @@
     <div class="detail-mode-section" id="breakdownSection" style="display:none;">
       <div class="hero" id="heroCard">
         <div id="map"></div>
+        <div id="tennisCourt" style="display:none;"></div>
         <canvas id="windFlowCanvas" class="wind-flow-canvas"></canvas>
         <div class="wind-rose" id="windRose">
           <svg viewBox="0 0 92 92">
@@ -1545,9 +1558,7 @@
   // structures especially -- SoFi Stadium's roof alone runs ~330m/1,000ft+ long) are real-world
   // larger than MLB parks on average. Values measured live off the largest venue in each sport
   // (Coors Field for MLB, SoFi Stadium for NFL) so every smaller venue also fits with margin.
-  // tennis: only a geocoded CITY (no exact venue, see fetchTennisVenueGeo in weather-worker.js),
-  // so this zooms to a city-wide view rather than falsely implying stadium-level precision.
-  const STADIUM_HALF_EXTENT_M = { mlb: 95, nfl: 190, ncaaf: 190, tennis: 6000 };
+  const STADIUM_HALF_EXTENT_M = { mlb: 95, nfl: 190, ncaaf: 190 };
 
   const sportToggle = document.getElementById("sportToggle");
   const statusLine = document.getElementById("statusLine");
@@ -3379,6 +3390,49 @@
     }
   }
 
+  // Tennis court diagram (added 2026-10-04, real user request: the satellite photo only ever
+  // showed an approximate city centroid, never the actual court -- see fetchTennisVenueGeo's own
+  // comment -- so a drawn court replaces it entirely. Real, standard ITF court proportions (78ft x
+  // 36ft doubles court, scaled 1ft = 10 units), not a stylized approximation. Deliberately no
+  // surface color (hard/clay/grass) since this product doesn't track real per-match surface data
+  // (see DECISIONS.md's tennis scope) -- asserting a specific surface we haven't confirmed would be
+  // exactly the kind of fabricated precision this project avoids everywhere else. Renders once per
+  // match open; the EXISTING wind-flow canvas (see initWindFlow) animates real wind across it for
+  // free, same as it already does over MLB/NFL's satellite photo -- same setWindFlow(dirFromDeg,
+  // speedMph) call, just a different background underneath. The small N/E/S/W compass on the court
+  // is the one honest caveat: this venue's real on-the-ground court facing isn't confirmed data, so
+  // the wind shown is accurate BY TRUE COMPASS DIRECTION, not confirmed relative to this specific
+  // court's actual orientation (see the caption this pairs with in showTennisDetail).
+  function tennisCourtSvg() {
+    return `<svg viewBox="0 0 400 820" xmlns="http://www.w3.org/2000/svg">
+      <rect x="20" y="20" width="360" height="780" rx="4" fill="color-mix(in srgb, var(--accent-atmo) 14%, var(--bg-elevated-2))" stroke="var(--line-strong)" stroke-width="2"/>
+      <g stroke="#fff" stroke-width="3" fill="none" opacity="0.92">
+        <rect x="20" y="20" width="360" height="780"/>
+        <rect x="65" y="20" width="270" height="780"/>
+        <line x1="20" y1="410" x2="380" y2="410" stroke-width="4"/>
+        <line x1="65" y1="200" x2="335" y2="200"/>
+        <line x1="65" y1="620" x2="335" y2="620"/>
+        <line x1="200" y1="200" x2="200" y2="620"/>
+        <line x1="200" y1="20" x2="200" y2="32"/>
+        <line x1="200" y1="788" x2="200" y2="800"/>
+      </g>
+      <g class="tc-compass-label" text-anchor="middle">
+        <text x="200" y="14">N</text>
+        <text x="200" y="814">S</text>
+        <text x="10" y="413">W</text>
+        <text x="390" y="413">E</text>
+      </g>
+    </svg>`;
+  }
+
+  function renderTennisCourt() {
+    const mapEl = document.getElementById("map");
+    const courtEl = document.getElementById("tennisCourt");
+    mapEl.style.display = "none";
+    courtEl.innerHTML = tennisCourtSvg();
+    courtEl.style.display = "flex";
+  }
+
   // Real, deterministic, rule-based note (no AI call -- see handleTennisGame's insight:null) on
   // what today's wind/temp actually mean for a match: wind affects ball toss on serve and lob
   // trajectory (the two shots most exposed to open air for the longest time), and heat measurably
@@ -3439,7 +3493,7 @@
       const res = await fetch(`${WORKER_BASE}/api/game?sport=tennis&venueCity=${encodeURIComponent(game.venueCity || "")}&court=${encodeURIComponent(game.court || "")}&startTimeUtc=${encodeURIComponent(game.startTimeUtc)}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      ensureMap(data.venue.lat, data.venue.lon, STADIUM_HALF_EXTENT_M.tennis);
+      renderTennisCourt();
       venueTag.textContent = data.venue.venue;
       const matchTime = new Date(game.startTimeUtc).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
       const forecastTag = data.weather.isForecast ? " (forecast)" : "";
@@ -3456,7 +3510,7 @@
       renderStatPairs("tennis", data.venue, data.score, null);
       renderWindRose(data.weather, data.score);
       renderSparkline(data.weather);
-      insightText.textContent = tennisWeatherNote(data.weather, data.score, data.venueConfirmedIndoor);
+      insightText.textContent = `${tennisWeatherNote(data.weather, data.score, data.venueConfirmedIndoor)}${data.score.roofClosed ? "" : " Wind shown is true compass direction (see N/S/E/W on the court) — this venue's exact court facing isn't individually confirmed."}`;
       if (window.setWindFlow) window.setWindFlow(data.weather.windFromDeg || 0, data.weather.windSpeedMph || 0);
       setStatus(`Updated ${new Date().toLocaleTimeString()}`);
     } catch (err) {
@@ -3542,6 +3596,10 @@
       const res = await fetch(`${WORKER_BASE}/api/game?sport=${sport}&venueKey=${game.venueKey}&startTimeUtc=${encodeURIComponent(game.startTimeUtc)}${gameIdParam}${awayAbbrParam}${ncaafParams}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
+      // Undo tennis's court swap, if the previous detail view opened was a tennis match -- #map
+      // itself was only ever hidden, never destroyed, so this is always safe to re-show.
+      document.getElementById("tennisCourt").style.display = "none";
+      document.getElementById("map").style.display = "";
       ensureMap(data.venue.lat, data.venue.lon, STADIUM_HALF_EXTENT_M[sport]);
       venueTag.textContent = data.venue.venue;
       // Facts row, in the order requested: roof status, then kickoff/first-pitch time, then
