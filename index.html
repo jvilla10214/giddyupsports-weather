@@ -784,7 +784,8 @@
      subgroups, so the actual tiles look identical to every other sport's, just organized above them. */
   #gamesGrid.tennis-grid { display: flex; flex-direction: column; gap: 22px; }
   .tn-search {
-    width: 100%; padding: 11px 14px; border-radius: var(--radius-md); border: 1px solid var(--line);
+    display: block; width: 100%; max-width: 320px; height: 38px; padding: 0 14px;
+    border-radius: var(--radius-md); border: 1px solid var(--line); flex: none;
     background: var(--bg-elevated); color: var(--text); font: inherit; font-size: 0.88rem;
   }
   .tn-search:focus { outline: none; border-color: var(--accent-atmo); }
@@ -2752,7 +2753,12 @@
         gamesGrid.innerHTML = currentGames.map(gameCardHtml).join("");
       }
       emptyState.style.display = "none";
-      gamesGrid.style.display = "grid";
+      // Tennis's own #gamesGrid.tennis-grid CSS rule (display:flex, a vertical section stack)
+      // would otherwise be overridden by this inline style -- inline always beats a stylesheet
+      // rule regardless of selector specificity, which is exactly what silently broke the search
+      // box's layout (confirmed live: the input stretched to fill a 393px-tall grid cell instead
+      // of sitting as a plain horizontal bar) until this was made conditional.
+      gamesGrid.style.display = sport === "tennis" ? "" : "grid";
       setStatus(`${currentGames.length} games loaded.`);
       loadGridPreviews(sport, currentGames);
     } catch (err) {
@@ -3656,7 +3662,7 @@
   backBtn.addEventListener("click", () => {
     stopLineAutoRefresh();
     gameView.style.display = "none";
-    gamesGrid.style.display = "grid";
+    gamesGrid.style.display = currentSport === "tennis" ? "" : "grid"; // see loadSchedule's own comment on this
     if (currentSport === "mlb") dayToggle.style.display = "inline-flex";
   });
 
