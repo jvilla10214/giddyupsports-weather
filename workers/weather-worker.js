@@ -1084,6 +1084,62 @@ async function handleTennisGame(env, params) {
   return json({ sport: "tennis", venue, weather, score, venueConfirmedIndoor, insight: null });
 }
 
+// ---- Golf ("Links & Lie") -- weather only, no bet calls, same scope as tennis, see DECISIONS.md ----
+//
+// Unlike tennis, ESPN's PGA event detail (sports.core.api.espn.com, fetched client-side since this
+// domain is ALSO blocked for Worker IPs -- same family as the others) carries a real, specific
+// course name + city/state/country (confirmed live: "Augusta National Golf Club", Augusta, GA for
+// the Masters; "Yokohama Country Club", Yokohama, Japan for the Baycurrent Classic) -- precise
+// enough for real venue-level (not just city-level) geocoding via Nominatim, same technique as
+// NCAAF's stadiums. International courses have no `state`, only a country name.
+async function fetchGolfVenueGeo(env, courseName, city, state, country) {
+  const cacheKey = `golf-venue-geo:${courseName}|${city}|${state}|${country}`;
+  return cached(env, cacheKey, 365 * 24 * 60 * 60, async () => {
+    try {
+      const q = state ? `${courseName}, ${city}, ${state}` : `${courseName}, ${city}, ${country}`;
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`;
+      const res = await fetch(url, { headers: { "User-Agent": NCAAF_GEOCODE_USER_AGENT } });
+      if (res.ok) {
+        const results = await res.json();
+        if (results?.[0]) return { lat: Number(results[0].lat), lon: Number(results[0].lon) };
+      }
+    } catch {
+      // fall through to the city-only geocode below -- a Nominatim hiccup on the specific course
+      // name shouldn't break the whole request when a real (if less precise) fallback exists
+    }
+    const cityUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1`;
+    const cityRes = await fetch(cityUrl, { headers: { "User-Agent": NCAAF_GEOCODE_USER_AGENT } });
+    if (!cityRes.ok) throw new Error(`Open-Meteo geocoding ${cityRes.status}`);
+    const cityData = await cityRes.json();
+    const match = cityData.results?.[0];
+    if (!match) throw new Error(`No geocoding match for "${courseName}, ${city}"`);
+    return { lat: match.latitude, lon: match.longitude };
+  });
+}
+
+async function handleGolfGame(env, params) {
+  const courseName = params.get("courseName");
+  const city = params.get("city");
+  const state = params.get("state") || "";
+  const country = params.get("country") || "";
+  const startTimeUtc = params.get("startTimeUtc");
+  if (!courseName || !city) return json({ error: "golf requires courseName and city" }, 400);
+
+  let geo;
+  try {
+    geo = await fetchGolfVenueGeo(env, courseName, city, state, country);
+  } catch (err) {
+    return json({ error: `Could not locate venue: ${err.message}` }, 400);
+  }
+
+  const weather = await fetchWeather(env, geo.lat, geo.lon, startTimeUtc);
+  // Every real PGA Tour course is outdoor grass (confirmed live -- every venue's own `grass`/`indoor`
+  // fields agree) -- no roof/indoor concept exists for golf the way it does for MLB/NFL/tennis.
+  const venue = { venue: courseName, roofType: "open", lat: geo.lat, lon: geo.lon };
+  const score = scoreNflGame(weather, venue); // reused unmodified, same wind/temp scoring shape every other sport reuses
+  return json({ sport: "golf", venue, weather, score, insight: null });
+}
+
 // ---- Weather ----
 
 const NWS_HEADERS = { "User-Agent": "GiddyUpSports-Weather/1.0 (weather.giddyupsports contact: jvilla10214@gmail.com)" };
@@ -2005,10 +2061,10 @@ export default {
           }
           return json(await fetchMlbSchedule(env, dateIso));
         }
-        if (sport === "nfl" || sport === "ncaaf" || sport === "tennis") {
+        if (sport === "nfl" || sport === "ncaaf" || sport === "tennis" || sport === "golf") {
           return json({ error: `${sport.toUpperCase()} schedule is fetched client-side (ESPN blocks Worker IPs) — see index.html and DECISIONS.md` }, 400);
         }
-        return json({ error: "sport must be mlb, nfl, ncaaf, or tennis" }, 400);
+        return json({ error: "sport must be mlb, nfl, ncaaf, tennis, or golf" }, 400);
       }
 
       // Spread/total lines + real line-movement tracking for NFL/NCAAF (see fetchCoversLines'
@@ -2048,7 +2104,8 @@ export default {
         const sport = url.searchParams.get("sport");
         if (sport === "ncaaf") return await handleNcaafGame(env, url.searchParams);
         if (sport === "tennis") return await handleTennisGame(env, url.searchParams);
-        if (sport !== "mlb" && sport !== "nfl") return json({ error: "sport must be mlb, nfl, ncaaf, or tennis" }, 400);
+        if (sport === "golf") return await handleGolfGame(env, url.searchParams);
+        if (sport !== "mlb" && sport !== "nfl") return json({ error: "sport must be mlb, nfl, ncaaf, tennis, or golf" }, 400);
         return await handleGame(env, sport, url.searchParams);
       }
 

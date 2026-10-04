@@ -6,7 +6,7 @@
 <title>GiddyUpSports Weather Command Center</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Big+Shoulders+Display:wght@600;700;800;900&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=Anton&family=Barlow+Semi+Condensed:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Manrope:wght@400;500;600;700&family=Oswald:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&family=Roboto+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Big+Shoulders+Display:wght@600;700;800;900&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=Anton&family=Barlow+Semi+Condensed:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Manrope:wght@400;500;600;700&family=Oswald:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&family=Roboto+Mono:wght@400;500;600&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
   /* ---------- Base tokens ("Floodlight") — inert fallback, always overridden below ----------
@@ -471,6 +471,99 @@
     --accent-move-down: #c17b82;
   }
 
+  /* ---------- Golf theme: "Links & Lie" — a windswept coastal links ---------- */
+  /* Weather only, no bet calls (see handleGolfGame in weather-worker.js and DECISIONS.md), same
+     scope decision as tennis. Reuses the landing tile's already-chosen rust/sage identity (tile-
+     accent/-2) directly, same as every other sport's theme. Light-default (a daytime links round,
+     not a floodlit night sport). Playfair Display for headlines is a deliberate departure from
+     every other sport's condensed/grotesque display face -- golf's own visual tradition (tournament
+     programs, clubhouse signage) is classic serif, not athletic-sans, and this is the one sport
+     here where that reads as authentic rather than a mismatch. */
+  html[data-sport="golf"] {
+    --bg: #f5f0e6;
+    --bg-elevated: #ffffff;
+    --bg-elevated-2: #ece3d2;
+    --bg-glass: rgba(255, 255, 255, 0.85);
+    --text: #2a211a;
+    --text-muted: #6b5d4f;
+    --text-faint: #a89783;
+    --line: #e0d3bd;
+    --line-strong: #c9b696;
+
+    --accent-atmo: #5d7268;
+    --accent-atmo-dim: #dde5e0;
+    --accent-live: #4a6b52;
+    --accent-live-dim: #dde8de;
+    --accent-ai: #a83e30;
+    --accent-ai-dim: #f0ddd8;
+    --accent-warn: #9c4a3a;
+    --accent-warn-dim: #efdcd7;
+    --accent-move-up: #4a6b52;
+    --accent-move-down: #9c4a3a;
+
+    --shadow: 0 20px 50px -26px rgba(42, 33, 26, 0.18), 0 1px 2px rgba(42, 33, 26, 0.05);
+    --shadow-soft: 0 10px 26px -18px rgba(42, 33, 26, 0.13);
+
+    --font-display: "Playfair Display", serif;
+    --font-body: "Manrope", sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+    --font-display-w1: 700;
+    --font-display-w0: 600;
+    --font-display-w2: 800;
+
+    --card-border-width: 1px;
+    --radius-lg: 10px;
+    --radius-md: 6px;
+    --insight-border-color: var(--accent-atmo);
+  }
+  @media (prefers-color-scheme: dark) {
+    html[data-sport="golf"]:not([data-theme="light"]) {
+      --bg: #1a1714;
+      --bg-elevated: #242019;
+      --bg-elevated-2: #2e2821;
+      --bg-glass: rgba(36, 32, 25, 0.85);
+      --text: #f0e9dd;
+      --text-muted: #b8a996;
+      --text-faint: #847566;
+      --line: #3d352b;
+      --line-strong: #534839;
+
+      --accent-atmo: #8fa399;
+      --accent-atmo-dim: #2a3530;
+      --accent-live: #7fa087;
+      --accent-live-dim: #243027;
+      --accent-ai: #c68278;
+      --accent-ai-dim: #3d2a26;
+      --accent-warn: #c4847a;
+      --accent-warn-dim: #3a2622;
+      --accent-move-up: #7fa087;
+      --accent-move-down: #c4847a;
+    }
+  }
+  /* Explicit dark-mode toggle for Golf, same literal-duplicate reasoning as every other sport's. */
+  html[data-sport="golf"][data-theme="dark"] {
+    --bg: #1a1714;
+    --bg-elevated: #242019;
+    --bg-elevated-2: #2e2821;
+    --bg-glass: rgba(36, 32, 25, 0.85);
+    --text: #f0e9dd;
+    --text-muted: #b8a996;
+    --text-faint: #847566;
+    --line: #3d352b;
+    --line-strong: #534839;
+
+    --accent-atmo: #8fa399;
+    --accent-atmo-dim: #2a3530;
+    --accent-live: #7fa087;
+    --accent-live-dim: #243027;
+    --accent-ai: #c68278;
+    --accent-ai-dim: #3d2a26;
+    --accent-warn: #c4847a;
+    --accent-warn-dim: #3a2622;
+    --accent-move-up: #7fa087;
+    --accent-move-down: #c4847a;
+  }
+
   * { box-sizing: border-box; }
   html, body { margin: 0; }
   body {
@@ -912,6 +1005,8 @@
   .gc-team-abbr.lead { color: var(--accent-live); }
   .tn-flag { width: 26px; height: 18px; object-fit: cover; border-radius: 3px; border: 1px solid rgba(0, 0, 0, 0.12); flex: none; }
   .gc-tennis-meta { font-size: 0.68rem; color: var(--text-faint); z-index: 1; margin-top: -4px; }
+  .gc-golf-name { font-family: var(--font-display); font-weight: var(--font-display-w1); font-size: 0.98rem; z-index: 1; }
+  .gc-weather-muted { font-size: 0.7rem; color: var(--text-faint); font-style: italic; }
   .tn-sets { font-family: var(--font-mono); font-size: 0.86rem; font-weight: 700; color: var(--text); white-space: nowrap; }
   /* AP rank badge, positioned on the logo chip itself rather than inline with the team code (see
      gameCardHtml's comment) -- small enough to read as a real ranking marker, not compete with it. */
@@ -1388,7 +1483,7 @@
       <button data-sport="nfl" aria-pressed="false">NFL</button>
       <button data-sport="ncaaf" aria-pressed="false">NCAAF</button>
       <button data-sport="tennis" aria-pressed="false">Tennis</button>
-      <button disabled title="Coming soon">Golf</button>
+      <button data-sport="golf" aria-pressed="false">Golf</button>
     </div>
     <button class="theme-toggle" id="themeToggle" type="button" aria-pressed="false" title="Night mode">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11Z"/></svg>
@@ -1419,12 +1514,12 @@
         <div class="lt-desc">Saturday's ranked matchups only — AP and Coaches poll teams, with the same wind/passing read as the NFL board. A real lean on every ranked game, not just a number.</div>
         <div class="lt-status">Beta</div>
       </button>
-      <div class="landing-tile soon" style="--tile-accent-light:#A83E30; --tile-accent-2-light:#5D7268; --tile-accent-dark:#C68278; --tile-accent-2-dark:#8FA39C;">
+      <button class="landing-tile live" data-sport="golf" style="--tile-accent-light:#A83E30; --tile-accent-2-light:#5D7268; --tile-accent-dark:#C68278; --tile-accent-2-dark:#8FA39C; --tile-font-display:'Barlow Semi Condensed', sans-serif; --tile-font-mono:'IBM Plex Mono', monospace; --tile-font-weight:700;">
         <div class="lt-name">Links &amp; Lie</div>
         <div class="lt-sport">Golf</div>
-        <div class="lt-desc">A windswept coastal links — where club selection has always been a weather reading first, a yardage second.</div>
-        <div class="lt-status">Coming Soon</div>
-      </div>
+        <div class="lt-desc">A windswept coastal links — where club selection has always been a weather reading first, a yardage second. Real conditions for the full PGA Tour schedule, no bet calls — just the weather.</div>
+        <div class="lt-status">Beta</div>
+      </button>
       <button class="landing-tile live" data-sport="tennis" style="--tile-accent-light:#6B3F82; --tile-accent-2-light:#3E6B3C; --tile-accent-dark:#9F82AE; --tile-accent-2-dark:#8AA389; --tile-font-display:'Barlow Semi Condensed', sans-serif; --tile-font-mono:'IBM Plex Mono', monospace; --tile-font-weight:600;">
         <div class="lt-name">Advantage Court</div>
         <div class="lt-sport">Tennis</div>
@@ -1595,7 +1690,9 @@
   // structures especially -- SoFi Stadium's roof alone runs ~330m/1,000ft+ long) are real-world
   // larger than MLB parks on average. Values measured live off the largest venue in each sport
   // (Coors Field for MLB, SoFi Stadium for NFL) so every smaller venue also fits with margin.
-  const STADIUM_HALF_EXTENT_M = { mlb: 95, nfl: 190, ncaaf: 190 };
+  // golf: a full 18-hole course spans far more ground than a stadium -- wide enough to show the
+  // whole real course, not just the clubhouse pin.
+  const STADIUM_HALF_EXTENT_M = { mlb: 95, nfl: 190, ncaaf: 190, golf: 900 };
 
   const sportToggle = document.getElementById("sportToggle");
   const statusLine = document.getElementById("statusLine");
@@ -2116,6 +2213,71 @@
     return matches;
   }
 
+  // Golf ("Links & Lie") -- weather only, no bet calls (same scope as tennis, see DECISIONS.md),
+  // full real PGA Tour schedule (user request), not curated down to majors only. ESPN's
+  // scoreboard gives the CURRENT week's event(s) with real status/competitor data, plus the whole
+  // real season's calendar (confirmed live: 49 real 2026 events, id+label+date each) in the SAME
+  // response -- no second fetch needed just to know what's coming. Unlike tennis, golf is stroke
+  // play against a field, not 1v1 matches, so the card unit here is the TOURNAMENT itself, and the
+  // grid stays small (current + a handful of upcoming weeks) -- no day/search sectioning needed the
+  // way tennis's hundreds of individual matches required.
+  const PGA_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard";
+  const PGA_EVENT_WEEKS_AHEAD = 6; // how many upcoming real tournaments to show beyond the current one
+
+  async function fetchPgaEventDetail(eventId) {
+    const res = await fetch(`https://sports.core.api.espn.com/v2/sports/golf/leagues/pga/events/${eventId}?lang=en&region=us`);
+    if (!res.ok) throw new Error(`ESPN golf event API ${res.status}`);
+    const data = await res.json();
+    const course = data.courses?.[0];
+    return {
+      courseName: course?.name || null,
+      city: course?.address?.city || null,
+      state: course?.address?.state || null,
+      country: course?.address?.country || null,
+      statusDetail: data.status?.type?.shortDetail || data.status?.type?.description || null,
+      gameState: data.status?.type?.state || null, // "pre" | "in" | "post"
+    };
+  }
+
+  async function fetchPgaScheduleClientSide() {
+    const res = await fetch(PGA_SCOREBOARD_URL);
+    if (!res.ok) throw new Error(`ESPN golf scoreboard API ${res.status}`);
+    const data = await res.json();
+    const calendar = data.leagues?.[0]?.calendar || [];
+    const now = new Date();
+    const cutoff = new Date(now.getTime() + PGA_EVENT_WEEKS_AHEAD * 7 * 24 * 60 * 60 * 1000);
+    // Current week's real event(s), already fully detailed in the scoreboard response itself.
+    const currentIds = new Set((data.events || []).map((ev) => ev.id));
+    const currentEntries = (data.events || []).map((ev) => ({ id: ev.id, label: ev.name, startDate: ev.date, endDate: ev.endDate }));
+    // Upcoming real entries from the season calendar, within the visible window, not already covered above.
+    const upcomingEntries = calendar.filter((c) => !currentIds.has(c.id) && new Date(c.startDate) > now && new Date(c.startDate) <= cutoff);
+    const entries = [...currentEntries, ...upcomingEntries];
+
+    const tournaments = await Promise.all(
+      entries.map(async (e) => {
+        try {
+          const detail = await fetchPgaEventDetail(e.id);
+          return {
+            gameId: e.id,
+            tournament: e.label,
+            startTimeUtc: e.startDate,
+            endTimeUtc: e.endDate,
+            venue: detail.courseName || "Course TBD",
+            venueKey: e.id, // just needs to be truthy, see loadSchedule's venueKey filter
+            courseCity: detail.city,
+            courseState: detail.state,
+            courseCountry: detail.country,
+            statusDetail: detail.statusDetail,
+            gameState: detail.gameState || "pre",
+          };
+        } catch {
+          return null; // a single event's detail failing shouldn't break the whole schedule
+        }
+      })
+    );
+    return tournaments.filter(Boolean).sort((a, b) => new Date(a.startTimeUtc) - new Date(b.startTimeUtc));
+  }
+
   // MLB live-score badge (added 2026-09-12): abstractState is the reliable "Preview"/"Live"/"Final"
   // field (detailedState has many more granular values -- "Warmup", "Delayed", "Manager challenge"
   // -- that all still mean "don't show a score yet" or "still live"). Ordinal-suffix inning label,
@@ -2541,8 +2703,46 @@
     </button>`;
   }
 
+  // Golf card: the field, not a 1v1 matchup -- shows the tournament + real course + date range,
+  // same .game-card/.gc-top/.gc-weather chrome as every other sport. Real Open-Meteo forecasts
+  // only extend ~16 days out, so an event further out than that shows "Forecast closer to the
+  // event" immediately rather than attempting (and wasting) a Worker fetch that can't return
+  // anything meaningful yet -- see GOLF_FORECAST_HORIZON_DAYS/loadGridPreviews' own gate.
+  const GOLF_FORECAST_HORIZON_DAYS = 15;
+  function golfWithinForecastHorizon(g) {
+    return (new Date(g.startTimeUtc) - Date.now()) / (24 * 60 * 60 * 1000) <= GOLF_FORECAST_HORIZON_DAYS;
+  }
+  function golfCardHtml(g, i) {
+    const start = new Date(g.startTimeUtc);
+    const end = new Date(g.endTimeUtc || g.startTimeUtc);
+    const sameMonth = start.getMonth() === end.getMonth();
+    const dateRange = sameMonth
+      ? `${start.toLocaleDateString([], { month: "short", day: "numeric" })}–${end.toLocaleDateString([], { day: "numeric" })}`
+      : `${start.toLocaleDateString([], { month: "short", day: "numeric" })} – ${end.toLocaleDateString([], { month: "short", day: "numeric" })}`;
+    const isFinal = g.gameState === "post";
+    const isLive = g.gameState === "in";
+    const topRight = isLive
+      ? `<div class="gc-live-badge"><span class="gc-live-dot"></span>${g.statusDetail || "Live"}</div>`
+      : isFinal
+      ? `<div class="gc-final-badge">FINAL</div>`
+      : "";
+    const weatherLine = golfWithinForecastHorizon(g)
+      ? `<div class="gc-weather" id="gcw-${i}"><span class="gc-dot"></span>…</div>`
+      : `<div class="gc-weather gc-weather-muted">Forecast available closer to the event</div>`;
+    return `<button class="game-card${isFinal ? " is-final" : ""}" data-idx="${i}">
+      <div class="gc-top">
+        <div class="gc-time">${dateRange}</div>
+        ${topRight}
+      </div>
+      <div class="gc-golf-name">${g.tournament}</div>
+      <div class="gc-tennis-meta">${g.venue}${g.courseCity ? ` &middot; ${g.courseCity}${g.courseState ? ", " + g.courseState : ""}` : ""}</div>
+      ${weatherLine}
+    </button>`;
+  }
+
   function gameCardHtml(g, i) {
     if (currentSport === "tennis") return tennisCardHtml(g, i);
+    if (currentSport === "golf") return golfCardHtml(g, i);
     const d = new Date(g.startTimeUtc);
     const date = d.toLocaleDateString([], { weekday: "short", month: "numeric", day: "numeric" });
     const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -2603,10 +2803,10 @@
 
   function gameStripHtml(g, i, activeIdx) {
     const time = new Date(g.startTimeUtc).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-    // Tennis's g.away/g.home are player objects (see fetchTennisScheduleClientSide), not the flat
-    // team-name strings every other sport uses here -- needs its own label, not the awayAbbr||away
-    // fallback chain below.
-    const label = currentSport === "tennis" ? `${g.away.shortName} vs ${g.home.shortName}` : `${g.awayAbbr || g.away} @ ${g.homeAbbr || g.home}`;
+    // Tennis's g.away/g.home are player objects (see fetchTennisScheduleClientSide); golf has no
+    // away/home at all (a stroke-play field, not a matchup) -- both need their own label instead of
+    // the awayAbbr||away fallback chain below, which every other (team-sport) schedule uses.
+    const label = currentSport === "tennis" ? `${g.away.shortName} vs ${g.home.shortName}` : currentSport === "golf" ? g.tournament : `${g.awayAbbr || g.away} @ ${g.homeAbbr || g.home}`;
     return `<button class="gs-pill${i === activeIdx ? " active" : ""}" data-idx="${i}">
       ${label} <span class="gs-time">${time}</span>
     </button>`;
@@ -2649,6 +2849,9 @@
   async function loadGridPreviews(sport, games) {
     await Promise.all(
       games.map(async (g, i) => {
+        // Golf only: skip the fetch entirely for a tournament beyond the real forecast horizon --
+        // see golfWithinForecastHorizon's own comment, nothing meaningful could come back anyway.
+        if (sport === "golf" && !golfWithinForecastHorizon(g)) return;
         try {
           // See showDetail's ncaafParams comment -- NCAAF has no static stadiums-dict, so venue
           // city/state/indoor/name ride along from the client's own ESPN-sourced schedule.
@@ -2659,12 +2862,18 @@
           // Tennis: venueCity + court instead of a stadiums-dict venueKey (see handleTennisGame in
           // weather-worker.js) -- the city string itself is the only venue this feature has.
           const tennisParams = sport === "tennis" ? `&venueCity=${encodeURIComponent(g.venueCity || "")}&court=${encodeURIComponent(g.court || "")}` : "";
+          // Golf: real course name + city/state/country instead of a stadiums-dict venueKey (see
+          // handleGolfGame in weather-worker.js).
+          const golfParams =
+            sport === "golf"
+              ? `&courseName=${encodeURIComponent(g.venue || "")}&city=${encodeURIComponent(g.courseCity || "")}&state=${encodeURIComponent(g.courseState || "")}&country=${encodeURIComponent(g.courseCountry || "")}`
+              : "";
           // gameId (MLB's Total Runs Call) and awayAbbr (NFL's Game Environment Score team signal)
           // are both needed server-side now that preview mode computes real Suggested Bet data, not
           // just weather -- see the detail-view fetch below for the same two params, added there first.
           const gameIdParam = g.gameId ? `&gameId=${encodeURIComponent(g.gameId)}` : "";
           const awayAbbrParam = g.awayAbbr ? `&awayAbbr=${encodeURIComponent(g.awayAbbr)}` : "";
-          const res = await fetch(`${WORKER_BASE}/api/game?sport=${sport}&venueKey=${g.venueKey}&preview=1&startTimeUtc=${encodeURIComponent(g.startTimeUtc)}${gameIdParam}${awayAbbrParam}${ncaafParams}${tennisParams}`);
+          const res = await fetch(`${WORKER_BASE}/api/game?sport=${sport}&venueKey=${g.venueKey}&preview=1&startTimeUtc=${encodeURIComponent(g.startTimeUtc)}${gameIdParam}${awayAbbrParam}${ncaafParams}${tennisParams}${golfParams}`);
           const data = await res.json();
           const el = document.getElementById(`gcw-${i}`);
           fillLeanPill(document.getElementById(`gcl-${i}`), data.error ? null : gridLeanCallText(sport, data));
@@ -2826,6 +3035,8 @@
         mergeCoversLines(games, await fetchCoversLinesForSlate("ncaaf"));
       } else if (sport === "tennis") {
         games = await fetchTennisScheduleClientSide(); // no odds merge -- weather only, see DECISIONS.md
+      } else if (sport === "golf") {
+        games = await fetchPgaScheduleClientSide(); // no odds merge -- weather only, see DECISIONS.md
       } else {
         // dayOffset, not a client-computed date -- the Worker computes the actual calendar date
         // itself (America/New_York), so the browser's own clock/timezone can never disagree with
@@ -3609,8 +3820,88 @@
     }
   }
 
+  // Real, deterministic, rule-based note (no AI call, same as tennis) on what today's wind/temp
+  // mean for play: wind is the single biggest variable in club selection (a real PGA Tour rule of
+  // thumb is roughly a half-to-one full club per 10mph of wind, more into a headwind than it helps
+  // downwind since drag costs more than it gives back), and warm air is measurably less dense,
+  // letting the ball carry further for the same swing -- both real, physical effects, not an
+  // invented betting angle (there is no betting angle here, by design).
+  function golfWeatherNote(weather, score) {
+    const windPart =
+      score.windTier === "light"
+        ? "Calm conditions — minimal effect on club selection today."
+        : score.windTier === "moderate"
+          ? `A real ${Math.round(weather.windSpeedMph)}mph wind is enough to affect club selection, especially into a headwind.`
+          : `A strong ${Math.round(weather.windSpeedMph)}mph wind is a major factor today — expect real club-selection swings and tougher shot-shaping, especially on approach shots.`;
+    const tempPart = weather.tempF >= 85 ? " Warm, less dense air lets the ball carry a bit further than normal." : weather.tempF <= 45 ? " Cold, denser air cuts real carry distance for the same swing." : "";
+    return windPart + tempPart;
+  }
+
+  async function showGolfDetail(game) {
+    emptyState.style.display = "none";
+    gamesGrid.style.display = "none";
+    dayToggle.style.display = "none";
+    gameView.style.display = "flex";
+    setDetailMode("breakdown"); // no Verdict content for golf (weather only, no bet calls) -- open straight to it
+    stopLineAutoRefresh(); // golf has no odds to poll
+    renderGameStrip(currentGames.indexOf(game));
+    venueTag.textContent = `${game.venue || "Course"}…`;
+    vhMatchup.innerHTML = game.tournament;
+    venueMeta.textContent = `${game.courseCity || ""}${game.courseState ? ", " + game.courseState : ""}`;
+    vhPitchers.style.display = "none";
+    pickHero.style.display = "none";
+    oddsHero.innerHTML = "";
+    updateBetBoxVisibility();
+    analystReadEl.style.display = "none";
+    insightTop.innerHTML = "";
+    fieldCarryEl.style.display = "none";
+    impactScaleMarksEl.style.display = "none";
+    handedNoteEl.style.display = "none";
+    umpireNoteEl.style.display = "none";
+    runEnvNoteEl.style.display = "none";
+    qbWatchNoteEl.style.display = "none";
+    totalCallNoteEl.style.display = "none";
+    pitcherNoteEl.style.display = "none";
+    almanacCard.style.display = "none";
+    gaugeCluster.innerHTML = "";
+    statPairs.innerHTML = "";
+    sparklineCard.style.display = "none";
+    windRoseSpeed.textContent = "—";
+    windRoseDir.textContent = "mph";
+    const withinHorizon = golfWithinForecastHorizon(game);
+    insightText.textContent = withinHorizon ? "Fetching conditions…" : "Forecast available closer to the event — Open-Meteo's real forecast only extends about 15 days out.";
+    setStatus(withinHorizon ? "Fetching conditions…" : "Forecast not available yet.");
+    if (!withinHorizon) return;
+
+    try {
+      const res = await fetch(`${WORKER_BASE}/api/game?sport=golf&courseName=${encodeURIComponent(game.venue || "")}&city=${encodeURIComponent(game.courseCity || "")}&state=${encodeURIComponent(game.courseState || "")}&country=${encodeURIComponent(game.courseCountry || "")}&startTimeUtc=${encodeURIComponent(game.startTimeUtc)}`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      document.getElementById("tennisCourt").style.display = "none";
+      document.getElementById("map").style.display = "";
+      ensureMap(data.venue.lat, data.venue.lon, STADIUM_HALF_EXTENT_M.golf);
+      venueTag.textContent = data.venue.venue;
+      const forecastTag = data.weather.isForecast ? " (forecast)" : "";
+      const roundTime = new Date(game.startTimeUtc).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      const scoreFact = game.gameState === "in" ? `LIVE ${game.statusDetail || ""}` : game.gameState === "post" ? "FINAL" : null;
+      venueMeta.textContent = [`${game.courseCity || ""}${game.courseState ? ", " + game.courseState : ""}`, `First tee time ${roundTime}${forecastTag}`, scoreFact].filter(Boolean).join(" · ");
+      lastWeather = data.weather;
+      renderInstrumentCluster(data.weather, data.score);
+      renderStatPairs("golf", data.venue, data.score, null);
+      renderWindRose(data.weather, data.score);
+      renderSparkline(data.weather);
+      insightText.textContent = golfWeatherNote(data.weather, data.score);
+      if (window.setWindFlow) window.setWindFlow(data.weather.windFromDeg || 0, data.weather.windSpeedMph || 0);
+      setStatus(`Updated ${new Date().toLocaleTimeString()}`);
+    } catch (err) {
+      insightText.textContent = `Could not load conditions: ${err.message}`;
+      setStatus(`Error: ${err.message}`);
+    }
+  }
+
   async function showDetail(sport, game) {
     if (sport === "tennis") return showTennisDetail(game);
+    if (sport === "golf") return showGolfDetail(game);
     emptyState.style.display = "none";
     gamesGrid.style.display = "none";
     dayToggle.style.display = "none"; // no "Today/Tomorrow" floating above a single game's detail view
