@@ -795,6 +795,13 @@
     text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted);
   }
   .tn-live-section .tn-live-title { display: flex; align-items: center; gap: 8px; color: var(--accent-live); }
+  /* Day columns laid out left-to-right (real user request) -- Live Now stays a full-width pinned
+     strip above this row, but Today/Tomorrow/etc. each become their own scrollable column instead
+     of stacking top-to-bottom. Each column's own cards still use .games-grid internally -- at a
+     fixed ~300px column width that auto-fill grid naturally settles to one card per row on its own,
+     no separate override needed. */
+  .tn-days-row { display: flex; flex-direction: row; gap: 18px; overflow-x: auto; padding-bottom: 6px; align-items: flex-start; }
+  .tn-days-row .tn-section { flex: 0 0 300px; width: 300px; }
   .tn-group { display: flex; flex-direction: column; gap: 10px; }
   .tn-group-title { font-size: 0.78rem; font-weight: 600; color: var(--text-faint); }
   details.tn-completed { margin-top: 2px; }
@@ -2719,7 +2726,7 @@
     gamesGrid.innerHTML =
       `<input type="search" class="tn-search" id="tnSearch" placeholder="Find a player or tournament…" aria-label="Filter tennis matches">` +
       liveHtml +
-      orderedDayKeys.map(dayHtml).join("");
+      `<div class="tn-days-row">${orderedDayKeys.map(dayHtml).join("")}</div>`;
     wireTennisSearch();
   }
 
