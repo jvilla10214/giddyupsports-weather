@@ -1942,6 +1942,16 @@
     const data = await res.json();
     const matches = [];
     for (const ev of data.events || []) {
+      // Main tour only (user request): ESPN's own event-summary link embeds a real, reliable
+      // "competitionType" -- confirmed live, 1 for main ATP/WTA tour events (both Slams and regular
+      // 250/500/1000s share this value) and 2 for the secondary 125/Challenger-equivalent circuit
+      // (e.g. real WTA 125 events like "Jingshan Tennis Open"/"Adana Open" both came back as 2,
+      // alongside a real WTA 1000, "China Open," at 1). Not documented anywhere -- found by diffing
+      // a known main-tour event against a known 125 event's own links -- but a genuine ESPN-supplied
+      // signal, not a guessed/hand-maintained tournament-name table that would go stale every season.
+      const summaryHref = ev.links?.find((l) => l.rel?.includes("summary"))?.href || "";
+      const competitionType = summaryHref.match(/competitionType\/(\d+)/)?.[1];
+      if (competitionType !== "1") continue;
       for (const grouping of ev.groupings || []) {
         const groupName = grouping.grouping?.displayName || "";
         if (!/singles/i.test(groupName)) continue; // doubles excluded, see this function's own comment
