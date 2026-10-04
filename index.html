@@ -2612,63 +2612,17 @@
     );
   }
 
-  // Tennis grid sectioning (added 2026-10-04, real user report: 300+ flat cards were hard to scan).
-  // Live matches are pulled out into their own pinned section regardless of day. Everything else is
-  // grouped by LOCAL calendar day (tennis is a multi-day tournament slate, unlike MLB's single-day
-  // or NFL/NCAAF's single-week one), today/future days shown first in chronological order, any
-  // already-finished past days after that in reverse order (most recent first) since they're the
-  // least relevant once the tournament's moved on. Within a day, grouped by tournament+round so
-  // "China Open · Women's Singles" reads as its own cluster instead of mixed inline labels -- and
-  // each group's already-finished matches collapse into a native <details> toggle rather than
-  // competing for scroll space with matches still to come.
-  function tennisDayKey(iso) {
-    return new Date(iso).toLocaleDateString("en-CA"); // YYYY-MM-DD, local tz, sortable as a string
-  }
-  function tennisDayLabel(dayKey) {
-    const todayKey = new Date().toLocaleDateString("en-CA");
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    if (dayKey === todayKey) return "Today";
-    if (dayKey === tomorrow.toLocaleDateString("en-CA")) return "Tomorrow";
-    return new Date(`${dayKey}T12:00:00`).toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" });
-  }
-
+  // Tennis grid (added 2026-10-04, real user report: 300+ flat cards were hard to scan; revised
+  // same day -- real user feedback that the day/tournament sectioning broke the one thing that DID
+  // work before, reading chronologically left-to-right across a flowing grid instead of top-to-
+  // bottom through stacked day blocks). Only live matches get pulled into their own pinned section;
+  // everything else stays exactly as it always has -- one continuous chronologically-sorted grid,
+  // wrapping left-to-right, same as every other sport's grid.
   function renderTennisGrid(games) {
     const live = [];
-    const byDay = new Map(); // dayKey -> Map(tournament+round -> { upcoming:[idx], completed:[idx] })
-    games.forEach((g, i) => {
-      if (g.gameState === "in") {
-        live.push(i);
-        return;
-      }
-      const dayKey = tennisDayKey(g.startTimeUtc);
-      if (!byDay.has(dayKey)) byDay.set(dayKey, new Map());
-      const dayMap = byDay.get(dayKey);
-      const tKey = `${g.tournament} · ${g.round}`;
-      if (!dayMap.has(tKey)) dayMap.set(tKey, { upcoming: [], completed: [] });
-      dayMap.get(tKey)[g.gameState === "post" ? "completed" : "upcoming"].push(i);
-    });
-
-    const todayKey = new Date().toLocaleDateString("en-CA");
-    const dayKeys = Array.from(byDay.keys());
-    const orderedDayKeys = [...dayKeys.filter((k) => k >= todayKey).sort(), ...dayKeys.filter((k) => k < todayKey).sort().reverse()];
-
+    const rest = [];
+    games.forEach((g, i) => (g.gameState === "in" ? live : rest).push(i));
     const cardHtml = (idx) => tennisCardHtml(games[idx], idx);
-    const groupHtml = (tKey, bucket) => {
-      const completedHtml = bucket.completed.length
-        ? `<details class="tn-completed"><summary>Completed (${bucket.completed.length})</summary><div class="games-grid">${bucket.completed.map(cardHtml).join("")}</div></details>`
-        : "";
-      return `<div class="tn-group">
-        <div class="tn-group-title">${tKey}</div>
-        ${bucket.upcoming.length ? `<div class="games-grid">${bucket.upcoming.map(cardHtml).join("")}</div>` : ""}
-        ${completedHtml}
-      </div>`;
-    };
-    const dayHtml = (dayKey) =>
-      `<div class="tn-section">
-        <div class="tn-section-title">${tennisDayLabel(dayKey)}</div>
-        ${Array.from(byDay.get(dayKey).entries()).map(([tKey, bucket]) => groupHtml(tKey, bucket)).join("")}
-      </div>`;
     const liveHtml = live.length
       ? `<div class="tn-section tn-live-section">
           <div class="tn-section-title tn-live-title"><span class="gc-live-dot"></span>Live Now</div>
@@ -2677,7 +2631,10 @@
       : "";
 
     gamesGrid.classList.add("tennis-grid");
-    gamesGrid.innerHTML = `<input type="search" class="tn-search" id="tnSearch" placeholder="Find a player or tournament…" aria-label="Filter tennis matches">` + liveHtml + orderedDayKeys.map(dayHtml).join("");
+    gamesGrid.innerHTML =
+      `<input type="search" class="tn-search" id="tnSearch" placeholder="Find a player or tournament…" aria-label="Filter tennis matches">` +
+      liveHtml +
+      `<div class="games-grid">${rest.map(cardHtml).join("")}</div>`;
     wireTennisSearch();
   }
 
@@ -2690,9 +2647,6 @@
         card.style.display = !q || card.textContent.toLowerCase().includes(q) ? "" : "none";
       });
       const anyVisibleWithin = (el) => Array.from(el.querySelectorAll(".game-card")).some((c) => c.style.display !== "none");
-      gamesGrid.querySelectorAll(".tn-group").forEach((group) => {
-        group.style.display = anyVisibleWithin(group) ? "" : "none";
-      });
       gamesGrid.querySelectorAll(".tn-section").forEach((section) => {
         section.style.display = anyVisibleWithin(section) ? "" : "none";
       });
