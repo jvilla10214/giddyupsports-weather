@@ -802,6 +802,30 @@
      no separate override needed. */
   .tn-days-row { display: flex; flex-direction: row; gap: 18px; overflow-x: auto; padding-bottom: 6px; align-items: flex-start; }
   .tn-days-row .tn-section { flex: 0 0 300px; width: 300px; }
+  /* Day-jump pills (added 2026-10-04, real user request: don't make people scroll all the way
+     right to find a day) -- one pill per day actually shown in the row, clicking scrolls that
+     column into view instead of blind horizontal scrolling. Past days are deliberately left out of
+     this bar (see .tn-earlier below) -- lowest-value content once a tournament's moved on, same
+     reasoning as why they're already collapsed. */
+  .tn-day-pills { display: flex; gap: 7px; flex-wrap: wrap; }
+  .tn-day-pill {
+    font-family: var(--font-mono); font-size: 0.68rem; font-weight: 600; padding: 5px 12px;
+    border-radius: 100px; border: 1px solid var(--line); background: var(--bg-elevated);
+    color: var(--text-muted); cursor: pointer; white-space: nowrap;
+  }
+  .tn-day-pill:hover { border-color: var(--accent-atmo); color: var(--accent-atmo); }
+  /* Past days, collapsed by default (same reasoning as the day-pills bar skipping them) -- a
+     tournament's already-finished days are the least useful content once it's moved on, so they're
+     opt-in rather than eating scroll space (horizontal, inside .tn-days-row) every visit. */
+  details.tn-earlier { margin-top: 4px; }
+  details.tn-earlier summary {
+    cursor: pointer; font-size: 0.8rem; color: var(--text-faint); font-weight: 600;
+    padding: 4px 0; list-style: none; font-family: var(--font-display); text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  details.tn-earlier summary::-webkit-details-marker { display: none; }
+  details.tn-earlier summary::before { content: "▸ "; }
+  details.tn-earlier[open] summary::before { content: "▾ "; }
+  details.tn-earlier .tn-days-row { margin-top: 12px; }
   .tn-group { display: flex; flex-direction: column; gap: 10px; }
   .tn-group-title { font-size: 0.78rem; font-weight: 600; color: var(--text-faint); }
   details.tn-completed { margin-top: 2px; }
@@ -2697,7 +2721,10 @@
 
     const todayKey = new Date().toLocaleDateString("en-CA");
     const dayKeys = Array.from(byDay.keys());
-    const orderedDayKeys = [...dayKeys.filter((k) => k >= todayKey).sort(), ...dayKeys.filter((k) => k < todayKey).sort().reverse()];
+    // Future/today days render immediately and get a jump-pill; past (already-finished) days
+    // collapse behind "Earlier" -- see this function's own CSS comments for why.
+    const futureDayKeys = dayKeys.filter((k) => k >= todayKey).sort();
+    const pastDayKeys = dayKeys.filter((k) => k < todayKey).sort().reverse();
 
     const cardHtml = (idx) => tennisCardHtml(games[idx], idx);
     const groupHtml = (tKey, bucket) => {
@@ -2711,23 +2738,37 @@
       </div>`;
     };
     const dayHtml = (dayKey) =>
-      `<div class="tn-section">
+      `<div class="tn-section" id="tn-day-${dayKey}">
         <div class="tn-section-title">${tennisDayLabel(dayKey)}</div>
         ${Array.from(byDay.get(dayKey).entries()).map(([tKey, bucket]) => groupHtml(tKey, bucket)).join("")}
       </div>`;
     const liveHtml = live.length
-      ? `<div class="tn-section tn-live-section">
+      ? `<div class="tn-section tn-live-section" id="tn-day-live">
           <div class="tn-section-title tn-live-title"><span class="gc-live-dot"></span>Live Now</div>
           <div class="games-grid">${live.map(cardHtml).join("")}</div>
         </div>`
+      : "";
+    const pills = [live.length ? { key: "live", label: "Live" } : null, ...futureDayKeys.map((k) => ({ key: k, label: tennisDayLabel(k) }))].filter(Boolean);
+    const pillsHtml = pills.length
+      ? `<div class="tn-day-pills">${pills.map((d) => `<button type="button" class="tn-day-pill" data-target="tn-day-${d.key}">${d.label}</button>`).join("")}</div>`
+      : "";
+    const earlierHtml = pastDayKeys.length
+      ? `<details class="tn-earlier"><summary>Earlier (${pastDayKeys.length} day${pastDayKeys.length > 1 ? "s" : ""})</summary><div class="tn-days-row">${pastDayKeys.map(dayHtml).join("")}</div></details>`
       : "";
 
     gamesGrid.classList.add("tennis-grid");
     gamesGrid.innerHTML =
       `<input type="search" class="tn-search" id="tnSearch" placeholder="Find a player or tournament…" aria-label="Filter tennis matches">` +
+      pillsHtml +
       liveHtml +
-      `<div class="tn-days-row">${orderedDayKeys.map(dayHtml).join("")}</div>`;
+      `<div class="tn-days-row">${futureDayKeys.map(dayHtml).join("")}</div>` +
+      earlierHtml;
     wireTennisSearch();
+    gamesGrid.querySelectorAll(".tn-day-pill").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.getElementById(btn.dataset.target)?.scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" });
+      });
+    });
   }
 
   function wireTennisSearch() {
@@ -2746,7 +2787,7 @@
         section.style.display = anyVisibleWithin(section) ? "" : "none";
       });
       if (q) {
-        gamesGrid.querySelectorAll("details.tn-completed").forEach((d) => {
+        gamesGrid.querySelectorAll("details.tn-completed, details.tn-earlier").forEach((d) => {
           if (anyVisibleWithin(d)) d.open = true;
         });
       }
