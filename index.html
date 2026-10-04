@@ -2024,7 +2024,12 @@
     const [atp, wta] = await Promise.all(
       Object.entries(TENNIS_SCOREBOARD_URLS).map(([tour, url]) => fetchTennisTourScheduleClientSide(tour, url))
     );
-    const matches = [...atp, ...wta];
+    // A combined ATP+WTA event (e.g. the China Open) is cross-listed under BOTH tours' scoreboard
+    // endpoints -- confirmed live, the exact same matchId ("184337", Swiatek vs. Vekic) came back
+    // from both /tennis/atp/scoreboard and /tennis/wta/scoreboard. Dedupe by matchId, first one
+    // seen wins (ATP's copy and WTA's copy are identical data either way).
+    const seen = new Set();
+    const matches = [...atp, ...wta].filter((m) => (seen.has(m.matchId) ? false : (seen.add(m.matchId), true)));
     matches.sort((a, b) => new Date(a.startTimeUtc) - new Date(b.startTimeUtc));
     return matches;
   }
