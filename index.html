@@ -1948,7 +1948,11 @@
         for (const comp of grouping.competitions || []) {
           const home = comp.competitors?.find((c) => c.homeAway === "home");
           const away = comp.competitors?.find((c) => c.homeAway === "away");
-          if (!home?.athlete || !away?.athlete) continue; // a bye/walkover slot with no real opponent yet
+          // A bye/walkover/not-yet-resolved bracket slot -- confirmed live, ESPN returns a real
+          // `athlete` object with displayName "TBD" for these (e.g. a cancelled consolation-bracket
+          // match), not a null/missing competitor, so the obvious null-check alone doesn't catch it.
+          const hasRealName = (c) => c?.athlete?.displayName && c.athlete.displayName.toUpperCase() !== "TBD";
+          if (!hasRealName(home) || !hasRealName(away)) continue;
           const player = (c) => ({
             name: c.athlete.displayName,
             shortName: c.athlete.shortName || c.athlete.displayName,
