@@ -854,6 +854,12 @@
     font-family: var(--font-mono); font-size: 0.6rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
     color: var(--text-faint); background: var(--bg-elevated-2); padding: 2px 7px; border-radius: 100px; white-space: nowrap; flex: none;
   }
+  /* Broadcast network badge (NFL only, pre-game cards -- see gameCardHtml's topRight logic and
+     broadcastBadgeHtml's own comment for why this is a colored wordmark, not an image logo). */
+  .gc-broadcast {
+    font-family: var(--font-mono); font-size: 0.6rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+    color: #fff; padding: 2px 7px; border-radius: 100px; white-space: nowrap; flex: none;
+  }
 
   /* Teams stacked vertically (logo above code) rather than side-by-side -- a horizontal chip+text
      row left each team sharing a cramped slice of the row with the big score in the middle, and
@@ -1841,6 +1847,31 @@
   // blocks Cloudflare Worker IPs outright — confirmed by testing identical requests. So NFL
   // schedule is fetched straight from the browser instead of proxied through the Worker; MLB
   // still goes through the Worker since the official MLB Stats API has no such restriction.
+  // Broadcast network badge (added 2026-10-04, real user request). ESPN's own geoBroadcasts.media
+  // DOES carry a real logo image for some networks (NFL Net, ESPN, confirmed live), but NOT for the
+  // common ones that actually matter most -- CBS, FOX, NBC, and Prime Video all came back with a
+  // real network NAME but no logo URL at all (checked live against a real Sunday slate). Rather
+  // than mix "real image for some, missing for most," every network gets the same treatment: a
+  // small colored wordmark badge in that network's real public brand color -- consistent, and
+  // never a broken image. Covers every network that's actually aired an NFL game in recent seasons.
+  const NFL_BROADCAST_BADGES = {
+    CBS: "#0057b8",
+    FOX: "#d31f26",
+    NBC: "#2a2a72",
+    ESPN: "#d00000",
+    ABC: "#000000",
+    "NFL Net": "#013369",
+    "NFL Network": "#013369",
+    "Prime Video": "#00a8e1",
+    Peacock: "#000000",
+    "Paramount+": "#0064ff",
+  };
+  function broadcastBadgeHtml(network) {
+    if (!network) return "";
+    const bg = NFL_BROADCAST_BADGES[network] || "#555";
+    return `<div class="gc-broadcast" style="background:${bg};">${network}</div>`;
+  }
+
   async function fetchNflScheduleClientSide() {
     const res = await fetch("https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard");
     if (!res.ok) throw new Error(`ESPN scoreboard API ${res.status}`);
@@ -1883,8 +1914,16 @@
         statusDetail: ev.status?.type?.shortDetail || null,
         oddsDetails: oddsData?.details || null,
         oddsOverUnder: oddsData?.overUnder ?? null,
+        // Real broadcast network, same payload already used for odds above (confirmed live --
+        // every competition carries a `broadcasts` array) -- see broadcastBadgeHtml's own comment
+        // for why this renders as a colored wordmark badge rather than an image logo.
+        broadcast: comp?.broadcasts?.[0]?.names?.[0] || null,
       };
-    });
+    })
+    // Real user request: sort by kickoff time slot (1pm games, then 4pm, then primetime) -- ESPN's
+    // own scoreboard order is usually already chronological but isn't a documented guarantee, so
+    // this makes it one explicitly rather than relying on that.
+    .sort((a, b) => new Date(a.startTimeUtc) - new Date(b.startTimeUtc));
   }
 
   // NCAAF ("Top 25 Watch") -- STAGE 1 ONLY (schedule + rankings + filter/tag), no weather/Worker
@@ -2501,6 +2540,8 @@
         ? `<div class="gc-live-badge"><span class="gc-live-dot"></span>${liveDetail}</div>`
         : state === "final"
         ? `<div class="gc-final-badge">FINAL</div>`
+        : currentSport === "nfl"
+        ? broadcastBadgeHtml(g.broadcast)
         : "";
     // Whichever side is ahead gets the accent-live color, live or final alike ("leading" becomes
     // "won" once the game ends, same visual language either way); a tie gets neither.
