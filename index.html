@@ -2654,16 +2654,60 @@
   }
 
   // Tennis grid (added 2026-10-04, real user report: 300+ flat cards were hard to scan; revised
-  // same day -- real user feedback that the day/tournament sectioning broke the one thing that DID
-  // work before, reading chronologically left-to-right across a flowing grid instead of top-to-
-  // bottom through stacked day blocks). Only live matches get pulled into their own pinned section;
-  // everything else stays exactly as it always has -- one continuous chronologically-sorted grid,
-  // wrapping left-to-right, same as every other sport's grid.
+  // twice same day -- first reverted to a flat chronological grid on "I liked the left-to-right
+  // reading," then restored to full sectioning on explicit follow-up: "I want the search bar at
+  // the top but then a Live Now, Today, Tomorrow section sub grouped by tournament." The earlier
+  // revert was premature -- see [[feedback_giddyupsports_prefer_flowing_grid_over_sections]]'s own
+  // note on treating "sort" vs "section" carefully; this confirms sectioning IS what was wanted,
+  // just needed to be seen built before the user could react to it either way.
+  function tennisDayKey(iso) {
+    return new Date(iso).toLocaleDateString("en-CA"); // YYYY-MM-DD, local tz, sortable as a string
+  }
+  function tennisDayLabel(dayKey) {
+    const todayKey = new Date().toLocaleDateString("en-CA");
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    if (dayKey === todayKey) return "Today";
+    if (dayKey === tomorrow.toLocaleDateString("en-CA")) return "Tomorrow";
+    return new Date(`${dayKey}T12:00:00`).toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" });
+  }
+
   function renderTennisGrid(games) {
     const live = [];
-    const rest = [];
-    games.forEach((g, i) => (g.gameState === "in" ? live : rest).push(i));
+    const byDay = new Map(); // dayKey -> Map(tournament+round -> { upcoming:[idx], completed:[idx] })
+    games.forEach((g, i) => {
+      if (g.gameState === "in") {
+        live.push(i);
+        return;
+      }
+      const dayKey = tennisDayKey(g.startTimeUtc);
+      if (!byDay.has(dayKey)) byDay.set(dayKey, new Map());
+      const dayMap = byDay.get(dayKey);
+      const tKey = `${g.tournament} · ${g.round}`;
+      if (!dayMap.has(tKey)) dayMap.set(tKey, { upcoming: [], completed: [] });
+      dayMap.get(tKey)[g.gameState === "post" ? "completed" : "upcoming"].push(i);
+    });
+
+    const todayKey = new Date().toLocaleDateString("en-CA");
+    const dayKeys = Array.from(byDay.keys());
+    const orderedDayKeys = [...dayKeys.filter((k) => k >= todayKey).sort(), ...dayKeys.filter((k) => k < todayKey).sort().reverse()];
+
     const cardHtml = (idx) => tennisCardHtml(games[idx], idx);
+    const groupHtml = (tKey, bucket) => {
+      const completedHtml = bucket.completed.length
+        ? `<details class="tn-completed"><summary>Completed (${bucket.completed.length})</summary><div class="games-grid">${bucket.completed.map(cardHtml).join("")}</div></details>`
+        : "";
+      return `<div class="tn-group">
+        <div class="tn-group-title">${tKey}</div>
+        ${bucket.upcoming.length ? `<div class="games-grid">${bucket.upcoming.map(cardHtml).join("")}</div>` : ""}
+        ${completedHtml}
+      </div>`;
+    };
+    const dayHtml = (dayKey) =>
+      `<div class="tn-section">
+        <div class="tn-section-title">${tennisDayLabel(dayKey)}</div>
+        ${Array.from(byDay.get(dayKey).entries()).map(([tKey, bucket]) => groupHtml(tKey, bucket)).join("")}
+      </div>`;
     const liveHtml = live.length
       ? `<div class="tn-section tn-live-section">
           <div class="tn-section-title tn-live-title"><span class="gc-live-dot"></span>Live Now</div>
@@ -2675,7 +2719,7 @@
     gamesGrid.innerHTML =
       `<input type="search" class="tn-search" id="tnSearch" placeholder="Find a player or tournament…" aria-label="Filter tennis matches">` +
       liveHtml +
-      `<div class="games-grid">${rest.map(cardHtml).join("")}</div>`;
+      orderedDayKeys.map(dayHtml).join("");
     wireTennisSearch();
   }
 
@@ -2688,6 +2732,9 @@
         card.style.display = !q || card.textContent.toLowerCase().includes(q) ? "" : "none";
       });
       const anyVisibleWithin = (el) => Array.from(el.querySelectorAll(".game-card")).some((c) => c.style.display !== "none");
+      gamesGrid.querySelectorAll(".tn-group").forEach((group) => {
+        group.style.display = anyVisibleWithin(group) ? "" : "none";
+      });
       gamesGrid.querySelectorAll(".tn-section").forEach((section) => {
         section.style.display = anyVisibleWithin(section) ? "" : "none";
       });
