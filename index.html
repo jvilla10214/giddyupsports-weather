@@ -3237,6 +3237,12 @@
     const pairs =
       sport === "mlb"
         ? [statPair("Altitude", (venue.altitudeFt / 1000).toFixed(1), "k ft"), statPair("Est. Carry", `${score.carryFt > 0 ? "+" : ""}${score.carryFt}`, "ft", true)]
+        : sport === "golf"
+        // Real user report: every PGA Tour course is outdoor (confirmed live -- see
+        // handleGolfGame's own comment in weather-worker.js), so a "Roof: Open" pair is never
+        // informative here the way it is for NFL's real mix of dome/retractable/open stadiums --
+        // just Wind Tier, golf's one real stat pair.
+        ? [statPair("Wind Tier", score.windTier || "—", null, true)]
         : [statPair("Roof", nflRoofLabel(venue, score)), statPair("Wind Tier", score.windTier || "—", null, true)];
     // Statcast park factor: a season-long, weather-independent figure (see DECISIONS.md), shown as
     // its own stat-pair rather than folded into "Est. Carry" so it's never mistaken for part of
