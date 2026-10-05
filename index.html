@@ -1436,6 +1436,19 @@
   .almanac-game-row .m b { color: var(--text); font-weight: 600; }
   .almanac-game-row .hr { font-family: var(--font-mono); color: var(--text-faint); flex: none; }
   .almanac-more { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-faint); padding-top: 2px; }
+  /* Golf leaderboard (real user request) -- reuses .almanac-card's chrome directly (see
+     golfLeaderboardCard's own class). Real ESPN standings, computed rank with tie handling (see
+     golfLeaderboardFromEvent). */
+  .gl-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; font-size: 0.82rem; border-bottom: 1px solid var(--line); }
+  .gl-row:last-child { border-bottom: none; }
+  .gl-rank { font-family: var(--font-mono); color: var(--text-faint); width: 28px; flex: none; }
+  .gl-flag { width: 18px; height: 12px; border-radius: 2px; flex: none; object-fit: cover; }
+  .gl-name { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gl-score { font-family: var(--font-mono); font-weight: 700; color: var(--accent-live); flex: none; }
+  details.gl-more summary { cursor: pointer; font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-faint); padding-top: 6px; list-style: none; }
+  details.gl-more summary::-webkit-details-marker { display: none; }
+  details.gl-more summary::before { content: "▸ "; }
+  details.gl-more[open] summary::before { content: "▾ "; }
 
   footer {
     display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
@@ -1663,6 +1676,10 @@
             <div class="almanac-label">Similar Weather Days — Last 15 Years</div>
             <div class="almanac-body" id="almanacBody">Searching…</div>
           </div>
+          <div class="almanac-card" id="golfLeaderboardCard" style="display:none;">
+            <div class="almanac-label">Leaderboard</div>
+            <div id="golfLeaderboardBody"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -1758,6 +1775,8 @@
   const pitcherNoteEl = document.getElementById("pitcherNote");
   const totalCallNoteEl = document.getElementById("totalCallNote");
   const almanacCard = document.getElementById("almanacCard");
+  const golfLeaderboardCard = document.getElementById("golfLeaderboardCard");
+  const golfLeaderboardBody = document.getElementById("golfLeaderboardBody");
   const almanacBody = document.getElementById("almanacBody");
   const venueMeta = document.getElementById("venueMeta");
   const windRoseSpeed = document.getElementById("windRoseSpeed");
@@ -2239,6 +2258,34 @@
     };
   }
 
+  // Real leaderboard (user request): ESPN's own /scoreboard response already carries each CURRENT
+  // event's full field inline (name, country flag, real score-to-par, confirmed live -- e.g.
+  // "Austin Smotherman," "-26") -- no separate fetch needed, unlike course info. The full per-event
+  // detail endpoint only carries $ref links per competitor (would mean one extra fetch PER PLAYER
+  // in the field, 70+ requests just to show a leaderboard), so this has to come from here instead.
+  // ESPN already returns competitors sorted by standing; rank is computed here (not supplied
+  // directly) with real tie handling ("T-2" when two players share a score).
+  function golfLeaderboardFromEvent(ev) {
+    const competitors = ev.competitions?.[0]?.competitors;
+    if (!competitors?.length) return null;
+    const parseScore = (s) => (s === "E" ? 0 : s === "-" || s == null ? null : Number(s));
+    let lastScore = null;
+    let lastRank = 0;
+    return competitors.map((c, idx) => {
+      const scoreNum = parseScore(c.score);
+      const tied = scoreNum != null && scoreNum === lastScore;
+      const rank = tied ? lastRank : idx + 1;
+      if (scoreNum != null) { lastScore = scoreNum; lastRank = rank; }
+      return {
+        rank: scoreNum == null ? null : tied ? `T${rank}` : `${rank}`,
+        name: c.athlete?.displayName || "—",
+        shortName: c.athlete?.shortName || c.athlete?.displayName || "—",
+        flag: c.athlete?.flag?.href || null,
+        score: c.score || "E",
+      };
+    });
+  }
+
   async function fetchPgaScheduleClientSide() {
     const res = await fetch(PGA_SCOREBOARD_URL);
     if (!res.ok) throw new Error(`ESPN golf scoreboard API ${res.status}`);
@@ -2248,6 +2295,8 @@
     const cutoff = new Date(now.getTime() + PGA_EVENT_WEEKS_AHEAD * 7 * 24 * 60 * 60 * 1000);
     // Current week's real event(s), already fully detailed in the scoreboard response itself.
     const currentIds = new Set((data.events || []).map((ev) => ev.id));
+    const leaderboardById = {};
+    for (const ev of data.events || []) leaderboardById[ev.id] = golfLeaderboardFromEvent(ev);
     const currentEntries = (data.events || []).map((ev) => ({ id: ev.id, label: ev.name, startDate: ev.date, endDate: ev.endDate }));
     // Upcoming real entries from the season calendar, within the visible window, not already covered above.
     const upcomingEntries = calendar.filter((c) => !currentIds.has(c.id) && new Date(c.startDate) > now && new Date(c.startDate) <= cutoff);
@@ -2269,6 +2318,7 @@
             courseCountry: detail.country,
             statusDetail: detail.statusDetail,
             gameState: detail.gameState || "pre",
+            leaderboard: leaderboardById[e.id] || null, // only ever real for a started/current event
           };
         } catch {
           return null; // a single event's detail failing shouldn't break the whole schedule
@@ -3782,6 +3832,7 @@
     totalCallNoteEl.style.display = "none";
     pitcherNoteEl.style.display = "none";
     almanacCard.style.display = "none";
+    golfLeaderboardCard.style.display = "none";
     gaugeCluster.innerHTML = "";
     statPairs.innerHTML = "";
     sparklineCard.style.display = "none";
@@ -3837,6 +3888,31 @@
     return windPart + tempPart;
   }
 
+  // Real leaderboard (user request) -- see golfLeaderboardFromEvent for where this data comes
+  // from (ESPN's own /scoreboard response, already fetched at schedule-load time, no extra
+  // request here). Top 10 shown immediately, the rest behind a native <details> toggle so a
+  // 70+ player field doesn't dominate the page by default.
+  function renderGolfLeaderboard(leaderboard) {
+    if (!leaderboard?.length) {
+      golfLeaderboardCard.style.display = "none";
+      return;
+    }
+    const rowHtml = (p) =>
+      `<div class="gl-row">
+        <span class="gl-rank">${p.rank ?? "—"}</span>
+        ${p.flag ? `<img src="${p.flag}" alt="" class="gl-flag" loading="lazy">` : ""}
+        <span class="gl-name">${p.name}</span>
+        <span class="gl-score">${p.score}</span>
+      </div>`;
+    const top = leaderboard.slice(0, 10);
+    const rest = leaderboard.slice(10);
+    const restHtml = rest.length
+      ? `<details class="gl-more"><summary>Show all ${leaderboard.length}</summary>${rest.map(rowHtml).join("")}</details>`
+      : "";
+    golfLeaderboardBody.innerHTML = top.map(rowHtml).join("") + restHtml;
+    golfLeaderboardCard.style.display = "block";
+  }
+
   async function showGolfDetail(game) {
     emptyState.style.display = "none";
     gamesGrid.style.display = "none";
@@ -3863,11 +3939,16 @@
     totalCallNoteEl.style.display = "none";
     pitcherNoteEl.style.display = "none";
     almanacCard.style.display = "none";
+    golfLeaderboardCard.style.display = "none";
     gaugeCluster.innerHTML = "";
     statPairs.innerHTML = "";
     sparklineCard.style.display = "none";
     windRoseSpeed.textContent = "—";
     windRoseDir.textContent = "mph";
+    // Doesn't depend on the weather fetch below -- real standings ESPN already gave us at
+    // schedule-load time, so a far-future event with no weather yet can still show nothing
+    // wrong, and a live/finished one shows its real leaderboard immediately.
+    renderGolfLeaderboard(game.leaderboard);
     const withinHorizon = golfWithinForecastHorizon(game);
     insightText.textContent = withinHorizon ? "Fetching conditions…" : "Forecast available closer to the event — Open-Meteo's real forecast only extends about 15 days out.";
     setStatus(withinHorizon ? "Fetching conditions…" : "Forecast not available yet.");
@@ -3946,6 +4027,7 @@
     totalCallNoteEl.style.display = "none";
     pitcherNoteEl.style.display = "none";
     almanacCard.style.display = "none";
+    golfLeaderboardCard.style.display = "none";
     gaugeCluster.innerHTML = "";
     statPairs.innerHTML = "";
     sparklineCard.style.display = "none";
