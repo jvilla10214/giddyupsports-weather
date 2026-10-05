@@ -94,38 +94,63 @@ export const MLB_KEY_TO_TEAM_ID = Object.fromEntries(
 );
 
 // NFL: roofType drives whether wind/precip effects apply at all (a closed dome/retractable roof
-// zeroes them out). lat/lon center the aerial map. No CF-bearing equivalent needed for football.
+// zeroes them out). lat/lon center the aerial map.
+//
+// fieldBearingDeg (added 2026-10-05, audit item "NFL #1" -- a real per-stadium orientation, same
+// idea as MLB's cfBearingDeg above): the field's long axis, 0-179deg (0=N-S axis, 90=E-W axis; a
+// football field is symmetric end-to-end -- teams swap ends at halftime -- so unlike MLB's CF
+// bearing there's no "forward" direction to pick, a mod-180 axis is all scoreNflGame needs to call
+// a real headwind/crosswind vs. today's wind). No Clem's-Baseball-equivalent aggregator exists for
+// NFL fields, so this was derived first-party: Overpass/OSM's own mapped football-pitch rectangle
+// (real coordinates, bearing computed via haversine on the long edges) where one exists, or PCA on
+// the stadium building footprint where it doesn't, cross-checked against web sources where
+// available. fieldBearingConfidence names how solid that is per venue, so the UI can caveat the
+// weak ones the same honest way roofStatusConfirmed already does for assumed-closed retractable
+// roofs, rather than asserting every value with equal certainty:
+//   "high"     -- a clean, correctly-dimensioned (~110x49m) OSM-mapped pitch rectangle.
+//   "moderate" -- building-footprint PCA only (no separately-mapped pitch) or a single
+//                 corroborating secondary source.
+//   "low"      -- BUF (brand-new, opened Oct 2026, no OSM pitch yet, single uncorroborated news
+//                 report), IND (direction corroborated by a secondary source but not the precise
+//                 degree -- OSM's building shape is too circular to trust), JAX (OSM's own mapped
+//                 pitch and a secondary source actively disagree -- OSM's value is kept as the
+//                 higher-quality evidence in principle, but the conflict itself is the real finding),
+//                 LV (direction-only estimate -- the dome's building footprint is too circular for
+//                 OSM PCA and no source states a precise degree).
+// BUF's lat/lon was also corrected this same pass: the new Highmark Stadium (opened Oct 2026) sits
+// ~400m from the previous coordinates here, which were the demolished former stadium's -- verified
+// live against OSM's own "Highmark Stadium" way, not just the research agent's flag.
 export const NFL_STADIUMS = {
-  ARI: { team: "Cardinals", venue: "State Farm Stadium", city: "Glendale, AZ", lat: 33.5276, lon: -112.2626, roofType: "retractable", surface: "grass" },
-  ATL: { team: "Falcons", venue: "Mercedes-Benz Stadium", city: "Atlanta, GA", lat: 33.7554, lon: -84.4008, roofType: "retractable", surface: "turf" },
-  BAL: { team: "Ravens", venue: "M&T Bank Stadium", city: "Baltimore, MD", lat: 39.278, lon: -76.6227, roofType: "open", surface: "grass" },
-  BUF: { team: "Bills", venue: "Highmark Stadium", city: "Orchard Park, NY", lat: 42.7738, lon: -78.787, roofType: "open", surface: "grass" },
-  CAR: { team: "Panthers", venue: "Bank of America Stadium", city: "Charlotte, NC", lat: 35.2258, lon: -80.8528, roofType: "open", surface: "turf" },
-  CHI: { team: "Bears", venue: "Soldier Field", city: "Chicago, IL", lat: 41.8623, lon: -87.6167, roofType: "open", surface: "grass" },
-  CIN: { team: "Bengals", venue: "Paycor Stadium", city: "Cincinnati, OH", lat: 39.0955, lon: -84.516, roofType: "open", surface: "turf" },
-  CLE: { team: "Browns", venue: "Huntington Bank Field", city: "Cleveland, OH", lat: 41.5061, lon: -81.6995, roofType: "open", surface: "grass" },
-  DAL: { team: "Cowboys", venue: "AT&T Stadium", city: "Arlington, TX", lat: 32.7473, lon: -97.0945, roofType: "retractable", surface: "turf" },
-  DEN: { team: "Broncos", venue: "Empower Field at Mile High", city: "Denver, CO", lat: 39.7439, lon: -105.02, roofType: "open", surface: "grass" },
-  DET: { team: "Lions", venue: "Ford Field", city: "Detroit, MI", lat: 42.34, lon: -83.0456, roofType: "dome", surface: "turf" },
-  GB: { team: "Packers", venue: "Lambeau Field", city: "Green Bay, WI", lat: 44.5013, lon: -88.0622, roofType: "open", surface: "grass" },
-  HOU: { team: "Texans", venue: "NRG Stadium", city: "Houston, TX", lat: 29.6847, lon: -95.4107, roofType: "retractable", surface: "turf" },
-  IND: { team: "Colts", venue: "Lucas Oil Stadium", city: "Indianapolis, IN", lat: 39.7601, lon: -86.1639, roofType: "retractable", surface: "turf" },
-  JAX: { team: "Jaguars", venue: "EverBank Stadium", city: "Jacksonville, FL", lat: 30.3239, lon: -81.6373, roofType: "open", surface: "grass" },
-  KC: { team: "Chiefs", venue: "GEHA Field at Arrowhead Stadium", city: "Kansas City, MO", lat: 39.0489, lon: -94.4839, roofType: "open", surface: "grass" },
-  LAC: { team: "Chargers", venue: "SoFi Stadium", city: "Inglewood, CA", lat: 33.9535, lon: -118.3392, roofType: "dome", surface: "turf" },
-  LAR: { team: "Rams", venue: "SoFi Stadium", city: "Inglewood, CA", lat: 33.9535, lon: -118.3392, roofType: "dome", surface: "turf" },
-  LV: { team: "Raiders", venue: "Allegiant Stadium", city: "Las Vegas, NV", lat: 36.0909, lon: -115.1833, roofType: "dome", surface: "grass" },
-  MIA: { team: "Dolphins", venue: "Hard Rock Stadium", city: "Miami Gardens, FL", lat: 25.958, lon: -80.2389, roofType: "open", surface: "grass" },
-  MIN: { team: "Vikings", venue: "U.S. Bank Stadium", city: "Minneapolis, MN", lat: 44.9735, lon: -93.2575, roofType: "dome", surface: "turf" },
-  NE: { team: "Patriots", venue: "Gillette Stadium", city: "Foxborough, MA", lat: 42.0909, lon: -71.2643, roofType: "open", surface: "turf" },
-  NO: { team: "Saints", venue: "Caesars Superdome", city: "New Orleans, LA", lat: 29.9511, lon: -90.0812, roofType: "dome", surface: "turf" },
-  NYG: { team: "Giants", venue: "MetLife Stadium", city: "East Rutherford, NJ", lat: 40.8135, lon: -74.0745, roofType: "open", surface: "turf" },
-  NYJ: { team: "Jets", venue: "MetLife Stadium", city: "East Rutherford, NJ", lat: 40.8135, lon: -74.0745, roofType: "open", surface: "turf" },
-  PHI: { team: "Eagles", venue: "Lincoln Financial Field", city: "Philadelphia, PA", lat: 39.9008, lon: -75.1675, roofType: "open", surface: "grass" },
-  PIT: { team: "Steelers", venue: "Acrisure Stadium", city: "Pittsburgh, PA", lat: 40.4468, lon: -80.0158, roofType: "open", surface: "grass" },
-  SEA: { team: "Seahawks", venue: "Lumen Field", city: "Seattle, WA", lat: 47.5952, lon: -122.3316, roofType: "open", surface: "turf" },
-  SF: { team: "49ers", venue: "Levi's Stadium", city: "Santa Clara, CA", lat: 37.403, lon: -121.9698, roofType: "open", surface: "grass" },
-  TB: { team: "Buccaneers", venue: "Raymond James Stadium", city: "Tampa, FL", lat: 27.9759, lon: -82.5033, roofType: "open", surface: "grass" },
-  TEN: { team: "Titans", venue: "Nissan Stadium", city: "Nashville, TN", lat: 36.1665, lon: -86.7713, roofType: "open", surface: "turf" },
-  WSH: { team: "Commanders", venue: "Commanders Field", city: "Landover, MD", lat: 38.9077, lon: -76.8645, roofType: "open", surface: "grass" },
+  ARI: { team: "Cardinals", venue: "State Farm Stadium", city: "Glendale, AZ", lat: 33.5276, lon: -112.2626, roofType: "retractable", surface: "grass", fieldBearingDeg: 148, fieldBearingConfidence: "moderate" },
+  ATL: { team: "Falcons", venue: "Mercedes-Benz Stadium", city: "Atlanta, GA", lat: 33.7554, lon: -84.4008, roofType: "retractable", surface: "turf", fieldBearingDeg: 90, fieldBearingConfidence: "moderate" },
+  BAL: { team: "Ravens", venue: "M&T Bank Stadium", city: "Baltimore, MD", lat: 39.278, lon: -76.6227, roofType: "open", surface: "grass", fieldBearingDeg: 110, fieldBearingConfidence: "high" },
+  BUF: { team: "Bills", venue: "Highmark Stadium", city: "Orchard Park, NY", lat: 42.773, lon: -78.7922, roofType: "open", surface: "grass", fieldBearingDeg: 0, fieldBearingConfidence: "low" },
+  CAR: { team: "Panthers", venue: "Bank of America Stadium", city: "Charlotte, NC", lat: 35.2258, lon: -80.8528, roofType: "open", surface: "turf", fieldBearingDeg: 140, fieldBearingConfidence: "high" },
+  CHI: { team: "Bears", venue: "Soldier Field", city: "Chicago, IL", lat: 41.8623, lon: -87.6167, roofType: "open", surface: "grass", fieldBearingDeg: 176, fieldBearingConfidence: "high" },
+  CIN: { team: "Bengals", venue: "Paycor Stadium", city: "Cincinnati, OH", lat: 39.0955, lon: -84.516, roofType: "open", surface: "turf", fieldBearingDeg: 142, fieldBearingConfidence: "moderate" },
+  CLE: { team: "Browns", venue: "Huntington Bank Field", city: "Cleveland, OH", lat: 41.5061, lon: -81.6995, roofType: "open", surface: "grass", fieldBearingDeg: 56, fieldBearingConfidence: "high" },
+  DAL: { team: "Cowboys", venue: "AT&T Stadium", city: "Arlington, TX", lat: 32.7473, lon: -97.0945, roofType: "retractable", surface: "turf", fieldBearingDeg: 69, fieldBearingConfidence: "high" },
+  DEN: { team: "Broncos", venue: "Empower Field at Mile High", city: "Denver, CO", lat: 39.7439, lon: -105.02, roofType: "open", surface: "grass", fieldBearingDeg: 0, fieldBearingConfidence: "high" },
+  DET: { team: "Lions", venue: "Ford Field", city: "Detroit, MI", lat: 42.34, lon: -83.0456, roofType: "dome", surface: "turf", fieldBearingDeg: 35, fieldBearingConfidence: "moderate" },
+  GB: { team: "Packers", venue: "Lambeau Field", city: "Green Bay, WI", lat: 44.5013, lon: -88.0622, roofType: "open", surface: "grass", fieldBearingDeg: 0, fieldBearingConfidence: "high" },
+  HOU: { team: "Texans", venue: "NRG Stadium", city: "Houston, TX", lat: 29.6847, lon: -95.4107, roofType: "retractable", surface: "turf", fieldBearingDeg: 0, fieldBearingConfidence: "moderate" },
+  IND: { team: "Colts", venue: "Lucas Oil Stadium", city: "Indianapolis, IN", lat: 39.7601, lon: -86.1639, roofType: "retractable", surface: "turf", fieldBearingDeg: 45, fieldBearingConfidence: "low" },
+  JAX: { team: "Jaguars", venue: "EverBank Stadium", city: "Jacksonville, FL", lat: 30.3239, lon: -81.6373, roofType: "open", surface: "grass", fieldBearingDeg: 11, fieldBearingConfidence: "low" },
+  KC: { team: "Chiefs", venue: "GEHA Field at Arrowhead Stadium", city: "Kansas City, MO", lat: 39.0489, lon: -94.4839, roofType: "open", surface: "grass", fieldBearingDeg: 137, fieldBearingConfidence: "high" },
+  LAC: { team: "Chargers", venue: "SoFi Stadium", city: "Inglewood, CA", lat: 33.9535, lon: -118.3392, roofType: "dome", surface: "turf", fieldBearingDeg: 142, fieldBearingConfidence: "high" },
+  LAR: { team: "Rams", venue: "SoFi Stadium", city: "Inglewood, CA", lat: 33.9535, lon: -118.3392, roofType: "dome", surface: "turf", fieldBearingDeg: 142, fieldBearingConfidence: "high" },
+  LV: { team: "Raiders", venue: "Allegiant Stadium", city: "Las Vegas, NV", lat: 36.0909, lon: -115.1833, roofType: "dome", surface: "grass", fieldBearingDeg: 45, fieldBearingConfidence: "low" },
+  MIA: { team: "Dolphins", venue: "Hard Rock Stadium", city: "Miami Gardens, FL", lat: 25.958, lon: -80.2389, roofType: "open", surface: "grass", fieldBearingDeg: 122, fieldBearingConfidence: "high" },
+  MIN: { team: "Vikings", venue: "U.S. Bank Stadium", city: "Minneapolis, MN", lat: 44.9735, lon: -93.2575, roofType: "dome", surface: "turf", fieldBearingDeg: 153, fieldBearingConfidence: "moderate" },
+  NE: { team: "Patriots", venue: "Gillette Stadium", city: "Foxborough, MA", lat: 42.0909, lon: -71.2643, roofType: "open", surface: "turf", fieldBearingDeg: 162, fieldBearingConfidence: "high" },
+  NO: { team: "Saints", venue: "Caesars Superdome", city: "New Orleans, LA", lat: 29.9511, lon: -90.0812, roofType: "dome", surface: "turf", fieldBearingDeg: 0, fieldBearingConfidence: "moderate" },
+  NYG: { team: "Giants", venue: "MetLife Stadium", city: "East Rutherford, NJ", lat: 40.8135, lon: -74.0745, roofType: "open", surface: "turf", fieldBearingDeg: 167, fieldBearingConfidence: "high" },
+  NYJ: { team: "Jets", venue: "MetLife Stadium", city: "East Rutherford, NJ", lat: 40.8135, lon: -74.0745, roofType: "open", surface: "turf", fieldBearingDeg: 167, fieldBearingConfidence: "high" },
+  PHI: { team: "Eagles", venue: "Lincoln Financial Field", city: "Philadelphia, PA", lat: 39.9008, lon: -75.1675, roofType: "open", surface: "grass", fieldBearingDeg: 172, fieldBearingConfidence: "high" },
+  PIT: { team: "Steelers", venue: "Acrisure Stadium", city: "Pittsburgh, PA", lat: 40.4468, lon: -80.0158, roofType: "open", surface: "grass", fieldBearingDeg: 164, fieldBearingConfidence: "high" },
+  SEA: { team: "Seahawks", venue: "Lumen Field", city: "Seattle, WA", lat: 47.5952, lon: -122.3316, roofType: "open", surface: "turf", fieldBearingDeg: 0, fieldBearingConfidence: "high" },
+  SF: { team: "49ers", venue: "Levi's Stadium", city: "Santa Clara, CA", lat: 37.403, lon: -121.9698, roofType: "open", surface: "grass", fieldBearingDeg: 152, fieldBearingConfidence: "high" },
+  TB: { team: "Buccaneers", venue: "Raymond James Stadium", city: "Tampa, FL", lat: 27.9759, lon: -82.5033, roofType: "open", surface: "grass", fieldBearingDeg: 1, fieldBearingConfidence: "high" },
+  TEN: { team: "Titans", venue: "Nissan Stadium", city: "Nashville, TN", lat: 36.1665, lon: -86.7713, roofType: "open", surface: "turf", fieldBearingDeg: 156, fieldBearingConfidence: "high" },
+  WSH: { team: "Commanders", venue: "Commanders Field", city: "Landover, MD", lat: 38.9077, lon: -76.8645, roofType: "open", surface: "grass", fieldBearingDeg: 119, fieldBearingConfidence: "high" },
 };

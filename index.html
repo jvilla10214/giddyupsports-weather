@@ -1663,6 +1663,7 @@
             <div class="handed-note" id="umpireNote" style="display:none;"></div>
             <div class="handed-note" id="runEnvNote" style="display:none;"></div>
             <div class="handed-note" id="qbWatchNote" style="display:none;"></div>
+            <div class="handed-note" id="windAxisNote" style="display:none;"></div>
             <div class="handed-note" id="totalCallNote" style="display:none;"></div>
             <div class="handed-note" id="pitcherNote" style="display:none;"></div>
             <div class="insight-text" id="insightText">Loading AI read…</div>
@@ -1783,6 +1784,7 @@
   const umpireNoteEl = document.getElementById("umpireNote");
   const runEnvNoteEl = document.getElementById("runEnvNote");
   const qbWatchNoteEl = document.getElementById("qbWatchNote");
+  const windAxisNoteEl = document.getElementById("windAxisNote");
   const pitcherNoteEl = document.getElementById("pitcherNote");
   const totalCallNoteEl = document.getElementById("totalCallNote");
   const almanacCard = document.getElementById("almanacCard");
@@ -2021,21 +2023,31 @@
   // than mix "real image for some, missing for most," every network gets the same treatment: a
   // small colored wordmark badge in that network's real public brand color -- consistent, and
   // never a broken image. Covers every network that's actually aired an NFL game in recent seasons.
+  // Real user report prompted an audit: checked every real broadcast name across the full 2026
+  // season (all 18 weeks, confirmed live) rather than just the one week this was first built
+  // against. Found two real gaps: ESPN's own data says "Fox" (title case), not "FOX" -- the
+  // all-caps entry silently never matched, every Fox game fell back to the grey default. And
+  // "Netflix" is a real, now-recurring broadcaster (started with real Christmas Day games) that
+  // wasn't in the table at all. "NFL Network"/"Peacock"/"Paramount+" never actually appear as the
+  // PRIMARY broadcast name this season (confirmed against the same full-season check) but are left
+  // in since they're real networks that could return. Lookup itself is now case-insensitive so a
+  // future casing drift like the Fox one degrades to a near-miss, not a silent grey badge.
   const NFL_BROADCAST_BADGES = {
-    CBS: "#0057b8",
-    FOX: "#d31f26",
-    NBC: "#2a2a72",
-    ESPN: "#d00000",
-    ABC: "#000000",
-    "NFL Net": "#013369",
-    "NFL Network": "#013369",
-    "Prime Video": "#00a8e1",
-    Peacock: "#000000",
-    "Paramount+": "#0064ff",
+    cbs: "#0057b8",
+    fox: "#d31f26",
+    nbc: "#2a2a72",
+    espn: "#d00000",
+    abc: "#000000",
+    "nfl net": "#013369",
+    "nfl network": "#013369",
+    "prime video": "#00a8e1",
+    netflix: "#e50914",
+    peacock: "#000000",
+    "paramount+": "#0064ff",
   };
   function broadcastBadgeHtml(network) {
     if (!network) return "";
-    const bg = NFL_BROADCAST_BADGES[network] || "#555";
+    const bg = NFL_BROADCAST_BADGES[network.toLowerCase()] || "#555";
     return `<div class="gc-broadcast" style="background:${bg};">${network}</div>`;
   }
 
@@ -2530,40 +2542,55 @@
     }
   }
 
-  // QB Watch (added 2026-09-19, NFL only, detail view only -- see
-  // scripts/backtest-nfl-qbchange-composite.js for why this is descriptive-only, never a call: the
-  // signal is real in-sample (r=-0.1239, ~3.5pt gap in actual game totals) but did NOT survive an
+  // Injury Watch (QB added 2026-09-19, extended to RB1/WR1/LT 2026-10-05 per site audit item
+  // "extend QB Watch's pattern to other positions" -- see
+  // scripts/backtest-nfl-qbchange-composite.js for why QB itself is descriptive-only, never a call:
+  // the signal is real in-sample (r=-0.1239, ~3.5pt gap in actual game totals) but did NOT survive an
   // honest train/2020-23-test/2024-25 split -- the market already prices a QB change in by kickoff,
-  // so there's no residual betting edge, just real context worth surfacing.
+  // so there's no residual betting edge, just real context worth surfacing. RB1/WR1/LT were NOT
+  // separately backtested (no existing script covers them) -- shown purely as "this real starter is
+  // out/doubtful," no effect-size claim at all for those three, unlike QB's own quoted number.
   //
   // Two free, CORS-open ESPN endpoints not used anywhere else in this app yet, confirmed live:
-  //   /teams/{abbr}/depthcharts -- each team's currently-listed QB order (some formation group
-  //     always has a "qb" position; the group's NAME varies by team's base offensive personnel, so
-  //     this searches every group rather than assuming e.g. "Offense").
+  //   /teams/{abbr}/depthcharts -- each team's currently-listed starters at every real position key
+  //     (confirmed live: rb, wr1, lt alongside qb, same response already fetched for QB -- no extra
+  //     call needed per added position). Group NAMES vary by team's base offensive personnel, so this
+  //     searches every group rather than assuming e.g. "Offense".
   //   sports.core.api.espn.com/.../teams/{id}/injuries?limit=200 -- actually returns the full
   //     LEAGUE injury list regardless of the team id in the path (confirmed live) but is small
   //     enough (~58 entries) that client-side filtering by athlete id is simpler and just as
   //     correct as trusting server-side team filtering that may not really be happening.
-  // Only "Out"/"Doubtful" trigger the flag -- "Questionable" QBs usually still play, so treating
+  // Only "Out"/"Doubtful" trigger a flag -- "Questionable" players usually still play, so treating
   // that as a change would flag far more games than actually see one.
-  // NOTE (found live while testing, 2026-09-19): the depth chart's #2 QB slot is NOT reliable
-  // enough to name as "the likely replacement" -- confirmed live, Atlanta's chart listed Tua
-  // Tagovailoa (Miami's own QB) as their backup, when the real replacement (per ESPN's own injury
-  // report text) was Cooper Rush, not even on this team's top-2 QB depth chart at all. Depth chart
-  // is used ONLY to identify the current QB1 (who to check injury status for) -- see watchFor below,
-  // which quotes ESPN's own injury shortComment for the "who's actually playing" answer instead of
-  // trusting the depth chart's backup slot.
-  async function fetchNflStartingQb(teamAbbr) {
+  // NOTE (found live while testing QB Watch, 2026-09-19): a depth chart's #2 slot at a position is
+  // NOT reliable enough to name as "the likely replacement" -- confirmed live, Atlanta's chart listed
+  // Tua Tagovailoa (Miami's own QB) as their backup, when the real replacement (per ESPN's own injury
+  // report text) was Cooper Rush, not even on this team's top-2 QB depth chart at all. Depth chart is
+  // used ONLY to identify who's CURRENTLY listed as the starter (who to check injury status for) --
+  // see watchFor below, which quotes ESPN's own injury shortComment for the "who's actually playing"
+  // answer instead of trusting a depth chart's backup slot.
+  const INJURY_WATCH_POSITIONS = [
+    { key: "qb", label: "QB" },
+    { key: "rb", label: "RB1" },
+    { key: "wr1", label: "WR1" },
+    { key: "lt", label: "LT" },
+  ];
+
+  async function fetchNflKeyStarters(teamAbbr) {
     const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/${teamAbbr.toLowerCase()}/depthcharts`);
     if (!res.ok) throw new Error(`ESPN depth chart ${res.status}`);
     const data = await res.json();
-    for (const group of data.depthchart || []) {
-      const qb = group.positions?.qb;
-      if (qb?.athletes?.length) {
-        return { starter: qb.athletes[0] };
+    const starters = {};
+    for (const { key } of INJURY_WATCH_POSITIONS) {
+      for (const group of data.depthchart || []) {
+        const pos = group.positions?.[key];
+        if (pos?.athletes?.length) {
+          starters[key] = { starter: pos.athletes[0] };
+          break;
+        }
       }
     }
-    return null;
+    return starters;
   }
 
   async function fetchNflInjuredAthleteStatus() {
@@ -2579,27 +2606,32 @@
     return statusByAthleteId;
   }
 
-  async function fetchNflQbWatch(homeAbbr, awayAbbr) {
+  async function fetchNflInjuryWatch(homeAbbr, awayAbbr) {
     if (!homeAbbr || !awayAbbr) return null;
-    const [homeQb, awayQb, injuredIndex] = await Promise.all([
-      fetchNflStartingQb(homeAbbr).catch(() => null),
-      fetchNflStartingQb(awayAbbr).catch(() => null),
+    const [homeStarters, awayStarters, injuredIndex] = await Promise.all([
+      fetchNflKeyStarters(homeAbbr).catch(() => ({})),
+      fetchNflKeyStarters(awayAbbr).catch(() => ({})),
       fetchNflInjuredAthleteStatus().catch(() => ({})),
     ]);
-    async function watchFor(abbr, qb) {
-      if (!qb?.starter) return null;
-      const match = injuredIndex[qb.starter.id];
-      if (!match) return null;
-      // ESPN's own $ref comes back as plain http:// -- force https so a page served over https
-      // (GitHub Pages) doesn't have this blocked as mixed content.
-      const statusRes = await fetch(match.injuryRef.replace(/^http:/, "https:"));
-      if (!statusRes.ok) return null;
-      const injury = await statusRes.json();
-      if (injury.status !== "Out" && injury.status !== "Doubtful") return null;
-      return { team: abbr, starterName: qb.starter.displayName, status: injury.status, note: injury.shortComment || null };
+    async function watchFor(abbr, starters) {
+      const flags = [];
+      for (const { key, label } of INJURY_WATCH_POSITIONS) {
+        const player = starters[key]?.starter;
+        if (!player) continue;
+        const match = injuredIndex[player.id];
+        if (!match) continue;
+        // ESPN's own $ref comes back as plain http:// -- force https so a page served over https
+        // (GitHub Pages) doesn't have this blocked as mixed content.
+        const statusRes = await fetch(match.injuryRef.replace(/^http:/, "https:"));
+        if (!statusRes.ok) continue;
+        const injury = await statusRes.json();
+        if (injury.status !== "Out" && injury.status !== "Doubtful") continue;
+        flags.push({ position: label, team: abbr, starterName: player.displayName, status: injury.status, note: injury.shortComment || null });
+      }
+      return flags;
     }
-    const [homeWatch, awayWatch] = await Promise.all([watchFor(homeAbbr, homeQb), watchFor(awayAbbr, awayQb)]);
-    return homeWatch || awayWatch ? { home: homeWatch, away: awayWatch } : null;
+    const [homeFlags, awayFlags] = await Promise.all([watchFor(homeAbbr, homeStarters), watchFor(awayAbbr, awayStarters)]);
+    return homeFlags.length || awayFlags.length ? { home: homeFlags, away: awayFlags } : null;
   }
 
   // Analyst Read (added 2026-09-19): curated, attributed, paraphrased commentary from named human
@@ -2691,20 +2723,43 @@
     analystReadEl.style.display = "block";
   }
 
-  function renderQbWatchNote(watch) {
-    if (!watch || (!watch.home && !watch.away)) {
+  function renderInjuryWatchNote(watch) {
+    const flags = [...(watch?.home || []), ...(watch?.away || [])];
+    if (!flags.length) {
       qbWatchNoteEl.style.display = "none";
       return;
     }
-    // Quotes ESPN's own injury-report text (see fetchNflStartingQb's comment) rather than naming a
+    // Quotes ESPN's own injury-report text (see fetchNflKeyStarters's comment) rather than naming a
     // specific replacement ourselves -- that's the one part of this ESPN data that's actually
-    // reliable, unlike the depth chart's backup slot.
-    const parts = [watch.home, watch.away]
-      .filter(Boolean)
-      .map((w) => `${w.starterName} (${w.status})${w.note ? ` — ${w.note}` : ""}`);
-    qbWatchNoteEl.innerHTML = `<span class="hn-dot"></span>QB Watch: ${parts.join(" · ")}` +
-      `<span style="margin-left:8px; color: var(--text-muted); font-size: 0.85em;">real effect, no betting edge (see model notes)</span>`;
+    // reliable, unlike a depth chart's backup slot.
+    const parts = flags.map((f) => `${f.position} ${f.starterName} (${f.status})${f.note ? ` — ${f.note}` : ""}`);
+    // Only QB has an actual backtested effect-size (see fetchNflInjuryWatch's comment) -- RB1/WR1/LT
+    // are shown purely as real, confirmed context, so the caption can't claim the same number for them.
+    const hasQb = flags.some((f) => f.position === "QB");
+    const caption = hasQb
+      ? "real effect for QB, no betting edge (see model notes) — other positions shown for context, not backtested"
+      : "shown for context, not backtested";
+    qbWatchNoteEl.innerHTML = `<span class="hn-dot"></span>Injury Watch: ${parts.join(" · ")}` +
+      `<span style="margin-left:8px; color: var(--text-muted); font-size: 0.85em;">${caption}</span>`;
     qbWatchNoteEl.style.display = "flex";
+  }
+
+  // Field Wind Alignment (added 2026-10-05, audit item "NFL #1" -- see fieldWindAlignment's own
+  // comment in rules-engine.js for why this deliberately never claims a down-the-field wind favors
+  // either team: the field is symmetric end-to-end, so that read swings by half, only crosswind is a
+  // real, direction-independent fact worth a plain claim).
+  function renderWindAxisNote(score) {
+    if (!score?.windFieldAlignment) {
+      windAxisNoteEl.style.display = "none";
+      return;
+    }
+    const caveat =
+      score.windFieldAlignmentConfidence === "low"
+        ? ` <span style="color: var(--text-muted); font-size: 0.85em;">(this venue's field orientation isn't confidently confirmed — treat with caution)</span>`
+        : "";
+    const label = score.windFieldAlignment === "crosswind" ? "Crosswind — harder for both kickers and passers to compensate for than a straight wind." : "Down-the-field wind — swings by half/end, doesn't clearly favor either team over a full game.";
+    windAxisNoteEl.innerHTML = `<span class="hn-dot"></span>${label}${caveat}`;
+    windAxisNoteEl.style.display = "flex";
   }
 
   // MLB's schedule (fetched via the Worker from MLB Stats API) carries each team's real numeric
@@ -3869,6 +3924,7 @@
     umpireNoteEl.style.display = "none";
     runEnvNoteEl.style.display = "none";
     qbWatchNoteEl.style.display = "none";
+    windAxisNoteEl.style.display = "none";
     totalCallNoteEl.style.display = "none";
     pitcherNoteEl.style.display = "none";
     almanacCard.style.display = "none";
@@ -4040,6 +4096,7 @@
     umpireNoteEl.style.display = "none";
     runEnvNoteEl.style.display = "none";
     qbWatchNoteEl.style.display = "none";
+    windAxisNoteEl.style.display = "none";
     totalCallNoteEl.style.display = "none";
     pitcherNoteEl.style.display = "none";
     almanacCard.style.display = "none";
@@ -4144,6 +4201,7 @@
     umpireNoteEl.style.display = "none";
     runEnvNoteEl.style.display = "none";
     qbWatchNoteEl.style.display = "none";
+    windAxisNoteEl.style.display = "none";
     totalCallNoteEl.style.display = "none";
     pitcherNoteEl.style.display = "none";
     almanacCard.style.display = "none";
@@ -4157,9 +4215,9 @@
     setStatus("Fetching conditions…");
     loadAlmanac(sport, game); // fire-and-forget, doesn't block the main view; already a no-op for non-MLB sports
     // Fire-and-forget, same reasoning as loadAlmanac above -- several ESPN calls chained together,
-    // shouldn't hold up the rest of the detail view. NFL only (see fetchNflQbWatch's comment).
+    // shouldn't hold up the rest of the detail view. NFL only (see fetchNflInjuryWatch's comment).
     if (sport === "nfl") {
-      fetchNflQbWatch(game.homeAbbr, game.awayAbbr).then(renderQbWatchNote).catch(() => renderQbWatchNote(null));
+      fetchNflInjuryWatch(game.homeAbbr, game.awayAbbr).then(renderInjuryWatchNote).catch(() => renderInjuryWatchNote(null));
     }
     // Doesn't depend on the Worker fetch below either -- purely local, curated data.
     renderAnalystRead(sport, game);
@@ -4216,6 +4274,7 @@
       renderSparkline(data.weather);
       renderLeanTop(sport, data.score);
       renderImpactRows(sport, data.weather, data.score);
+      if (sport === "nfl") renderWindAxisNote(data.score);
       renderUmpireNote(data.umpire);
       if (sport === "mlb") {
         renderRunEnvironmentNote(data.runEnvironmentScore, "Run Environment", 5);

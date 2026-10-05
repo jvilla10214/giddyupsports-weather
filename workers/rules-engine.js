@@ -213,9 +213,32 @@ function scoreMlbGame(weather, venue, roofStatus) {
 // directional effect this analysis can't see -- and the 20+mph sample is small (n=93 team-weeks,
 // 32 individual 40+yd kicks). Genuinely inconclusive, not "proven no effect" -- so the language
 // below says exactly that, rather than either the old fabricated number or an overcorrected claim.
+// Field Wind Alignment (added 2026-10-05, audit item "NFL #1" -- see fieldBearingDeg's own comment
+// in data/stadiums.js for how that real per-venue value was derived). A football field is symmetric
+// end-to-end (teams swap ends at halftime), so unlike MLB's cfBearingDeg this deliberately does NOT
+// claim a wind blowing down the field favors either team across a full game -- it swings by end/half,
+// net effect roughly symmetric. What IS real and doesn't depend on which end anyone's facing:
+// crosswind (blowing across the field's long axis) is the harder case for both a kicker and a passer
+// to compensate for than a straight wind, since there's no "lean into it" adjustment that works the
+// same way a pure head/tailwind does -- so that's the one real, direction-dependent thing worth
+// surfacing here. DIAG_THRESHOLD_DEG splits the 0-90deg angle-to-axis into three bands: aligned
+// (down-the-field), crosswind, and an in-between "angled" band that gets no specific note (neither
+// claim would be honest at that angle).
+const FIELD_WIND_ALIGNED_MAX_DEG = 30;
+const FIELD_WIND_CROSSWIND_MIN_DEG = 60;
+
+function fieldWindAlignment(weather, venue) {
+  if (weather.windSpeedMph < 10 || venue.fieldBearingDeg == null) return null;
+  const towardDeg = (weather.windFromDeg + 180) % 360;
+  const axisDeg = venue.fieldBearingDeg;
+  const diffToAxis = Math.min(Math.abs(angleDiff(towardDeg, axisDeg)), Math.abs(angleDiff(towardDeg, (axisDeg + 180) % 360)));
+  const alignment = diffToAxis <= FIELD_WIND_ALIGNED_MAX_DEG ? "down the field" : diffToAxis >= FIELD_WIND_CROSSWIND_MIN_DEG ? "crosswind" : "angled";
+  return { alignment, confidence: venue.fieldBearingConfidence || null };
+}
+
 /**
  * @param {object} weather - { tempF, humidityPct, windSpeedMph, windFromDeg, precipProbPct }
- * @param {object} venue - NFL_STADIUMS[x] entry: { roofType }
+ * @param {object} venue - NFL_STADIUMS[x] entry: { roofType, fieldBearingDeg?, fieldBearingConfidence? }
  */
 function scoreNflGame(weather, venue) {
   const roofClosed = venue.roofType !== "open";
@@ -268,12 +291,23 @@ function scoreNflGame(weather, venue) {
   if (weather.precipProbPct >= 50) notes.push("High precipitation chance — expect more ball-security caution and a run-heavier script.");
   if (weather.tempF <= 32) notes.push("Freezing temps historically correlate with lower scoring and a run-leaning game plan.");
 
+  const windAlignment = fieldWindAlignment(weather, venue);
+  if (windAlignment?.alignment === "crosswind") {
+    const caveat = windAlignment.confidence === "low" ? " (this venue's field orientation isn't confidently confirmed, so treat this read with extra caution)" : "";
+    notes.push(`Today's wind is blowing mostly ACROSS ${venue.venue}'s field rather than down it — a crosswind is real-world harder for both kickers and passers to compensate for than a straight wind${caveat}.`);
+  } else if (windAlignment?.alignment === "down the field") {
+    const caveat = windAlignment.confidence === "low" ? " (this venue's field orientation isn't confidently confirmed, so treat this read with extra caution)" : "";
+    notes.push(`Today's wind is blowing mostly down ${venue.venue}'s own field axis rather than across it — real, but it swings by end/half (a tailwind at one end is a headwind at the other), so it doesn't clearly favor either team over a full game${caveat}.`);
+  }
+
   return {
     sport: "NFL",
     roofClosed: false,
     roofStatusConfirmed: true, // no roof at all in play -- an open-air "open" venue has nothing to confirm
     windTier,
     windCompass: windCompassOrVariable(weather),
+    windFieldAlignment: windAlignment?.alignment || null,
+    windFieldAlignmentConfidence: windAlignment?.confidence || null,
     passingImpact,
     fgRangeImpact,
     notes,
@@ -579,6 +613,32 @@ const STARTER_REGRESS_IP = 50; // innings of league-average ERA blended into eac
 const OFFENSE_REGRESS_GAMES = 20; // games of league-average scoring blended into each offense
 const CONDITIONS_KEYS = ["carry", "parkFactor", "parkHr", "umpireLean"];
 
+// Lineup Quality Adjustment (MLB Total Runs audit item, added 2026-10-05): offense(t) above is a
+// season-long average and can't see who's actually starting today -- a regular getting a rest day,
+// a September call-up, an injury replacement. When a real confirmed lineup exists (see
+// fetchMlbLineup in weather-worker.js), this nudges that team's offense term by how the 9 real
+// starters' own season OPS compares to the league's, weighted by each batting-order spot's real
+// expected PA share (same PA_BY_BATTING_ORDER weights as Home Run Watch, for the same reason --
+// leadoff hitters bat more than #9). Each batter's own OPS is regressed toward league average by his
+// own season PA first (LINEUP_OPS_REGRESS_PA), so a part-timer's small, noisy sample doesn't swing
+// the lineup average -- same shrinkage discipline as BATTER_HR_REGRESS_PA. SENSITIVITY further
+// dampens the result since 9 players' OPS is still a thinner signal than a full team-season of
+// runs/game; no hard clamp on top of that, consistent with how every other adjustment here relies on
+// regression-to-mean rather than a clamp. Falls back to multiplier 1 (no adjustment) when no
+// confirmed lineup exists yet -- same "not posted" honesty as every other lineup-dependent field.
+const LINEUP_OPS_REGRESS_PA = 300;
+const LINEUP_QUALITY_SENSITIVITY = 0.5;
+
+function computeLineupQualityMultiplier(battersWithOps, leagueOps) {
+  if (!battersWithOps?.length || !(leagueOps > 0)) return 1;
+  const weights = battersWithOps.map((_, i) => PA_BY_BATTING_ORDER[i] ?? PA_BY_BATTING_ORDER[PA_BY_BATTING_ORDER.length - 1]);
+  const weightTotal = weights.reduce((a, b) => a + b, 0);
+  if (!weightTotal) return 1;
+  const lineupOps =
+    battersWithOps.reduce((sum, b, i) => sum + regressToward(b.ops, b.pa || 0, LINEUP_OPS_REGRESS_PA, leagueOps) * weights[i], 0) / weightTotal;
+  return 1 + (lineupOps / leagueOps - 1) * LINEUP_QUALITY_SENSITIVITY;
+}
+
 function regressToward(value, sample, priorSample, mean) {
   if (value == null || !Number.isFinite(value)) return mean;
   const w = sample > 0 ? sample / (sample + priorSample) : 0;
@@ -589,7 +649,8 @@ function regressToward(value, sample, priorSample, mean) {
  * @param {object} inputs
  *   leagueRunsPerGame: number - league runs per team per game this season
  *   leagueEra: number - league ERA this season
- *   home/away: { runsPerGame, games, staffEra, starter: {era, inningsPitched}|null }
+ *   home/away: { runsPerGame, games, staffEra, starter: {era, inningsPitched}|null, lineupMultiplier?: number }
+ *     lineupMultiplier: computeLineupQualityMultiplier's result, or omitted/1 when no confirmed lineup yet
  *   runEnvironmentScore: computeRunEnvironmentScore's result (or null) -- only its conditions slice is used
  * @returns {{total, homeRuns, awayRuns, conditionsRuns, factors}|null} null when team data is missing --
  *   without it the projection collapses to league average, which is exactly the bug this replaced
@@ -601,7 +662,7 @@ function computeTotalRunsProjection(inputs) {
     if (!(t.runsPerGame > 0) || !(t.staffEra > 0) || !(t.games > 0)) return null;
   }
 
-  const offense = (t) => regressToward(t.runsPerGame, t.games, OFFENSE_REGRESS_GAMES, lgRpg) / lgRpg;
+  const offense = (t) => (regressToward(t.runsPerGame, t.games, OFFENSE_REGRESS_GAMES, lgRpg) / lgRpg) * (t.lineupMultiplier ?? 1);
   const pitching = (t) => {
     const starterEra = t.starter ? regressToward(t.starter.era, t.starter.inningsPitched || 0, STARTER_REGRESS_IP, lgEra) : t.staffEra;
     return (STARTER_SHARE * starterEra + (1 - STARTER_SHARE) * t.staffEra) / lgEra;
@@ -878,6 +939,7 @@ export {
   MIN_PITCHER_BATTED_BALLS,
   computeTotalRunsProjection,
   computeTotalRunsCall,
+  computeLineupQualityMultiplier,
   computeConditionsAdjustedEra,
   computeGameEnvironmentScore,
   MIN_TEAM_GAMES_FOR_TENDENCY,

@@ -52,7 +52,7 @@
  */
 
 import { MLB_STADIUMS, NFL_STADIUMS, MLB_TEAM_ID_TO_KEY, MLB_KEY_TO_TEAM_ID } from "../data/stadiums.js";
-import { scoreMlbGame, scoreNflGame, windCompassOrVariable, computeRunEnvironmentScore, computeHrWatchList, MIN_PITCHER_IP, MIN_PITCHER_BATTED_BALLS, computeTotalRunsProjection, computeTotalRunsCall, computeConditionsAdjustedEra, computeGameEnvironmentScore, MIN_TEAM_GAMES_FOR_TENDENCY, NCAAF_TEAM_SCALE, NCAAF_SP_SCALE, NCAAF_IN_SEASON_SCALE, NCAAF_BLEND_WEIGHT_SP, ncaafGameEnvironmentTier } from "./rules-engine.js";
+import { scoreMlbGame, scoreNflGame, windCompassOrVariable, computeRunEnvironmentScore, computeHrWatchList, MIN_PITCHER_IP, MIN_PITCHER_BATTED_BALLS, computeTotalRunsProjection, computeTotalRunsCall, computeLineupQualityMultiplier, computeConditionsAdjustedEra, computeGameEnvironmentScore, MIN_TEAM_GAMES_FOR_TENDENCY, NCAAF_TEAM_SCALE, NCAAF_SP_SCALE, NCAAF_IN_SEASON_SCALE, NCAAF_BLEND_WEIGHT_SP, ncaafGameEnvironmentTier } from "./rules-engine.js";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -557,7 +557,8 @@ async function fetchLeagueHrRate(env) {
   // projection, so old v1 entries (missing those fields) must not be served for the rest of the day.
   // v3: adds the overall leagueHrRate (Home Run Watch) -- bumped so a stale v2 entry doesn't mask
   // it for the rest of the day.
-  return cached(env, `league-hr-rate:v3:${year}`, 24 * 60 * 60, async () => {
+  // v4: adds leagueOps (Lineup Quality Adjustment) -- same reasoning.
+  return cached(env, `league-hr-rate:v4:${year}`, 24 * 60 * 60, async () => {
     const headers = { "User-Agent": "GiddyUpSports-Weather/1.0" };
     const [pitchingRes, vsLeftRes, vsRightRes, hittingRes] = await Promise.all([
       fetch(`https://statsapi.mlb.com/api/v1/teams/stats?stats=season&group=pitching&season=${year}&sportIds=1`, { headers }),
@@ -591,6 +592,15 @@ async function fetchLeagueHrRate(env) {
     let leagueGames = 0;
     let leagueHrSum = 0;
     let leaguePaSum = 0;
+    // Real league-wide OPS (Lineup Quality Adjustment, see computeLineupQualityMultiplier in
+    // rules-engine.js): summed from the same per-team hitting splits already fetched above, not a
+    // per-team average-of-averages -- H/AB/BB/HBP/SF/TB are additive across teams, OPS itself isn't.
+    let leagueHits = 0;
+    let leagueAtBats = 0;
+    let leagueWalks = 0;
+    let leagueHbp = 0;
+    let leagueSacFlies = 0;
+    let leagueTotalBases = 0;
     const offenseByTeamId = {};
     for (const s of hitting.stats?.[0]?.splits || []) {
       const runs = s.stat?.runs || 0;
@@ -599,10 +609,20 @@ async function fetchLeagueHrRate(env) {
       leagueGames += games;
       leagueHrSum += s.stat?.homeRuns || 0;
       leaguePaSum += s.stat?.plateAppearances || 0;
+      leagueHits += s.stat?.hits || 0;
+      leagueAtBats += s.stat?.atBats || 0;
+      leagueWalks += s.stat?.baseOnBalls || 0;
+      leagueHbp += s.stat?.hitByPitch || 0;
+      leagueSacFlies += s.stat?.sacFlies || 0;
+      leagueTotalBases += s.stat?.totalBases || 0;
       if (s.team?.id && games) offenseByTeamId[s.team.id] = { runsPerGame: runs / games, games };
     }
     const leagueRunsPerGame = leagueGames ? leagueRuns / leagueGames : null;
     const leagueHrRate = leaguePaSum ? leagueHrSum / leaguePaSum : null;
+    const leagueObpDenom = leagueAtBats + leagueWalks + leagueHbp + leagueSacFlies;
+    const leagueObp = leagueObpDenom ? (leagueHits + leagueWalks + leagueHbp) / leagueObpDenom : null;
+    const leagueSlg = leagueAtBats ? leagueTotalBases / leagueAtBats : null;
+    const leagueOps = leagueObp != null && leagueSlg != null ? leagueObp + leagueSlg : null;
 
     function splitsByTeam(splitData) {
       const byTeamId = {};
@@ -632,6 +652,7 @@ async function fetchLeagueHrRate(env) {
       leagueEra,
       leagueRunsPerGame,
       leagueHrRate,
+      leagueOps,
       staffByTeamId,
       offenseByTeamId,
       hittingLeagueByHand: { L: vl.leagueHrRate, R: vr.leagueHrRate },
@@ -666,15 +687,18 @@ async function fetchMlbLineup(env, gamePk, dateIso) {
 // One real season HR/PA per confirmed lineup batter -- same official-API pattern as
 // fetchPitcherHrTendency below, just the hitting side. Cached a full day, same reasoning (a season
 // rate barely moves start to start).
+// v2: adds ops (Lineup Quality Adjustment, see computeLineupQualityMultiplier in rules-engine.js) --
+// same response already carries it, no extra call; cache key bumped so a stale v1 entry (missing
+// ops) doesn't mask it for the rest of the day.
 async function fetchBatterSeasonHr(env, playerId) {
   const year = new Date().getUTCFullYear();
-  return cached(env, `batter-hr:${playerId}:${year}`, 24 * 60 * 60, async () => {
+  return cached(env, `batter-hr:v2:${playerId}:${year}`, 24 * 60 * 60, async () => {
     const url = `https://statsapi.mlb.com/api/v1/people/${playerId}?hydrate=stats(group=[hitting],type=[season],season=${year})`;
     const res = await fetch(url, { headers: { "User-Agent": "GiddyUpSports-Weather/1.0" } });
     if (!res.ok) throw new Error(`MLB Stats API person ${res.status}`);
     const data = await res.json();
     const stat = data.people?.[0]?.stats?.find((s) => s.group?.displayName === "hitting" && s.type?.displayName === "season")?.splits?.[0]?.stat;
-    return { hr: stat?.homeRuns || 0, pa: stat?.plateAppearances || 0 };
+    return { hr: stat?.homeRuns || 0, pa: stat?.plateAppearances || 0, ops: stat?.ops != null ? Number(stat.ops) : null };
   });
 }
 
@@ -2094,17 +2118,47 @@ async function handleGame(env, sport, params) {
   if (sport === "mlb" && projectionTeams) {
     try {
       const { leagueRates, game, homePitcher, awayPitcher } = projectionTeams;
-      const team = (teamId, pitcher) => ({
+
+      // Lineup Quality Adjustment (see computeLineupQualityMultiplier in rules-engine.js): a second,
+      // independent fetch of today's confirmed lineup -- same fault-isolation reasoning as the Home
+      // Run Watch block above (a lineup-fetch hiccup here shouldn't blank out the Total Runs Call).
+      // Multiplier stays 1 (no adjustment) when no lineup is posted yet, same honesty pattern as
+      // every other lineup-dependent field.
+      let lineupMultipliers = { home: 1, away: 1 };
+      try {
+        const lineup = await fetchMlbLineup(env, gameId, mlbScheduleDate);
+        const sideOps = async (batters) => {
+          if (!batters?.length) return null;
+          const withOps = await Promise.all(
+            batters.map(async (b) => {
+              try {
+                const stats = await fetchBatterSeasonHr(env, b.id);
+                return { ops: stats.ops, pa: stats.pa };
+              } catch {
+                return { ops: null, pa: 0 };
+              }
+            })
+          );
+          return computeLineupQualityMultiplier(withOps, leagueRates.leagueOps);
+        };
+        const [awayMult, homeMult] = await Promise.all([sideOps(lineup.away), sideOps(lineup.home)]);
+        lineupMultipliers = { home: homeMult ?? 1, away: awayMult ?? 1 };
+      } catch (err) {
+        lineupMultipliers = { home: 1, away: 1 };
+      }
+
+      const team = (teamId, pitcher, lineupMultiplier) => ({
         runsPerGame: leagueRates.offenseByTeamId?.[teamId]?.runsPerGame,
         games: leagueRates.offenseByTeamId?.[teamId]?.games,
         staffEra: leagueRates.staffByTeamId?.[teamId]?.staffEra,
         starter: pitcher?.era != null ? { era: pitcher.era, inningsPitched: pitcher.inningsPitched } : null,
+        lineupMultiplier,
       });
       const projection = computeTotalRunsProjection({
         leagueRunsPerGame: leagueRates.leagueRunsPerGame,
         leagueEra: leagueRates.leagueEra,
-        home: team(game.homeTeamId, homePitcher),
-        away: team(game.awayTeamId, awayPitcher),
+        home: team(game.homeTeamId, homePitcher, lineupMultipliers.home),
+        away: team(game.awayTeamId, awayPitcher, lineupMultipliers.away),
         runEnvironmentScore,
       });
       const lines = projection ? await fetchTotalLines(env) : null;
