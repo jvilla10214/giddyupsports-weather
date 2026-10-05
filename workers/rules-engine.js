@@ -458,6 +458,30 @@ function computeRunEnvironmentScore(inputs) {
   return { score, tier: runEnvironmentTier(score), inputsUsed: contributions.map((c) => c.key), contributions: rankedContributions };
 }
 
+// ---- Home Run Watch (real user request: "people bet that") ----
+//
+// Per-PLAYER, not per-game -- real anytime-HR props are a player market, not a team one. Each
+// confirmed lineup batter's own real season HR rate (HR/PA), regressed toward the league average
+// for a small sample the same way team offense is regressed in computeTotalRunsProjection, scaled
+// by TODAY'S real Run Environment Score for this exact park/weather/pitching matchup -- reuses that
+// already-validated composite directly rather than inventing a second, parallel HR-environment
+// model from scratch. No fabricated "probability" or "odds" -- just each batter's own real rate,
+// shown alongside the real factors that moved it, same honesty convention as every other call here.
+const BATTER_HR_REGRESS_PA = 150; // PA of league-average HR rate blended into each batter's own small sample
+const HR_ENV_SENSITIVITY = 0.35; // how much today's Run Environment Score scales each batter's real rate
+
+function computeHrWatchList(battersWithStats, leagueHrRate, runEnvironmentScore) {
+  if (!battersWithStats?.length || leagueHrRate == null) return null;
+  const envMultiplier = runEnvironmentScore ? 1 + runEnvironmentScore.score * HR_ENV_SENSITIVITY : 1;
+  return battersWithStats
+    .map((b) => {
+      const rawRate = b.pa ? b.hr / b.pa : null;
+      const regressedRate = regressToward(rawRate, b.pa || 0, BATTER_HR_REGRESS_PA, leagueHrRate);
+      return { name: b.name, hr: b.hr, pa: b.pa, adjustedRate: regressedRate * envMultiplier };
+    })
+    .sort((a, b) => b.adjustedRate - a.adjustedRate);
+}
+
 // ---- Total Runs Call (Run Environment Score vs. the real market O/U line) ----
 //
 // User requested 2026-09-05: pull a real Vegas O/U line (RotoGrinders) per game and have something
@@ -837,6 +861,7 @@ export {
   angleDiff,
   windCompassOrVariable,
   computeRunEnvironmentScore,
+  computeHrWatchList,
   MIN_PITCHER_IP,
   MIN_PITCHER_BATTED_BALLS,
   computeTotalRunsProjection,

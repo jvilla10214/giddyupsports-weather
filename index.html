@@ -1449,6 +1449,12 @@
   details.gl-more summary::-webkit-details-marker { display: none; }
   details.gl-more summary::before { content: "▸ "; }
   details.gl-more[open] summary::before { content: "▾ "; }
+  /* Home Run Watch (real user request: "people bet that") -- reuses .gl-row's chrome (same
+     rank/name/stat layout as the golf leaderboard) across two side-by-side columns, one per team. */
+  .hr-watch-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .gl-side-label { font-family: var(--font-mono); font-size: 0.64rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-faint); margin-bottom: 4px; }
+  .hr-watch-empty { font-size: 0.8rem; color: var(--text-faint); font-style: italic; }
+  .hr-watch-caption { font-size: 0.72rem; color: var(--text-faint); margin-top: 10px; line-height: 1.4; }
 
   footer {
     display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
@@ -1680,6 +1686,10 @@
             <div class="almanac-label">Leaderboard</div>
             <div id="golfLeaderboardBody"></div>
           </div>
+          <div class="almanac-card" id="hrWatchCard" style="display:none;">
+            <div class="almanac-label">Home Run Watch</div>
+            <div id="hrWatchBody"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -1777,6 +1787,8 @@
   const almanacCard = document.getElementById("almanacCard");
   const golfLeaderboardCard = document.getElementById("golfLeaderboardCard");
   const golfLeaderboardBody = document.getElementById("golfLeaderboardBody");
+  const hrWatchCard = document.getElementById("hrWatchCard");
+  const hrWatchBody = document.getElementById("hrWatchBody");
   const almanacBody = document.getElementById("almanacBody");
   const venueMeta = document.getElementById("venueMeta");
   const windRoseSpeed = document.getElementById("windRoseSpeed");
@@ -3860,6 +3872,7 @@
     pitcherNoteEl.style.display = "none";
     almanacCard.style.display = "none";
     golfLeaderboardCard.style.display = "none";
+    hrWatchCard.style.display = "none";
     gaugeCluster.innerHTML = "";
     statPairs.innerHTML = "";
     sparklineCard.style.display = "none";
@@ -3940,6 +3953,35 @@
     golfLeaderboardCard.style.display = "block";
   }
 
+  // Home Run Watch (real user request: "people bet that") -- each confirmed lineup batter's own
+  // real season HR count/PA, already ranked by the Worker (see computeHrWatchList in
+  // rules-engine.js). Deliberately shows the real counting stats, not a fabricated "probability" --
+  // same honesty convention as the rest of this app. Hidden entirely (not an empty/error state)
+  // when MLB hasn't posted lineups yet, routine hours before a game.
+  function hrWatchSideHtml(label, list) {
+    if (!list?.length) return `<div class="gl-side-label">${label}</div><div class="hr-watch-empty">Lineup not yet posted.</div>`;
+    const rowHtml = (b, i) =>
+      `<div class="gl-row">
+        <span class="gl-rank">${i + 1}</span>
+        <span class="gl-name">${b.name}</span>
+        <span class="gl-score">${b.hr} HR</span>
+      </div>`;
+    return `<div class="gl-side-label">${label}</div>${list.slice(0, 5).map(rowHtml).join("")}`;
+  }
+  function renderHrWatch(hrWatch, awayAbbr, homeAbbr) {
+    if (!hrWatch || (!hrWatch.away?.length && !hrWatch.home?.length)) {
+      hrWatchCard.style.display = "none";
+      return;
+    }
+    hrWatchBody.innerHTML = `
+      <div class="hr-watch-sides">
+        <div>${hrWatchSideHtml(awayAbbr || "Away", hrWatch.away)}</div>
+        <div>${hrWatchSideHtml(homeAbbr || "Home", hrWatch.home)}</div>
+      </div>
+      <div class="hr-watch-caption">Real season HR count per batter in today's confirmed lineup, ranked by rate adjusted for today's real park/weather/pitching environment. Not a probability or a guarantee.</div>`;
+    hrWatchCard.style.display = "block";
+  }
+
   // Client-side retry for the real course footprint (user request: "an aerial shot of the ENTIRE
   // course"). The Worker already tries this same Overpass lookup server-side first -- see
   // fetchGolfFootprintByProximity's own comment in weather-worker.js -- but confirmed live that
@@ -4001,6 +4043,7 @@
     pitcherNoteEl.style.display = "none";
     almanacCard.style.display = "none";
     golfLeaderboardCard.style.display = "none";
+    hrWatchCard.style.display = "none";
     gaugeCluster.innerHTML = "";
     statPairs.innerHTML = "";
     sparklineCard.style.display = "none";
@@ -4104,6 +4147,7 @@
     pitcherNoteEl.style.display = "none";
     almanacCard.style.display = "none";
     golfLeaderboardCard.style.display = "none";
+    hrWatchCard.style.display = "none";
     gaugeCluster.innerHTML = "";
     statPairs.innerHTML = "";
     sparklineCard.style.display = "none";
@@ -4180,6 +4224,7 @@
       renderTotalCallNote(data.totalRunsCall);
       renderSuggestedBet(sport, data.totalRunsCall, data.gameEnvironmentScore, data.runEnvironmentScore);
       if (sport === "mlb") renderPitcherNote(game, data.pitcherAdjustedEra);
+      if (sport === "mlb") renderHrWatch(data.hrWatch, game.awayAbbr, game.homeAbbr);
       insightText.textContent = data.insight || "No insight generated.";
       if (window.setWindFlow) window.setWindFlow(data.weather.windFromDeg || 0, data.weather.windSpeedMph || 0);
       setStatus(`Updated ${new Date().toLocaleTimeString()}`);

@@ -52,7 +52,7 @@
  */
 
 import { MLB_STADIUMS, NFL_STADIUMS, MLB_TEAM_ID_TO_KEY, MLB_KEY_TO_TEAM_ID } from "../data/stadiums.js";
-import { scoreMlbGame, scoreNflGame, windCompassOrVariable, computeRunEnvironmentScore, MIN_PITCHER_IP, MIN_PITCHER_BATTED_BALLS, computeTotalRunsProjection, computeTotalRunsCall, computeConditionsAdjustedEra, computeGameEnvironmentScore, MIN_TEAM_GAMES_FOR_TENDENCY, NCAAF_TEAM_SCALE, NCAAF_SP_SCALE, NCAAF_IN_SEASON_SCALE, NCAAF_BLEND_WEIGHT_SP, ncaafGameEnvironmentTier } from "./rules-engine.js";
+import { scoreMlbGame, scoreNflGame, windCompassOrVariable, computeRunEnvironmentScore, computeHrWatchList, MIN_PITCHER_IP, MIN_PITCHER_BATTED_BALLS, computeTotalRunsProjection, computeTotalRunsCall, computeConditionsAdjustedEra, computeGameEnvironmentScore, MIN_TEAM_GAMES_FOR_TENDENCY, NCAAF_TEAM_SCALE, NCAAF_SP_SCALE, NCAAF_IN_SEASON_SCALE, NCAAF_BLEND_WEIGHT_SP, ncaafGameEnvironmentTier } from "./rules-engine.js";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -555,7 +555,9 @@ async function fetchLeagueHrRate(env) {
   const year = new Date().getUTCFullYear();
   // Cache key v2 (2026-09-25): the cached shape gained team offense + staff ERA for the Total Runs
   // projection, so old v1 entries (missing those fields) must not be served for the rest of the day.
-  return cached(env, `league-hr-rate:v2:${year}`, 24 * 60 * 60, async () => {
+  // v3: adds the overall leagueHrRate (Home Run Watch) -- bumped so a stale v2 entry doesn't mask
+  // it for the rest of the day.
+  return cached(env, `league-hr-rate:v3:${year}`, 24 * 60 * 60, async () => {
     const headers = { "User-Agent": "GiddyUpSports-Weather/1.0" };
     const [pitchingRes, vsLeftRes, vsRightRes, hittingRes] = await Promise.all([
       fetch(`https://statsapi.mlb.com/api/v1/teams/stats?stats=season&group=pitching&season=${year}&sportIds=1`, { headers }),
@@ -583,17 +585,24 @@ async function fetchLeagueHrRate(env) {
     const leagueEra = leagueIp ? (leagueEr / leagueIp) * 9 : null;
 
     // Team offense: season runs per game, plus the league per-team average it's compared against.
+    // Also the real overall league HR/PA (Home Run Watch, see computeHrWatchList in rules-engine.js)
+    // -- same response already fetched for runs/games, no extra call needed.
     let leagueRuns = 0;
     let leagueGames = 0;
+    let leagueHrSum = 0;
+    let leaguePaSum = 0;
     const offenseByTeamId = {};
     for (const s of hitting.stats?.[0]?.splits || []) {
       const runs = s.stat?.runs || 0;
       const games = s.stat?.gamesPlayed || 0;
       leagueRuns += runs;
       leagueGames += games;
+      leagueHrSum += s.stat?.homeRuns || 0;
+      leaguePaSum += s.stat?.plateAppearances || 0;
       if (s.team?.id && games) offenseByTeamId[s.team.id] = { runsPerGame: runs / games, games };
     }
     const leagueRunsPerGame = leagueGames ? leagueRuns / leagueGames : null;
+    const leagueHrRate = leaguePaSum ? leagueHrSum / leaguePaSum : null;
 
     function splitsByTeam(splitData) {
       const byTeamId = {};
@@ -622,6 +631,7 @@ async function fetchLeagueHrRate(env) {
       pitcherHr9League,
       leagueEra,
       leagueRunsPerGame,
+      leagueHrRate,
       staffByTeamId,
       offenseByTeamId,
       hittingLeagueByHand: { L: vl.leagueHrRate, R: vr.leagueHrRate },
@@ -633,6 +643,41 @@ async function fetchLeagueHrRate(env) {
 // A starter's own season HR/9 + throwing hand, one clean official-API call (no Statcast scraping
 // needed for this input -- see comment above). Cached per pitcher, same TTL/reasoning as park
 // factors: a season rate barely moves start to start.
+// Home Run Watch (real user request): the real confirmed starting lineup, when MLB has posted one.
+// Confirmed live: MLB's own schedule hydrate=lineups returns a real, name-ordered batting order a
+// few hours before first pitch (checked against a real same-day game), and an empty array for any
+// game more than about a day out (checked against a real game two days ahead) -- so an empty
+// result here is routine, not an error, same "not yet announced" honesty already used for starting
+// pitchers/umpires elsewhere in this file. Short TTL since a real lineup can still be posted or
+// corrected closer to game time.
+async function fetchMlbLineup(env, gamePk, dateIso) {
+  return cached(env, `mlb-lineup:${gamePk}`, 10 * 60, async () => {
+    const url = `https://statsapi.mlb.com/api/v1/schedule?gamePk=${gamePk}&date=${dateIso}&hydrate=lineups`;
+    const res = await fetch(url, { headers: { "User-Agent": "GiddyUpSports-Weather/1.0" } });
+    if (!res.ok) throw new Error(`MLB Stats API schedule ${res.status}`);
+    const data = await res.json();
+    const game = data.dates?.[0]?.games?.find((g) => String(g.gamePk) === String(gamePk));
+    const lineups = game?.lineups;
+    const toBatters = (players) => (players || []).map((p) => ({ id: p.id, name: p.fullName }));
+    return { away: toBatters(lineups?.awayPlayers), home: toBatters(lineups?.homePlayers) };
+  });
+}
+
+// One real season HR/PA per confirmed lineup batter -- same official-API pattern as
+// fetchPitcherHrTendency below, just the hitting side. Cached a full day, same reasoning (a season
+// rate barely moves start to start).
+async function fetchBatterSeasonHr(env, playerId) {
+  const year = new Date().getUTCFullYear();
+  return cached(env, `batter-hr:${playerId}:${year}`, 24 * 60 * 60, async () => {
+    const url = `https://statsapi.mlb.com/api/v1/people/${playerId}?hydrate=stats(group=[hitting],type=[season],season=${year})`;
+    const res = await fetch(url, { headers: { "User-Agent": "GiddyUpSports-Weather/1.0" } });
+    if (!res.ok) throw new Error(`MLB Stats API person ${res.status}`);
+    const data = await res.json();
+    const stat = data.people?.[0]?.stats?.find((s) => s.group?.displayName === "hitting" && s.type?.displayName === "season")?.splits?.[0]?.stat;
+    return { hr: stat?.homeRuns || 0, pa: stat?.plateAppearances || 0 };
+  });
+}
+
 async function fetchPitcherHrTendency(env, pitcherId) {
   const year = new Date().getUTCFullYear();
   return cached(env, `pitcher-hr9:${pitcherId}:${year}`, 24 * 60 * 60, async () => {
@@ -1908,6 +1953,7 @@ async function handleGame(env, sport, params) {
   let runEnvironmentScore = null;
   let pitcherAdjustedEra = null; // { home, away } -- see computeConditionsAdjustedEra in rules-engine.js
   let projectionTeams = null; // { leagueRates, game, homePitcher, awayPitcher } -- Total Runs projection inputs, see below
+  let hrWatch = null; // { away, home } -- Home Run Watch, see computeHrWatchList in rules-engine.js, below
   if (sport === "mlb" && gameId) {
     try {
       const schedule = await fetchMlbSchedule(env, mlbScheduleDate);
@@ -2008,6 +2054,36 @@ async function handleGame(env, sport, params) {
     }
   }
 
+  // Home Run Watch (real user request: "people bet that") -- wrapped separately from the block
+  // above so a lineup-fetch hiccup (or a real "not posted yet" empty result, routine hours before
+  // a game -- see fetchMlbLineup's own comment) never touches runEnvironmentScore/pitcherAdjustedEra,
+  // which don't depend on it. Re-fetches league rates (cheap -- already cached by the block above
+  // for the common case) rather than threading that const out of its own try-block scope.
+  if (sport === "mlb" && gameId) {
+    try {
+      const lineup = await fetchMlbLineup(env, gameId, mlbScheduleDate);
+      const leagueHrRate = (await fetchLeagueHrRate(env)).leagueHrRate;
+      const buildSide = async (batters) => {
+        if (!batters?.length) return null;
+        const withStats = await Promise.all(
+          batters.map(async (b) => {
+            try {
+              const stats = await fetchBatterSeasonHr(env, b.id);
+              return { name: b.name, hr: stats.hr, pa: stats.pa };
+            } catch {
+              return { name: b.name, hr: 0, pa: 0 };
+            }
+          })
+        );
+        return computeHrWatchList(withStats, leagueHrRate, runEnvironmentScore);
+      };
+      const [awayWatch, homeWatch] = await Promise.all([buildSide(lineup.away), buildSide(lineup.home)]);
+      hrWatch = awayWatch || homeWatch ? { away: awayWatch, home: homeWatch } : null;
+    } catch (err) {
+      hrWatch = null;
+    }
+  }
+
   // Total Runs Call (see computeTotalRunsProjection/computeTotalRunsCall in rules-engine.js): our
   // own projected total from both offenses, both starters, both staffs and today's conditions,
   // compared against the live RotoGrinders line exactly as posted (never adjusted). Wrapped
@@ -2080,7 +2156,7 @@ async function handleGame(env, sport, params) {
 
   // Still the one thing preview mode skips -- see this function's own top-of-function comment.
   const insight = preview ? null : await narrate(env, sport, score, weather, venue, parkFactor, umpire, runEnvironmentScore, totalRunsCall, gameEnvironmentScore, pitcherAdjustedEra);
-  return json({ sport, venue, weather, score, insight: insight ? insight.text : null, parkFactor, umpire, runEnvironmentScore, totalRunsCall, gameEnvironmentScore, pitcherAdjustedEra });
+  return json({ sport, venue, weather, score, insight: insight ? insight.text : null, parkFactor, umpire, runEnvironmentScore, totalRunsCall, gameEnvironmentScore, pitcherAdjustedEra, hrWatch });
 }
 
 async function handleAlmanac(env, sport, params) {
