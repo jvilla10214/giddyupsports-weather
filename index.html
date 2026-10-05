@@ -2262,6 +2262,13 @@
       country: course?.address?.country || null,
       statusDetail: data.status?.type?.shortDetail || data.status?.type?.description || null,
       gameState: data.status?.type?.state || null, // "pre" | "in" | "post"
+      // Real user request: only the main PGA Tour event each week, not a concurrent smaller
+      // opposite-field event (e.g. Puerto Rico Open the same week as the Arnold Palmer
+      // Invitational). ESPN's own event detail already flags this directly -- confirmed live,
+      // every real signature/full-field event comes back `primary: true` and every real
+      // concurrent opposite-field event comes back `primary: false` -- no purse/field-size
+      // heuristic needed, this is an explicit real signal straight from the source.
+      primary: data.primary !== false,
     };
   }
 
@@ -2313,6 +2320,7 @@
       entries.map(async (e) => {
         try {
           const detail = await fetchPgaEventDetail(e.id);
+          if (!detail.primary) return null; // a concurrent smaller event the same week -- see fetchPgaEventDetail's own comment
           return {
             gameId: e.id,
             tournament: e.label,
