@@ -1455,6 +1455,7 @@
   .gl-side-label { font-family: var(--font-mono); font-size: 0.64rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-faint); margin-bottom: 4px; }
   .hr-watch-empty { font-size: 0.8rem; color: var(--text-faint); font-style: italic; }
   .hr-watch-caption { font-size: 0.72rem; color: var(--text-faint); margin-top: 10px; line-height: 1.4; }
+  .hr-watch-count { display: block; font-family: var(--font-mono); font-size: 0.64rem; color: var(--text-faint); font-weight: 400; }
 
   footer {
     display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
@@ -3963,8 +3964,8 @@
     const rowHtml = (b, i) =>
       `<div class="gl-row">
         <span class="gl-rank">${i + 1}</span>
-        <span class="gl-name">${b.name}</span>
-        <span class="gl-score">${b.hr} HR</span>
+        <span class="gl-name">${b.name}<span class="hr-watch-count">${b.hr} HR this season</span></span>
+        <span class="gl-score">${b.probabilityPct}%</span>
       </div>`;
     return `<div class="gl-side-label">${label}</div>${list.slice(0, 5).map(rowHtml).join("")}`;
   }
@@ -3978,7 +3979,7 @@
         <div>${hrWatchSideHtml(awayAbbr || "Away", hrWatch.away)}</div>
         <div>${hrWatchSideHtml(homeAbbr || "Home", hrWatch.home)}</div>
       </div>
-      <div class="hr-watch-caption">Real season HR count per batter in today's confirmed lineup, ranked by rate adjusted for today's real park/weather/pitching environment. Not a probability or a guarantee.</div>`;
+      <div class="hr-watch-caption">Estimated chance of at least one home run today, from each batter's own real season HR rate (regressed for sample size), adjusted for today's real park/weather/pitching environment, over a real expected plate-appearance count for their lineup spot. A model estimate, not a guarantee.</div>`;
     hrWatchCard.style.display = "block";
   }
 

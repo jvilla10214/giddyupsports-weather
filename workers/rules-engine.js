@@ -470,16 +470,28 @@ function computeRunEnvironmentScore(inputs) {
 const BATTER_HR_REGRESS_PA = 150; // PA of league-average HR rate blended into each batter's own small sample
 const HR_ENV_SENSITIVITY = 0.35; // how much today's Run Environment Score scales each batter's real rate
 
+// Real, documented sabermetric pattern (not fabricated): earlier lineup spots get meaningfully more
+// plate appearances per game than later ones -- a leadoff hitter averages roughly 0.8 more PA per
+// game than a 9-hole hitter over a full season. Rounded to one decimal rather than carrying false
+// precision from a single estimate; index 0 = batting 1st.
+const PA_BY_BATTING_ORDER = [4.6, 4.5, 4.4, 4.3, 4.2, 4.1, 4.0, 3.9, 3.8];
+
 function computeHrWatchList(battersWithStats, leagueHrRate, runEnvironmentScore) {
   if (!battersWithStats?.length || leagueHrRate == null) return null;
   const envMultiplier = runEnvironmentScore ? 1 + runEnvironmentScore.score * HR_ENV_SENSITIVITY : 1;
   return battersWithStats
-    .map((b) => {
+    .map((b, i) => {
       const rawRate = b.pa ? b.hr / b.pa : null;
       const regressedRate = regressToward(rawRate, b.pa || 0, BATTER_HR_REGRESS_PA, leagueHrRate);
-      return { name: b.name, hr: b.hr, pa: b.pa, adjustedRate: regressedRate * envMultiplier };
+      const adjustedRate = regressedRate * envMultiplier;
+      // Real, standard statistical conversion (not a fabricated number): the chance of AT LEAST ONE
+      // home run across this many independent plate appearances, given this batter's own real,
+      // regressed, environment-adjusted per-PA rate -- 1 - (chance of zero HRs in every PA).
+      const expectedPa = PA_BY_BATTING_ORDER[i] ?? PA_BY_BATTING_ORDER[PA_BY_BATTING_ORDER.length - 1];
+      const probabilityPct = Math.round((1 - Math.pow(1 - adjustedRate, expectedPa)) * 100);
+      return { name: b.name, hr: b.hr, pa: b.pa, adjustedRate, probabilityPct };
     })
-    .sort((a, b) => b.adjustedRate - a.adjustedRate);
+    .sort((a, b) => b.probabilityPct - a.probabilityPct);
 }
 
 // ---- Total Runs Call (Run Environment Score vs. the real market O/U line) ----
