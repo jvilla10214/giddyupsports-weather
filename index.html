@@ -3934,6 +3934,40 @@
     golfLeaderboardCard.style.display = "block";
   }
 
+  // Client-side retry for the real course footprint (user request: "an aerial shot of the ENTIRE
+  // course"). The Worker already tries this same Overpass lookup server-side first -- see
+  // fetchGolfFootprintByProximity's own comment in weather-worker.js -- but confirmed live that
+  // Overpass's public instance rate-limits inconsistently (one real request succeeded, the very
+  // next failed with HTTP 521), not a hard per-IP block. This is a second, independent attempt
+  // from the browser's own IP at a different moment -- only run when the Worker's own attempt came
+  // back unconfirmed, so a confirmed server-side result never gets second-guessed.
+  const GOLF_FOOTPRINT_MIN_M = 300;
+  const GOLF_FOOTPRINT_MAX_M = 2200;
+  function golfHalfExtentFromBoundsClientSide(b, lat) {
+    const dLatM = ((b.maxlat - b.minlat) / 2) * 111320;
+    const dLonM = ((b.maxlon - b.minlon) / 2) * 111320 * Math.cos((lat * Math.PI) / 180);
+    const halfExtentM = Math.max(dLatM, dLonM) * 1.15;
+    if (halfExtentM < GOLF_FOOTPRINT_MIN_M || halfExtentM > GOLF_FOOTPRINT_MAX_M) return null;
+    return Math.round(halfExtentM);
+  }
+  async function fetchGolfFootprintClientSide(lat, lon) {
+    const query = `[out:json][timeout:10];(way["leisure"="golf_course"](around:3000,${lat},${lon});relation["leisure"="golf_course"](around:3000,${lat},${lon}););out body bb;`;
+    const res = await fetch("https://overpass-api.de/api/interpreter", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: `data=${encodeURIComponent(query)}`,
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    let best = null;
+    for (const el of data.elements || []) {
+      if (!el.bounds) continue;
+      const halfExtentM = golfHalfExtentFromBoundsClientSide(el.bounds, lat);
+      if (halfExtentM && (!best || halfExtentM > best)) best = halfExtentM;
+    }
+    return best;
+  }
+
   async function showGolfDetail(game) {
     emptyState.style.display = "none";
     gamesGrid.style.display = "none";
@@ -3982,10 +4016,21 @@
       document.getElementById("tennisCourt").style.display = "none";
       document.getElementById("map").style.display = "";
       // Real course footprint (user request: "an aerial shot of the ENTIRE course") when OSM has
-      // one and it passes a sanity check server-side -- see golfHalfExtentFromBbox's own comment
-      // in weather-worker.js for why not every course has one -- falls back to a generous fixed
-      // extent otherwise, same as before.
-      ensureMap(data.venue.lat, data.venue.lon, data.venue.halfExtentM || STADIUM_HALF_EXTENT_M.golf);
+      // one and it passes a sanity check -- see golfHalfExtentFromBbox's own comment in
+      // weather-worker.js for why not every course has one. A second, independent attempt from
+      // the browser's own IP when the Worker's own attempt came back unconfirmed -- see
+      // fetchGolfFootprintClientSide's own comment for why this isn't redundant.
+      let halfExtentM = data.venue.halfExtentM;
+      if (!data.venue.courseFootprintConfirmed) {
+        try {
+          const clientHalfExtentM = await fetchGolfFootprintClientSide(data.venue.lat, data.venue.lon);
+          if (clientHalfExtentM) halfExtentM = clientHalfExtentM;
+        } catch {
+          // keep the Worker's own (unconfirmed, fixed-default) extent -- a client-side hiccup here
+          // is never worse than what we already have
+        }
+      }
+      ensureMap(data.venue.lat, data.venue.lon, halfExtentM || STADIUM_HALF_EXTENT_M.golf);
       venueTag.textContent = data.venue.venue;
       const forecastTag = data.weather.isForecast ? " (forecast)" : "";
       const roundTime = new Date(game.startTimeUtc).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });

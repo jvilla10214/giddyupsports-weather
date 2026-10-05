@@ -1093,21 +1093,27 @@ async function handleTennisGame(env, params) {
 // enough for real venue-level (not just city-level) geocoding via Nominatim, same technique as
 // NCAAF's stadiums. International courses have no `state`, only a country name.
 // Real course footprint, not a guessed radius (added 2026-10-05, real user request: "an aerial
-// shot of the ENTIRE course"). OpenStreetMap maps real golf course boundaries as a polygon for
-// many (not all) courses -- confirmed live: Augusta National (49-point real polygon, ~1.76km x
-// 1.5km), TPC Sawgrass, and East Lake Golf Club all returned a real boundary; this week's actual
-// tournament venue (Black Desert Resort Golf Course) returned NOTHING, and Pebble Beach returned a
-// polygon so small (~44m across) it's clearly a mismapped building footprint, not the real course.
-// So this is used when present AND passes a sanity check (a real 18-hole course is reliably
-// several hundred meters to a few km across), falling back to a generous fixed half-extent
-// otherwise -- never trusting an unverified polygon blindly.
+// shot of the ENTIRE course"). Two independent real sources are tried, in order, before falling
+// back to a fixed radius:
+//   1. Nominatim's own polygon for the searched NAME (cheap, same request as the point geocode)
+//      -- works for well-known courses (confirmed live: Augusta National, TPC Sawgrass, East Lake)
+//      but fails whenever the real OSM feature's name doesn't closely match the search string, or
+//      isn't indexed by name at all.
+//   2. Overpass (a full OSM query engine, not just the name-search index) for any real
+//      leisure=golf_course way/relation within 3km of the point we already geocoded -- proximity-
+//      based, so it doesn't depend on exact name matching. Confirmed live: this found a real,
+//      1281-node "Black Desert Golf Course" polygon (~2.2km x 0.9km) for this week's actual
+//      tournament venue, which Nominatim's name search had returned nothing for at all (ESPN calls
+//      it "Black Desert RESORT Golf Course" -- the extra word was enough to miss the name index).
+// Both are sanity-checked the same way (a real 18-hole course is reliably several hundred meters to
+// a few km across) before being trusted -- confirmed live this also correctly rejects Pebble
+// Beach's Nominatim result, a polygon so small (~44m) it's clearly a mismapped building, not the
+// real course.
 const GOLF_MIN_SANE_HALF_EXTENT_M = 300;
 const GOLF_MAX_SANE_HALF_EXTENT_M = 2200;
 const GOLF_DEFAULT_HALF_EXTENT_M = 900;
 
-function golfHalfExtentFromBbox(bbox, lat) {
-  // Nominatim's boundingbox is [south, north, west, east] as strings.
-  const [south, north, west, east] = bbox.map(Number);
+function golfHalfExtentFromBbox(south, north, west, east, lat) {
   const dLatM = ((north - south) / 2) * 111320;
   const dLonM = ((east - west) / 2) * 111320 * Math.cos((lat * Math.PI) / 180);
   const halfExtentM = Math.max(dLatM, dLonM) * 1.15; // +15% margin so the course isn't flush against the frame edge
@@ -1115,12 +1121,42 @@ function golfHalfExtentFromBbox(bbox, lat) {
   return Math.round(halfExtentM);
 }
 
+// Proximity-based real course footprint, independent of name matching -- see this file's own
+// comment above fetchGolfVenueGeo for why this exists alongside the Nominatim name-search attempt.
+async function fetchGolfFootprintByProximity(lat, lon) {
+  const query = `[out:json][timeout:12];(way["leisure"="golf_course"](around:3000,${lat},${lon});relation["leisure"="golf_course"](around:3000,${lat},${lon}););out body bb;`;
+  const res = await fetch("https://overpass-api.de/api/interpreter", {
+    method: "POST",
+    headers: { "User-Agent": NCAAF_GEOCODE_USER_AGENT, "Content-Type": "application/x-www-form-urlencoded" },
+    body: `data=${encodeURIComponent(query)}`,
+  });
+  if (!res.ok) throw new Error(`Overpass ${res.status}`);
+  const data = await res.json();
+  // Real courses can be mapped as several adjacent ways (front/back nine, different holes) --
+  // picks whichever real element has the largest sane span, not just the first result.
+  let best = null;
+  for (const el of data.elements || []) {
+    const b = el.bounds;
+    if (!b) continue;
+    const halfExtentM = golfHalfExtentFromBbox(b.minlat, b.maxlat, b.minlon, b.maxlon, lat);
+    if (halfExtentM && (!best || halfExtentM > best)) best = halfExtentM;
+  }
+  return best;
+}
+
 async function fetchGolfVenueGeo(env, courseName, city, state, country) {
-  // v2: now also carries halfExtentM/courseFootprintConfirmed -- bumped so earlier-cached
-  // {lat,lon}-only entries (from before that real-footprint support existed) don't silently
-  // mask the new fields for a stale 365-day TTL.
-  const cacheKey = `golf-venue-geo:v2:${courseName}|${city}|${state}|${country}`;
+  // v3: adds the Overpass proximity fallback -- bumped again so a v2 cache entry that only ever
+  // got as far as the fixed default (because the name-search polygon attempt failed) doesn't sit
+  // on a stale miss for a year once this second, independent attempt can do better. NOTE: confirmed
+  // live that Overpass's public instance rate-limits inconsistently (a real request for "Port Royal
+  // Golf Course" succeeded; the very next one, for "Black Desert," came back HTTP 521) -- not a
+  // hard per-IP block, since both came from this same Worker, just a shared global limit on
+  // Overpass's end. The frontend's own showGolfDetail retries this same lookup client-side
+  // (different IP, different moment) whenever this attempt comes back unconfirmed, so a transient
+  // miss here isn't the only chance at a real footprint.
+  const cacheKey = `golf-venue-geo:v3:${courseName}|${city}|${state}|${country}`;
   return cached(env, cacheKey, 365 * 24 * 60 * 60, async () => {
+    let lat, lon, halfExtentM;
     try {
       const q = state ? `${courseName}, ${city}, ${state}` : `${courseName}, ${city}, ${country}`;
       const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&polygon_geojson=1&limit=1`;
@@ -1129,22 +1165,37 @@ async function fetchGolfVenueGeo(env, courseName, city, state, country) {
         const results = await res.json();
         const match = results?.[0];
         if (match) {
-          const lat = Number(match.lat);
-          const halfExtentM = match.boundingbox ? golfHalfExtentFromBbox(match.boundingbox, lat) : null;
-          return { lat, lon: Number(match.lon), halfExtentM: halfExtentM || GOLF_DEFAULT_HALF_EXTENT_M, courseFootprintConfirmed: halfExtentM != null };
+          lat = Number(match.lat);
+          lon = Number(match.lon);
+          if (match.boundingbox) {
+            const [south, north, west, east] = match.boundingbox.map(Number);
+            halfExtentM = golfHalfExtentFromBbox(south, north, west, east, lat);
+          }
         }
       }
     } catch {
-      // fall through to the city-only geocode below -- a Nominatim hiccup on the specific course
-      // name shouldn't break the whole request when a real (if less precise) fallback exists
+      // a Nominatim hiccup on the specific course name shouldn't break the whole request when a
+      // real (if less precise) fallback exists below
     }
-    const cityUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1`;
-    const cityRes = await fetch(cityUrl, { headers: { "User-Agent": NCAAF_GEOCODE_USER_AGENT } });
-    if (!cityRes.ok) throw new Error(`Open-Meteo geocoding ${cityRes.status}`);
-    const cityData = await cityRes.json();
-    const match = cityData.results?.[0];
-    if (!match) throw new Error(`No geocoding match for "${courseName}, ${city}"`);
-    return { lat: match.latitude, lon: match.longitude, halfExtentM: GOLF_DEFAULT_HALF_EXTENT_M, courseFootprintConfirmed: false };
+    if (lat == null) {
+      const cityUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1`;
+      const cityRes = await fetch(cityUrl, { headers: { "User-Agent": NCAAF_GEOCODE_USER_AGENT } });
+      if (!cityRes.ok) throw new Error(`Open-Meteo geocoding ${cityRes.status}`);
+      const cityData = await cityRes.json();
+      const match = cityData.results?.[0];
+      if (!match) throw new Error(`No geocoding match for "${courseName}, ${city}"`);
+      lat = match.latitude;
+      lon = match.longitude;
+    }
+    if (!halfExtentM) {
+      try {
+        halfExtentM = await fetchGolfFootprintByProximity(lat, lon);
+      } catch {
+        halfExtentM = null; // an Overpass hiccup degrades to the fixed default below -- the
+        // frontend gets its own independent attempt at this, see this function's own comment
+      }
+    }
+    return { lat, lon, halfExtentM: halfExtentM || GOLF_DEFAULT_HALF_EXTENT_M, courseFootprintConfirmed: halfExtentM != null };
   });
 }
 
