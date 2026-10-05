@@ -1092,16 +1092,47 @@ async function handleTennisGame(env, params) {
 // the Masters; "Yokohama Country Club", Yokohama, Japan for the Baycurrent Classic) -- precise
 // enough for real venue-level (not just city-level) geocoding via Nominatim, same technique as
 // NCAAF's stadiums. International courses have no `state`, only a country name.
+// Real course footprint, not a guessed radius (added 2026-10-05, real user request: "an aerial
+// shot of the ENTIRE course"). OpenStreetMap maps real golf course boundaries as a polygon for
+// many (not all) courses -- confirmed live: Augusta National (49-point real polygon, ~1.76km x
+// 1.5km), TPC Sawgrass, and East Lake Golf Club all returned a real boundary; this week's actual
+// tournament venue (Black Desert Resort Golf Course) returned NOTHING, and Pebble Beach returned a
+// polygon so small (~44m across) it's clearly a mismapped building footprint, not the real course.
+// So this is used when present AND passes a sanity check (a real 18-hole course is reliably
+// several hundred meters to a few km across), falling back to a generous fixed half-extent
+// otherwise -- never trusting an unverified polygon blindly.
+const GOLF_MIN_SANE_HALF_EXTENT_M = 300;
+const GOLF_MAX_SANE_HALF_EXTENT_M = 2200;
+const GOLF_DEFAULT_HALF_EXTENT_M = 900;
+
+function golfHalfExtentFromBbox(bbox, lat) {
+  // Nominatim's boundingbox is [south, north, west, east] as strings.
+  const [south, north, west, east] = bbox.map(Number);
+  const dLatM = ((north - south) / 2) * 111320;
+  const dLonM = ((east - west) / 2) * 111320 * Math.cos((lat * Math.PI) / 180);
+  const halfExtentM = Math.max(dLatM, dLonM) * 1.15; // +15% margin so the course isn't flush against the frame edge
+  if (halfExtentM < GOLF_MIN_SANE_HALF_EXTENT_M || halfExtentM > GOLF_MAX_SANE_HALF_EXTENT_M) return null;
+  return Math.round(halfExtentM);
+}
+
 async function fetchGolfVenueGeo(env, courseName, city, state, country) {
-  const cacheKey = `golf-venue-geo:${courseName}|${city}|${state}|${country}`;
+  // v2: now also carries halfExtentM/courseFootprintConfirmed -- bumped so earlier-cached
+  // {lat,lon}-only entries (from before that real-footprint support existed) don't silently
+  // mask the new fields for a stale 365-day TTL.
+  const cacheKey = `golf-venue-geo:v2:${courseName}|${city}|${state}|${country}`;
   return cached(env, cacheKey, 365 * 24 * 60 * 60, async () => {
     try {
       const q = state ? `${courseName}, ${city}, ${state}` : `${courseName}, ${city}, ${country}`;
-      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`;
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&polygon_geojson=1&limit=1`;
       const res = await fetch(url, { headers: { "User-Agent": NCAAF_GEOCODE_USER_AGENT } });
       if (res.ok) {
         const results = await res.json();
-        if (results?.[0]) return { lat: Number(results[0].lat), lon: Number(results[0].lon) };
+        const match = results?.[0];
+        if (match) {
+          const lat = Number(match.lat);
+          const halfExtentM = match.boundingbox ? golfHalfExtentFromBbox(match.boundingbox, lat) : null;
+          return { lat, lon: Number(match.lon), halfExtentM: halfExtentM || GOLF_DEFAULT_HALF_EXTENT_M, courseFootprintConfirmed: halfExtentM != null };
+        }
       }
     } catch {
       // fall through to the city-only geocode below -- a Nominatim hiccup on the specific course
@@ -1113,7 +1144,7 @@ async function fetchGolfVenueGeo(env, courseName, city, state, country) {
     const cityData = await cityRes.json();
     const match = cityData.results?.[0];
     if (!match) throw new Error(`No geocoding match for "${courseName}, ${city}"`);
-    return { lat: match.latitude, lon: match.longitude };
+    return { lat: match.latitude, lon: match.longitude, halfExtentM: GOLF_DEFAULT_HALF_EXTENT_M, courseFootprintConfirmed: false };
   });
 }
 
@@ -1135,7 +1166,7 @@ async function handleGolfGame(env, params) {
   const weather = await fetchWeather(env, geo.lat, geo.lon, startTimeUtc);
   // Every real PGA Tour course is outdoor grass (confirmed live -- every venue's own `grass`/`indoor`
   // fields agree) -- no roof/indoor concept exists for golf the way it does for MLB/NFL/tennis.
-  const venue = { venue: courseName, roofType: "open", lat: geo.lat, lon: geo.lon };
+  const venue = { venue: courseName, roofType: "open", lat: geo.lat, lon: geo.lon, halfExtentM: geo.halfExtentM, courseFootprintConfirmed: geo.courseFootprintConfirmed };
   const score = scoreNflGame(weather, venue); // reused unmodified, same wind/temp scoring shape every other sport reuses
   return json({ sport: "golf", venue, weather, score, insight: null });
 }

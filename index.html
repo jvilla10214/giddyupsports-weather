@@ -3973,7 +3973,11 @@
       if (data.error) throw new Error(data.error);
       document.getElementById("tennisCourt").style.display = "none";
       document.getElementById("map").style.display = "";
-      ensureMap(data.venue.lat, data.venue.lon, STADIUM_HALF_EXTENT_M.golf);
+      // Real course footprint (user request: "an aerial shot of the ENTIRE course") when OSM has
+      // one and it passes a sanity check server-side -- see golfHalfExtentFromBbox's own comment
+      // in weather-worker.js for why not every course has one -- falls back to a generous fixed
+      // extent otherwise, same as before.
+      ensureMap(data.venue.lat, data.venue.lon, data.venue.halfExtentM || STADIUM_HALF_EXTENT_M.golf);
       venueTag.textContent = data.venue.venue;
       const forecastTag = data.weather.isForecast ? " (forecast)" : "";
       const roundTime = new Date(game.startTimeUtc).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
