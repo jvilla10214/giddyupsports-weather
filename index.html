@@ -1070,6 +1070,8 @@
   .gc-odds-pill.lean.under .lbl, .gc-odds-pill.lean.under .val { color: var(--accent-atmo); }
 
   .game-card .gc-pitchers { font-size: 0.72rem; color: var(--text-faint); z-index: 1; }
+  .game-card .gc-hr-watch { font-size: 0.72rem; color: var(--text-faint); z-index: 1; font-family: var(--font-mono); }
+  .game-card .gc-hr-watch b { color: var(--accent-live); font-weight: 700; }
   .game-card .gc-weather { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); min-height: 1.1em; z-index: 1; }
   .game-card .gc-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); flex: none; }
   .game-card .gc-dot.good { background: var(--accent-live); }
@@ -2935,6 +2937,7 @@
       </div>
       ${oddsPills}
       ${pitchersLine}
+      ${currentSport === "mlb" ? `<div class="gc-hr-watch" id="gch-${i}" style="display:none;"></div>` : ""}
       <div class="gc-weather" id="gcw-${i}"><span class="gc-dot"></span>…</div>
     </button>`;
   }
@@ -3015,6 +3018,22 @@
           const data = await res.json();
           const el = document.getElementById(`gcw-${i}`);
           fillLeanPill(document.getElementById(`gcl-${i}`), data.error ? null : gridLeanCallText(sport, data));
+          // Grid-card Home Run Watch teaser (real user request, 2026-10-07: surface the single
+          // highest real HR probability across both lineups right on the grid, same "don't make
+          // people click in for the headline number" reasoning as the Suggested Bet lean pill above
+          // -- reuses this same preview=1 fetch, data.hrWatch already comes back from it unconditionally.
+          if (sport === "mlb") {
+            const hrEl = document.getElementById(`gch-${i}`);
+            const topPick = [...(data.hrWatch?.away || []), ...(data.hrWatch?.home || [])].sort((a, b) => b.probabilityPct - a.probabilityPct)[0];
+            if (hrEl) {
+              if (data.error || !topPick) {
+                hrEl.style.display = "none";
+              } else {
+                hrEl.innerHTML = `HR Watch: ${topPick.name} <b>${topPick.probabilityPct}%</b>`;
+                hrEl.style.display = "";
+              }
+            }
+          }
           if (!el || data.error) return;
           let cls = "";
           if (sport === "mlb") {
@@ -4022,10 +4041,14 @@
   // when MLB hasn't posted lineups yet, routine hours before a game.
   function hrWatchSideHtml(label, list) {
     if (!list?.length) return `<div class="gl-side-label">${label}</div><div class="hr-watch-empty">Lineup not yet posted.</div>`;
+    // "vs hand" tag (added 2026-10-07): computeHrWatchList's basis field says whether THIS batter's
+    // number is built from his real split specifically vs today's opposing starter's throwing hand,
+    // or fell back to his plain season rate (unknown starter, or the split fetch failed) -- shown so
+    // the more-accurate platoon-driven numbers don't read as identical in kind to the plainer ones.
     const rowHtml = (b, i) =>
       `<div class="gl-row">
         <span class="gl-rank">${i + 1}</span>
-        <span class="gl-name">${b.name}<span class="hr-watch-count">${b.hr} HR this season</span></span>
+        <span class="gl-name">${b.name}<span class="hr-watch-count">${b.hr} HR this season${b.basis === "platoon" ? " · vs. today's pitcher hand" : ""}</span></span>
         <span class="gl-score">${b.probabilityPct}%</span>
       </div>`;
     return `<div class="gl-side-label">${label}</div>${list.slice(0, 5).map(rowHtml).join("")}`;
@@ -4040,7 +4063,7 @@
         <div>${hrWatchSideHtml(awayAbbr || "Away", hrWatch.away)}</div>
         <div>${hrWatchSideHtml(homeAbbr || "Home", hrWatch.home)}</div>
       </div>
-      <div class="hr-watch-caption">Estimated chance of at least one home run today, from each batter's own real season HR rate (regressed for sample size), adjusted for today's real park/weather/pitching environment, over a real expected plate-appearance count for their lineup spot. A model estimate, not a guarantee.</div>`;
+      <div class="hr-watch-caption">Estimated chance of at least one home run today, from each batter's own real HR rate — specifically vs. today's opposing starter's throwing hand where that split exists, else their season rate — regressed for sample size and adjusted for today's real park/weather/pitching environment, over a real expected plate-appearance count for their lineup spot. A model estimate, not a guarantee.</div>`;
     hrWatchCard.style.display = "block";
   }
 

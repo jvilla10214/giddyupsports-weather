@@ -690,15 +690,34 @@ async function fetchMlbLineup(env, gamePk, dateIso) {
 // v2: adds ops (Lineup Quality Adjustment, see computeLineupQualityMultiplier in rules-engine.js) --
 // same response already carries it, no extra call; cache key bumped so a stale v1 entry (missing
 // ops) doesn't mask it for the rest of the day.
+// v3: adds real vs-LHP/vs-RHP platoon splits (Home Run Watch accuracy pass, 2026-10-07) -- confirmed
+// live that MLB Stats API's own hydrate can return season AND both statSplits in ONE request
+// (type=[season,statSplits], sitCodes=[vl,vr]), so this is still exactly one HTTP call per batter,
+// not three. computeHrWatchList in rules-engine.js picks whichever split actually matches today's
+// real opposing starter's throwing hand -- these splits are season-long and hand-general (not
+// specific to today's particular pitcher), same category of real signal as the existing team-level
+// vsL/vsR split already used in the Run Environment Score's teamHrRateDelta. Cache key bumped again
+// so a stale v2 entry (missing vsL/vsR) doesn't mask them for the rest of the day.
 async function fetchBatterSeasonHr(env, playerId) {
   const year = new Date().getUTCFullYear();
-  return cached(env, `batter-hr:v2:${playerId}:${year}`, 24 * 60 * 60, async () => {
-    const url = `https://statsapi.mlb.com/api/v1/people/${playerId}?hydrate=stats(group=[hitting],type=[season],season=${year})`;
+  return cached(env, `batter-hr:v3:${playerId}:${year}`, 24 * 60 * 60, async () => {
+    const url = `https://statsapi.mlb.com/api/v1/people/${playerId}?hydrate=stats(group=[hitting],type=[season,statSplits],season=${year},sitCodes=[vl,vr])`;
     const res = await fetch(url, { headers: { "User-Agent": "GiddyUpSports-Weather/1.0" } });
     if (!res.ok) throw new Error(`MLB Stats API person ${res.status}`);
     const data = await res.json();
-    const stat = data.people?.[0]?.stats?.find((s) => s.group?.displayName === "hitting" && s.type?.displayName === "season")?.splits?.[0]?.stat;
-    return { hr: stat?.homeRuns || 0, pa: stat?.plateAppearances || 0, ops: stat?.ops != null ? Number(stat.ops) : null };
+    const statBlocks = data.people?.[0]?.stats || [];
+    const seasonStat = statBlocks.find((s) => s.group?.displayName === "hitting" && s.type?.displayName === "season")?.splits?.[0]?.stat;
+    const splitBlock = statBlocks.find((s) => s.group?.displayName === "hitting" && s.type?.displayName === "statSplits");
+    const splitStat = (code) => splitBlock?.splits?.find((sp) => sp.split?.code === code)?.stat;
+    const vl = splitStat("vl");
+    const vr = splitStat("vr");
+    return {
+      hr: seasonStat?.homeRuns || 0,
+      pa: seasonStat?.plateAppearances || 0,
+      ops: seasonStat?.ops != null ? Number(seasonStat.ops) : null,
+      vsL: { hr: vl?.homeRuns || 0, pa: vl?.plateAppearances || 0 },
+      vsR: { hr: vr?.homeRuns || 0, pa: vr?.plateAppearances || 0 },
+    };
   });
 }
 
@@ -2083,25 +2102,33 @@ async function handleGame(env, sport, params) {
   // a game -- see fetchMlbLineup's own comment) never touches runEnvironmentScore/pitcherAdjustedEra,
   // which don't depend on it. Re-fetches league rates (cheap -- already cached by the block above
   // for the common case) rather than threading that const out of its own try-block scope.
+  // Platoon-split accuracy pass (2026-10-07, real user request for "a better algorithm"): reads
+  // each probable starter's real throwing hand off `projectionTeams` (set by the block above, if it
+  // ran) rather than re-fetching -- that's free, already-computed data, not the "re-fetch cheap
+  // cached stuff" pattern used for leagueHrRate below, since there's no cached endpoint for "this
+  // pitcher's hand" on its own cheap enough to justify a second request for it.
   if (sport === "mlb" && gameId) {
     try {
       const lineup = await fetchMlbLineup(env, gameId, mlbScheduleDate);
       const leagueHrRate = (await fetchLeagueHrRate(env)).leagueHrRate;
-      const buildSide = async (batters) => {
+      const awayFacesHand = projectionTeams?.homePitcher?.throwsHand || null; // away lineup bats against the HOME starter
+      const homeFacesHand = projectionTeams?.awayPitcher?.throwsHand || null; // home lineup bats against the AWAY starter
+      const buildSide = async (batters, opposingHand) => {
         if (!batters?.length) return null;
         const withStats = await Promise.all(
           batters.map(async (b) => {
             try {
               const stats = await fetchBatterSeasonHr(env, b.id);
-              return { name: b.name, hr: stats.hr, pa: stats.pa };
+              const platoon = opposingHand === "L" ? stats.vsL : opposingHand === "R" ? stats.vsR : null;
+              return { name: b.name, hr: stats.hr, pa: stats.pa, platoonHr: platoon?.hr ?? 0, platoonPa: platoon?.pa ?? 0 };
             } catch {
-              return { name: b.name, hr: 0, pa: 0 };
+              return { name: b.name, hr: 0, pa: 0, platoonHr: 0, platoonPa: 0 };
             }
           })
         );
         return computeHrWatchList(withStats, leagueHrRate, runEnvironmentScore);
       };
-      const [awayWatch, homeWatch] = await Promise.all([buildSide(lineup.away), buildSide(lineup.home)]);
+      const [awayWatch, homeWatch] = await Promise.all([buildSide(lineup.away, awayFacesHand), buildSide(lineup.home, homeFacesHand)]);
       hrWatch = awayWatch || homeWatch ? { away: awayWatch, home: homeWatch } : null;
     } catch (err) {
       hrWatch = null;

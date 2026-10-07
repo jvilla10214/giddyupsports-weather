@@ -495,14 +495,31 @@ function computeRunEnvironmentScore(inputs) {
 // ---- Home Run Watch (real user request: "people bet that") ----
 //
 // Per-PLAYER, not per-game -- real anytime-HR props are a player market, not a team one. Each
-// confirmed lineup batter's own real season HR rate (HR/PA), regressed toward the league average
-// for a small sample the same way team offense is regressed in computeTotalRunsProjection, scaled
-// by TODAY'S real Run Environment Score for this exact park/weather/pitching matchup -- reuses that
-// already-validated composite directly rather than inventing a second, parallel HR-environment
-// model from scratch. No fabricated "probability" or "odds" -- just each batter's own real rate,
-// shown alongside the real factors that moved it, same honesty convention as every other call here.
+// confirmed lineup batter's own real HR rate -- platoon-specific vs today's actual opposing
+// starter's hand where available (see PLATOON_SELF_REGRESS_PA below), else season-wide -- regressed
+// toward the league average for a small sample the same way team offense is regressed in
+// computeTotalRunsProjection, scaled by TODAY'S real Run Environment Score for this exact
+// park/weather/pitching matchup -- reuses that already-validated composite directly rather than
+// inventing a second, parallel HR-environment model from scratch. A real statistical probability
+// (1-(1-p)^n over real expected plate appearances, see below), not a fabricated one -- every input
+// feeding it is a real, regressed rate, same honesty convention as every other call here.
 const BATTER_HR_REGRESS_PA = 150; // PA of league-average HR rate blended into each batter's own small sample
 const HR_ENV_SENSITIVITY = 0.35; // how much today's Run Environment Score scales each batter's real rate
+
+// Platoon-split accuracy pass (2026-10-07, real user request for "a better algorithm"): a batter's
+// own real HR rate specifically vs LHP/RHP (MLB Stats API's own statSplits, see fetchBatterSeasonHr
+// in weather-worker.js) is a real, well-established baseball effect -- same category of signal as
+// the Run Environment Score's existing team-level teamHrRateDelta, just applied at the individual
+// level this time, which is what an actual anytime-HR prop is priced on. Regressed toward the
+// batter's OWN season rate first (not straight to league average) -- a platoon split is a smaller,
+// noisier SUBSET of the same player's own plate appearances, so his own larger-sample overall rate
+// is a better prior for it than a leaguewide number would be. PLATOON_SELF_REGRESS_PA is a standard
+// sabermetric default (platoon splits are widely cited as needing a few hundred PA before they
+// stabilize on their own), not separately backtested against this project's own historical data --
+// same honest category as STARTER_SHARE/OFFENSE_REGRESS_GAMES in computeTotalRunsProjection. Falls
+// back cleanly to the plain season rate when no platoon data exists yet (fetch failure) or today's
+// opposing starter's hand isn't known -- identical to this function's behavior before this pass.
+const PLATOON_SELF_REGRESS_PA = 100;
 
 // Real, documented sabermetric pattern (not fabricated): earlier lineup spots get meaningfully more
 // plate appearances per game than later ones -- a leadoff hitter averages roughly 0.8 more PA per
@@ -510,20 +527,33 @@ const HR_ENV_SENSITIVITY = 0.35; // how much today's Run Environment Score scale
 // precision from a single estimate; index 0 = batting 1st.
 const PA_BY_BATTING_ORDER = [4.6, 4.5, 4.4, 4.3, 4.2, 4.1, 4.0, 3.9, 3.8];
 
+/**
+ * @param {object[]} battersWithStats - { name, hr, pa, platoonHr?, platoonPa? } per confirmed
+ *   lineup batter -- platoonHr/platoonPa are this batter's real HR/PA specifically vs today's
+ *   actual opposing starter's throwing hand (0/0 when unknown, which this treats the same as
+ *   "no platoon data" and falls back to the season-only rate).
+ */
 function computeHrWatchList(battersWithStats, leagueHrRate, runEnvironmentScore) {
   if (!battersWithStats?.length || leagueHrRate == null) return null;
   const envMultiplier = runEnvironmentScore ? 1 + runEnvironmentScore.score * HR_ENV_SENSITIVITY : 1;
   return battersWithStats
     .map((b, i) => {
-      const rawRate = b.pa ? b.hr / b.pa : null;
-      const regressedRate = regressToward(rawRate, b.pa || 0, BATTER_HR_REGRESS_PA, leagueHrRate);
+      const seasonRate = b.pa ? b.hr / b.pa : null;
+      let baseRate = seasonRate;
+      let basis = "season";
+      if (b.platoonPa > 0 && seasonRate != null) {
+        const platoonRateRaw = b.platoonHr / b.platoonPa;
+        baseRate = regressToward(platoonRateRaw, b.platoonPa, PLATOON_SELF_REGRESS_PA, seasonRate);
+        basis = "platoon";
+      }
+      const regressedRate = regressToward(baseRate, b.pa || 0, BATTER_HR_REGRESS_PA, leagueHrRate);
       const adjustedRate = regressedRate * envMultiplier;
       // Real, standard statistical conversion (not a fabricated number): the chance of AT LEAST ONE
       // home run across this many independent plate appearances, given this batter's own real,
       // regressed, environment-adjusted per-PA rate -- 1 - (chance of zero HRs in every PA).
       const expectedPa = PA_BY_BATTING_ORDER[i] ?? PA_BY_BATTING_ORDER[PA_BY_BATTING_ORDER.length - 1];
       const probabilityPct = Math.round((1 - Math.pow(1 - adjustedRate, expectedPa)) * 100);
-      return { name: b.name, hr: b.hr, pa: b.pa, adjustedRate, probabilityPct };
+      return { name: b.name, hr: b.hr, pa: b.pa, adjustedRate, probabilityPct, basis };
     })
     .sort((a, b) => b.probabilityPct - a.probabilityPct);
 }
