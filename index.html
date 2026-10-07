@@ -1070,11 +1070,6 @@
   .gc-odds-pill.lean.under .lbl, .gc-odds-pill.lean.under .val { color: var(--accent-atmo); }
 
   .game-card .gc-pitchers { font-size: 0.72rem; color: var(--text-faint); z-index: 1; }
-  .game-card .gc-hr-watch { z-index: 1; }
-  .game-card .gc-hr-watch-label { font-family: var(--font-mono); font-size: 0.6rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-faint); margin-bottom: 3px; }
-  .game-card .gc-hr-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-  .game-card .gc-hr-chip { display: inline-flex; align-items: baseline; gap: 3px; font-family: var(--font-mono); font-size: 0.66rem; color: var(--text-muted); background: var(--bg-elevated-2); border: var(--card-border-width) solid var(--line); border-radius: 999px; padding: 2px 7px; }
-  .game-card .gc-hr-chip b { color: var(--accent-live); font-weight: 700; }
   .game-card .gc-weather { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); min-height: 1.1em; z-index: 1; }
   .game-card .gc-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); flex: none; }
   .game-card .gc-dot.good { background: var(--accent-live); }
@@ -2940,7 +2935,6 @@
       </div>
       ${oddsPills}
       ${pitchersLine}
-      ${currentSport === "mlb" ? `<div class="gc-hr-watch" id="gch-${i}" style="display:none;"></div>` : ""}
       <div class="gc-weather" id="gcw-${i}"><span class="gc-dot"></span>…</div>
     </button>`;
   }
@@ -3021,33 +3015,6 @@
           const data = await res.json();
           const el = document.getElementById(`gcw-${i}`);
           fillLeanPill(document.getElementById(`gcl-${i}`), data.error ? null : gridLeanCallText(sport, data));
-          // Grid-card Home Run Watch teaser (real user request, 2026-10-07: surface the top 5
-          // candidates and their real probability right on the grid, same "don't make people click
-          // in for the headline number" reasoning as the Suggested Bet lean pill above -- reuses
-          // this same preview=1 fetch, data.hrWatch already comes back from it unconditionally.
-          // Combined across both lineups (not top 5 per side) -- "who's actually most live to go
-          // deep in THIS game" is a single cross-team question, same framing a bettor would ask.
-          if (sport === "mlb") {
-            const hrEl = document.getElementById(`gch-${i}`);
-            const topFive = [...(data.hrWatch?.away || []), ...(data.hrWatch?.home || [])].sort((a, b) => b.probabilityPct - a.probabilityPct).slice(0, 5);
-            if (hrEl) {
-              if (data.error || !topFive.length) {
-                hrEl.style.display = "none";
-              } else {
-                // Real suffixes (Vladimir Guerrero Jr., Ronald Acuna Jr., etc.) would otherwise
-                // become the "last name" shown -- skip them and take the word before instead.
-                const NAME_SUFFIXES = new Set(["jr.", "jr", "sr.", "sr", "ii", "iii", "iv"]);
-                const lastName = (name) => {
-                  const parts = name.split(" ");
-                  while (parts.length > 1 && NAME_SUFFIXES.has(parts[parts.length - 1].toLowerCase())) parts.pop();
-                  return parts[parts.length - 1];
-                };
-                const chips = topFive.map((b) => `<span class="gc-hr-chip">${lastName(b.name)} <b>${b.probabilityPct}%</b></span>`).join("");
-                hrEl.innerHTML = `<div class="gc-hr-watch-label">HR Watch</div><div class="gc-hr-chips">${chips}</div>`;
-                hrEl.style.display = "";
-              }
-            }
-          }
           if (!el || data.error) return;
           let cls = "";
           if (sport === "mlb") {
